@@ -237,7 +237,7 @@ func (s *Store) TurnClosed(session, turn string) (bool, error) {
 type TurnEnd struct {
 	Closed       bool   // the turn has a session.closed
 	ExitCode     *int   // its exit code; nil when the service closed it at start, or it never started
-	Error        string // its error, such as "the agent could not be started"
+	Error        string // why it could not start, such as "the agent could not be started"; never an exited agent's own error line (0.5.7), whose stderr stays out of any history
 	ReplayFailed bool   // a replay.failed of the turn is stored
 	Stopped      bool   // the person stopped the turn (session.closed's stopped)
 }
@@ -251,7 +251,8 @@ func (s *Store) TurnEnd(session, turn string) (TurnEnd, error) {
 	err := s.r.QueryRow(`SELECT
 		EXISTS(SELECT 1 FROM events WHERE session = ?1 AND turn = ?2 AND kind = 'session.closed'),
 		(SELECT json_extract(data, '$.exit_code') FROM events WHERE session = ?1 AND turn = ?2 AND kind = 'session.closed' ORDER BY seq DESC LIMIT 1),
-		(SELECT json_extract(data, '$.error') FROM events WHERE session = ?1 AND turn = ?2 AND kind = 'session.closed' ORDER BY seq DESC LIMIT 1),
+		(SELECT CASE WHEN json_extract(data, '$.exit_code') IS NULL THEN json_extract(data, '$.error') END
+			FROM events WHERE session = ?1 AND turn = ?2 AND kind = 'session.closed' ORDER BY seq DESC LIMIT 1),
 		EXISTS(SELECT 1 FROM events WHERE session = ?1 AND turn = ?2 AND kind = 'replay.failed'),
 		COALESCE((SELECT json_extract(data, '$.stopped') FROM events WHERE session = ?1 AND turn = ?2 AND kind = 'session.closed' ORDER BY seq DESC LIMIT 1), 0)`,
 		session, turn).Scan(&closed, &code, &msg, &failed, &stopped)

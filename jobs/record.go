@@ -289,7 +289,7 @@ func CloseLost(q *queue.Queue, st *store.Store, now time.Time) (int, error) {
 			continue
 		}
 		if _, _, err := st.Append(event.Event{ID: queue.NewID("evt_"), Kind: event.SessionClosed, Time: now,
-			Session: h.Session, Turn: h.Turn, Hold: h.Hold, Unsettled: true}); err != nil {
+			Session: h.Session, Turn: h.Turn, Hold: h.Hold, Unsettled: true, State: store.TurnFailed}); err != nil {
 			return n, err
 		}
 		n++

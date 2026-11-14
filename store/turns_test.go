@@ -538,8 +538,24 @@ func TestFailedTurnTakesItsLastCallsRefusal(t *testing.T) {
 	} {
 		mustAppend(t, s, e)
 	}
-	closed := runClosed("s", "t_d", "h4", &one)
+	closed := runClosed("s", "t_d", "h4", nil)
 	closed.Error = "the agent could not start"
+	mustAppend(t, s, closed)
+	// e: failed, refused, and its agent wrote its own error line (0.5.7):
+	// the vendor's words win.
+	for _, e := range []event.Event{runOpened("s", "t_e", "h5"), started("s", "t_e", "hi"),
+		call("s", "t_e", "x6"), answer("s", "t_e", "x6", 403, refusal)} {
+		mustAppend(t, s, e)
+	}
+	closed = runClosed("s", "t_e", "h5", &one)
+	closed.Error = "ERROR codex_api::endpoint: something else went wrong"
+	mustAppend(t, s, closed)
+	// f: failed, no refusal: its agent's own error line.
+	for _, e := range []event.Event{runOpened("s", "t_f", "h6"), started("s", "t_f", "hi")} {
+		mustAppend(t, s, e)
+	}
+	closed = runClosed("s", "t_f", "h6", &one)
+	closed.Error = event.ExitError(1)
 	mustAppend(t, s, closed)
 	l, err := s.Turns(TurnQuery{Limit: 10})
 	if err != nil {
@@ -557,5 +573,11 @@ func TestFailedTurnTakesItsLastCallsRefusal(t *testing.T) {
 	}
 	if d := m["t_d"]; d.State != TurnFailed || d.Error != "the agent could not start" {
 		t.Errorf("child's own reason %+v", d)
+	}
+	if e := m["t_e"]; e.State != TurnFailed || e.Error != refusal {
+		t.Errorf("refused, with the agent's own line %+v", e)
+	}
+	if f := m["t_f"]; f.State != TurnFailed || f.Error != event.ExitError(1) {
+		t.Errorf("exit code alone %+v", f)
 	}
 }

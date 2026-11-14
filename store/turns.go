@@ -57,7 +57,7 @@ type Turn struct {
 	ExitCode   *int       `json:"exit_code,omitempty" doc:"A run's turn: its child's exit code, once it exited. Absent for a child the service closed on restart."`
 	Stopped    bool       `json:"stopped,omitempty" doc:"A run's turn: someone stopped it with POST /api/v0/turns/{id}/stop. Its state is then stopped."`
 	Unsettled  bool       `json:"unsettled,omitempty" doc:"A run's turn: its session.closed says the gateway could not confirm that every model call was stored, as for a turn the service closed on restart. Own replay does not continue from it."`
-	Error      string     `json:"error,omitempty" doc:"A run's turn: why its child could not start, from its session.closed. Its state is then failed. A failed turn whose child gave no reason takes the error of its last model call's reply, when the vendor or control's relay refused that call with a status other than 200, else the last line of error_tail."`
+	Error      string     `json:"error,omitempty" doc:"A failed run's turn: why it failed, why its child could not start, from its session.closed; else the error of its last model call's reply, when the vendor or control's relay refused that call with a status other than 200; else its session.closed's error: the agent's own error line from its stderr (the first line that starts with error or fatal, else the first that is not a list item, at most 300 bytes), or its exit code. Its state is then failed. A turn from before 0.5.7 whose session.closed has no error takes the error line of error_tail."`
 	ErrorTail  string     `json:"error_tail,omitempty" doc:"A run's turn whose agent exited with an error: the last lines it wrote to stderr, from its session.closed (at most 20 lines and 2 KiB, anything shaped like a secret hidden)."`
 	// Origin, from the turn's turn.started: who started it when the person
 	// did not.
@@ -351,15 +351,18 @@ func (s *Store) Turns(q TurnQuery) (TurnList, error) {
 				t.State = TurnFinished
 			default:
 				t.State = TurnFailed
-				// The child gave no reason: the refusal of its last call is
-				// it, as a turn whose call the relay refused (no codex
-				// sign-in connected) otherwise showed nothing.
-				if t.Error == "" {
-					t.Error = refused[key{session, turn}]
+				// A child that exited and whose last call the vendor or the
+				// relay refused: that refusal is the reason, in the vendor's
+				// own words (a model the vendor does not serve, no codex
+				// sign-in connected), over the agent's own error line. A
+				// child that could not start (no exit code) keeps why.
+				if r := refused[key{session, turn}]; r != "" && (t.Error == "" || exitCode.Valid) {
+					t.Error = r
 				}
-				// Else what the agent wrote last before it exited.
-				if t.Error == "" && t.ErrorTail != "" {
-					t.Error = t.ErrorTail[strings.LastIndexByte(t.ErrorTail, '\n')+1:]
+				// A record from before 0.5.7 has no error on an exited
+				// child's session.closed: the error line of its tail.
+				if t.Error == "" {
+					t.Error = event.ErrorLine(t.ErrorTail)
 				}
 			}
 		case opened == 0 && completedAt.Valid:

@@ -79,6 +79,8 @@ type runEvent struct {
 	ResumeID  string `json:"resume_id"`
 	Stopped   bool   `json:"stopped"`
 	ErrorTail string `json:"error_tail"`
+	State     string `json:"state"`
+	Error     string `json:"error"`
 }
 
 func runEvents(t *testing.T, st *store.Store, session string) []runEvent {
@@ -238,8 +240,10 @@ func TestRunSetsBaseURLInChildOnlyAndClosesWithExitCode(t *testing.T) {
 }
 
 // An agent that exits with an error leaves its last stderr lines on its
-// session.closed, and the turn's error says the last one: the record says
-// why it failed, not only that it did. One that exits 0 leaves none.
+// session.closed, with state failed and its own error line as the error, and
+// the turn's error says that line: the record says why it failed, not only
+// that it did. One that exits 0 leaves none, with state finished. The fake
+// agent makes no model call, so the turn fails before any.
 func TestRunErrorTailOnSessionClosed(t *testing.T) {
 	home := t.TempDir()
 	svc := runService(t, home, nil, 0)
@@ -253,21 +257,55 @@ func TestRunErrorTailOnSessionClosed(t *testing.T) {
 		}
 		id, _ := out["session"].(string)
 		c := waitClosed(t, svc.store, id)
-		want := ""
+		want, wantErr, wantState := "", "", store.TurnFinished
 		if exit == "1" {
 			want = "starting\nError: Eligibility check failed: request failed with status 401"
+			wantErr, wantState = "Error: Eligibility check failed: request failed with status 401", store.TurnFailed
 		}
-		if c.ErrorTail != want {
-			t.Fatalf("exit %s: error_tail %q, want %q", exit, c.ErrorTail, want)
+		if c.ErrorTail != want || c.State != wantState || c.Error != wantErr {
+			t.Fatalf("exit %s: session.closed %+v, want error_tail %q, state %s, error %q", exit, c, want, wantState, wantErr)
 		}
 		list, err := svc.store.Turns(store.TurnQuery{Session: id, Limit: 1})
 		if err != nil || len(list.Turns) != 1 {
 			t.Fatalf("turns: %+v %v", list, err)
 		}
-		if tr := list.Turns[0]; exit == "1" && (tr.State != store.TurnFailed || tr.ErrorTail != want ||
-			tr.Error != "Error: Eligibility check failed: request failed with status 401") {
+		if tr := list.Turns[0]; tr.State != wantState || tr.ErrorTail != want || tr.Error != wantErr {
 			t.Fatalf("turn %+v", tr)
 		}
+	}
+}
+
+// agy 1.5.9 refusing a --model it does not know prints its error and then
+// its 22-line list of models, all to stderr, and exits 1 before any model
+// call (live, 2026-11-14). The error is that first line, not the list's last
+// item, though the 20-line tail no longer holds it.
+func TestRunErrorIsTheErrorLineNotTheList(t *testing.T) {
+	home := t.TempDir()
+	svc := runService(t, home, nil, 0)
+	tok := readToken(t, home)
+	errLine := `error: invalid model selection (--model "gemini-2.5-flash-preview-tts" --effort ""): model gemini-2.5-flash-preview-tts is not recognized as a known model or custom model in settings`
+	stderr := errLine + "\nAvailable models:\n"
+	for _, m := range []string{"Gemini 4 Carbon (High)", "Gemini 4 Carbon (Medium)", "Gemini 4 Carbon (Low)", "Gemini 4 Hydrogen (High)",
+		"Gemini 4 Hydrogen (XHigh)", "Gemini 4 Hydrogen (Medium)", "Gemini 4 Hydrogen (Low)", "Gemini 4 Argon (High)", "Gemini 4 Argon (Medium)",
+		"Gemini 4 Argon (Low)", "Gemini 3.8 Flash (High)", "Gemini 3.8 Flash (Medium)", "Gemini 3.8 Flash (Low)", "Gemini 3.7 Flash (High)",
+		"Gemini 3.7 Flash (Medium)", "Gemini 3.7 Flash (Low)", "Gemini 3.6 Flash (High)", "Gemini 3.6 Flash (Medium)", "Gemini 3.6 Flash (Low)",
+		"Gemini 3.1 Pro (High)", "Gemini 3.1 Pro (Low)"} {
+		stderr += "  " + m + "\n"
+	}
+	t.Setenv("AGENTBUS_FAKE_STDERR", stderr)
+	t.Setenv("AGENTBUS_FAKE_EXIT", "1")
+	code, out, raw := postRun(t, svc, tok, map[string]any{"agent": "claude", "folder": t.TempDir(), "isolate": false, "prompt": "hi"})
+	if code != http.StatusAccepted {
+		t.Fatalf("status %d: %s", code, raw)
+	}
+	id, _ := out["session"].(string)
+	c := waitClosed(t, svc.store, id)
+	if c.State != store.TurnFailed || c.Error != errLine || strings.Contains(c.ErrorTail, "invalid model") {
+		t.Fatalf("session.closed %+v", c)
+	}
+	list, err := svc.store.Turns(store.TurnQuery{Session: id, Limit: 1})
+	if err != nil || len(list.Turns) != 1 || list.Turns[0].Error != errLine || list.Turns[0].ModelCalls != 0 {
+		t.Fatalf("turns: %+v %v", list, err)
 	}
 }
 

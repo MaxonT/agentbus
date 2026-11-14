@@ -203,6 +203,19 @@ type ModelServer interface {
 	WireModels(base, placeholder string) (env, args []string)
 }
 
+// KeyModelLister is a harness whose --model on an API key takes only the
+// names it knows, not every model of its vendor's API, and that lists them
+// itself with no sign-in and no call (agy models with the Gemini provider).
+// Control runs it unmodified in a clean home of its own for the list of its
+// access "api" (models.Lines reads it), in place of the vendor's
+// list-models call.
+type KeyModelLister interface {
+	// WireKeyModels is that run's environment and arguments, with
+	// placeholder as the key: the run needs one set, and never gets the
+	// person's.
+	WireKeyModels(placeholder string) (env, args []string)
+}
+
 // Access is one way a harness reaches a model.
 type Access struct {
 	Kind     string

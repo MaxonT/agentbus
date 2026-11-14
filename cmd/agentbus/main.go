@@ -992,7 +992,8 @@ const (
 // modelSources are where control reads the lists of models
 // (api.ModelSources): OpenRouter's list-models call with the OpenRouter key,
 // each vendor's list-models call with its API key set in Settings, agy's
-// own listing, run unmodified in its home on control, and codex's own
+// own listing, run unmodified in its home on control, and on an API key in a
+// clean home with no call (keyModelLister), and codex's own
 // model/list (modelServer, set where control has a relay).
 func modelSources(c config, subs *credentials.Subscriptions) *api.ModelSources {
 	apiBase := map[string]string{}
@@ -1006,7 +1007,7 @@ func modelSources(c config, subs *credentials.Subscriptions) *api.ModelSources {
 		or = mustParse(openrouter)
 	}
 	return &api.ModelSources{Cache: &models.Cache{}, Client: &http.Client{Timeout: 20 * time.Second},
-		OpenRouterBase: or.String(), Own: subs.OwnModels,
+		OpenRouterBase: or.String(), Own: subs.OwnModels, KeyListed: keyModelLister(c),
 		// The key an OpenRouter agent would get: set in Settings, or else
 		// the default variable's, where control runs.
 		OpenRouterKey: func() string {
