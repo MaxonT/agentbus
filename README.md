@@ -137,8 +137,6 @@ their defaults are in `/docs`, under Settings).
   the rule off for every program, so the profile is the better choice.
 - On ext4 a copy is a full copy. A clone (APFS) or a reflink (xfs, btrfs) is used where the disk can
   make one.
-- An asked agent works in a fresh copy of your folder. It reads the asking turn's changes through
-  the API, but does not have those files.
 - MCP servers in your config load on normal turns, never on read-only ones. On a Mac, a server that
   signs in with OAuth keeps its token in the Keychain, and macOS asks to let the session read it;
   deny it to keep that server off. What a server does is outside AgentBus's record.
