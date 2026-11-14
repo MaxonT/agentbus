@@ -27,24 +27,22 @@ have (Claude Code, Codex, Antigravity or any OpenRouter model) and tracks every 
 - **Your folder stays as it is.** Each session works in its own copy. You review the changes and
   apply them to your folder. Turn on the sandbox to make the copy a hard wall.
 - **Everything stays on your machine.** Your sessions, every model call and reply, and your sign-ins
-  and keys are kept in AgentBus's data folder on your machine. No telemetry and no AgentBus servers:
-  the only calls out are your agents' own calls to their model vendors, and a feedback message if
-  you send one.
+  and keys are kept in AgentBus's data folder on your machine.
 
 ## Install
 
 You need macOS or Linux, and `claude`, `codex` or `agy` installed. Use **one** of these:
 
-**Homebrew** (macOS or Linux):
-
-```sh
-brew install staysup/tap/agentbus
-```
-
 **Install script** (puts the binary in `~/.local/bin`):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/staysup/agentbus/main/install.sh | sh
+```
+
+**Homebrew** (macOS or Linux):
+
+```sh
+brew install staysup/tap/agentbus
 ```
 
 **From source** (Go 1.27.1 or later):
@@ -76,26 +74,26 @@ installed, and a Claude and a ChatGPT subscription.
    link. In a new tab or browser, either start `agentbus up` again for a new link, or paste your
    token on the connect screen. The token is the file `token` in the data folder
    (`$AGENTBUS_HOME`, by default `~/.local/share/agentbus`). Copy it without showing it:
-   `pbcopy < ~/.local/share/agentbus/token` on a Mac, or `xclip -sel c < …/token` on Linux.
+   `pbcopy < ~/.local/share/agentbus/token` on a Mac, or
+   `xclip -sel c < .local/share/agentbus/token` on Linux.
    Anyone with the token controls your agents, so keep it to yourself.
 
-2. **Add your agents.** A new AgentBus starts with no agents. In the cockpit, press **+ Agent**
+3. **Add your agents.** A new AgentBus starts with no agents. In the cockpit, press **+ Agent**
    at the top of the Agents column, pick the tool, Claude Code, and press **Create agent**. Do the
    same for Codex.
 
-3. **Connect your subscriptions.** Open **Settings** (at the foot of the Agents column), then
+4. **Connect your subscriptions.** Open **Settings** (at the foot of the Agents column), then
    **Subscriptions**. Press **Connect** next to claude, and sign in as the tool asks. Do the same
    for codex. You do this once.
 
-4. **Ask claude something.** Back in the cockpit (**Cockpit** at the top of Settings), press
+5. **Ask claude something.** Back in the cockpit (**Cockpit** at the top of Settings), press
    **New session**. Pick Claude Code as the agent, type the path of a project folder, write a first
    message such as "what does this project do?", and press **Start**.
 
-5. **Ask codex about it.** In the same conversation, switch the agent box beside Send to Codex, and
+6. **Ask codex about it.** In the same conversation, switch the agent box beside Send to Codex, and
    send "what do you think about above?". Codex reads Claude's answer and gives its own.
 
-Every turn and every model call is now in the record, with its cost. `agentbus up -h` lists the
-options.
+Every turn and every model call is now in the record, with its cost.
 
 ### More on subscriptions
 
@@ -117,40 +115,6 @@ that vendor; any other call gets 403. The agent gets a placeholder in its place,
 reaches a runner, an agent's environment, a log or the record. A turn while no key is set is refused with "set your Anthropic API key in Settings" (and
 the like). agy on a Gemini API key needs no Google sign-in, so it also works with control on a Mac.
 API: `PUT` and `DELETE /api/v0/subscriptions/{anthropic,openai,gemini}/key`.
-
-## Several machines
-
-AgentBus has two parts:
-
-- **Control** is the one place that keeps everything: the record of every turn, the queue, your
-  settings and agents, and the API the cockpit uses. It does no work itself.
-- **A runner** does the work. Each machine that should run agents runs one. It asks control for
-  work, makes a copy of the folder for each session, runs the agents there, and applies the changes
-  to your folder when you say so.
-
-`agentbus up` is both, in one program, for one machine. For several machines, run control once,
-reachable from the others (`agentbus server -listen 0.0.0.0`), and a runner on each machine.
-
-**Every runner must reach control's address.** That works on one network. A hosted relay, as a
-managed service, is planned and not available yet.
-
-To add a machine:
-
-1. Install AgentBus on it (see Install above).
-2. Run `agentbus login http://<control>:8787`. It prints a code.
-3. In the cockpit, open **Runners** (at the foot of the Agents column), type the code and press
-   **Approve**.
-4. Run the command `agentbus login` prints after approval. It starts the runner, which works while
-   that command runs.
-
-The Runners page then shows the machine as **Online**. When you start a session, you pick the
-machine, then a folder on it; the session stays on that machine.
-
-![The Runners page: a machine waiting for approval, and the code field](docs/assets/cockpit-runners.png)
-
-By default a runner holds no secrets: control adds the sign-in or API key to each model call.
-Connect your subscriptions once in the cockpit (Settings, Subscriptions). Control and every runner must run the same release. `agentbus login -h` lists the
-options.
 
 ## Settings
 
