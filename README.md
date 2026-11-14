@@ -177,7 +177,6 @@ instructions every turn gets. Change them on the cockpit's Settings page, or wit
 
 ## Known limits
 
-- OpenRouter turns show a cost of $0: the price table has no OpenRouter prices yet.
 - A session stays on the machine that holds its folder.
 - On Ubuntu 24.04 and later, AppArmor allows user namespaces only to a program with a profile, so
   the sandbox and `contain` need one. The install script offers it when it installs into a folder
@@ -185,8 +184,8 @@ instructions every turn gets. Change them on the cockpit's Settings page, or wit
   The profile is `packaging/apparmor/agentbus`, also in each release archive. The runner says what is
   missing. The fallback is the system setting `sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0`,
   which turns the rule off for every program, so the profile is the better choice.
-- Network control is Linux only. On macOS, `contain = "on"` refuses every turn unless the sandbox
-  is on.
+- Network control on macOS works through the sandbox, which AgentBus turns on for the turn when
+  `contain = "on"`.
 - On ext4 a copy is a full copy. A clone (APFS) or a reflink (xfs, btrfs) is used where the disk
   can make one.
 - An asked agent works in a fresh copy of your folder. It reads the asking turn's changes through
@@ -199,6 +198,12 @@ instructions every turn gets. Change them on the cockpit's Settings page, or wit
   is used on every approved runner; to keep agy's off your runners, do not connect it.
 - The API as tools (MCP) is on by default for claude and codex: `[agent_api] tools = false` turns
   it off, and agents then call the API with `agentbus-api`.
+- MCP servers copied in with Use my config load on normal turns, never on read-only ones. On a Mac,
+  a server that signs in with OAuth keeps its token in the Keychain, and macOS asks to let the session
+  read it; deny it to keep that server off. What a server does is outside AgentBus's record.
+- Claude's browser (Chrome) cannot run in AgentBus sessions: it needs the tool's own sign-in.
+- On a Mac, use agy with a Gemini API key (Settings, Subscriptions); its Google sign-in lives in the
+  Keychain.
 
 ## Docs
 
