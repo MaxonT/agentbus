@@ -18,11 +18,11 @@
 [![AgentBus demo](https://img.youtube.com/vi/si0HHQFcCD0/maxresdefault.jpg)](https://youtu.be/si0HHQFcCD0)
 
 AgentBus sits between your coding agents and every model vendor. It runs the agents you already
-have (Claude Code, codex, Antigravity), signed in as you, and records every step.
+have (Claude Code, codex, Antigravity or any OpenRouter model) and tracks every step.
 
 - **Your agents work together.** Claude can ask codex, or any agent from any vendor, to answer a
-  question, take on a task or check its work, through the same API you use. The answer comes back
-  into its conversation.
+  question, take on a task or check its work, through the unified API. The answer comes back
+  into the same conversation.
 - **You see every model call**, and what it cost: exactly what each model was sent, piece by piece,
   and what it answered. Each request and reply is stored on your machine.
 - **Switch models without losing context.** Each turn is a fresh agent run. AgentBus keeps the
