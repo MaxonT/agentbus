@@ -288,12 +288,17 @@ func TestCodexOwnServersArgs(t *testing.T) {
 // agy turns allow no MCP call at all, read-only or not: --settings replaces
 // the person's permissions for the run, and headless agy refuses any call no
 // rule allows (measured 2026-11-14, research/2026-11-14-use-my-own-tools-design.md).
-func TestAgyNoMCPRule(t *testing.T) {
+// agy may call MCP servers on edit turns and never on read-only ones.
+func TestAgyMCPRule(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		turn := Turn{OwnServers: []string{"dune"}, Prompt: "hi"}
 		turn.Writes.ReadOnly = readOnly
-		if s := agySettings(turn); strings.Contains(s, "mcp") {
-			t.Errorf("read_only %v: %s", readOnly, s)
+		s := agySettings(turn)
+		if got := strings.Contains(s, "mcp(*)"); got == readOnly {
+			t.Errorf("read_only %v: mcp(*) present %v: %s", readOnly, got, s)
+		}
+		if readOnly && strings.Contains(s, "mcp") {
+			t.Errorf("read-only turn names mcp: %s", s)
 		}
 	}
 }

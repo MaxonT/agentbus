@@ -239,6 +239,12 @@ func agySettings(t Turn) string {
 		}
 	}
 	write := !t.Writes.ReadOnly
+	// Edit turns may call the MCP servers the person copied into the
+	// session's home (Home files); read-only turns get no mcp rule, and
+	// headless agy then refuses every MCP call (measured 2026-11-14).
+	if write {
+		allow = append(allow, "mcp(*)")
+	}
 	if write {
 		for _, f := range t.Writes.Edit {
 			allow = append(allow, "write_file("+f+")", "edit_file("+f+")")

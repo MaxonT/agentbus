@@ -38,14 +38,14 @@ func TestAgyArgs(t *testing.T) {
 		{"read-only", Turn{Writes: Writes{ReadOnly: true, Edit: []string{"/w/f"}}, Allow: []string{"go test"}, ReadFolders: []string{"/r"}},
 			[]string{"read_file(/r)"}, []string{"write_file(*)", "edit_file(*)", "command(*)"}},
 		{"edits", Turn{Writes: edit, Allow: []string{"go test", "agentbus-api"}},
-			[]string{"write_file(/w/f)", "edit_file(/w/f)", "command(go test)", "command(agentbus-api)"},
+			[]string{"mcp(*)", "write_file(/w/f)", "edit_file(/w/f)", "command(go test)", "command(agentbus-api)"},
 			[]string{"write_file(/w/f/policy.toml)", "edit_file(/w/f/policy.toml)"}},
 		{"no edit rule", Turn{Allow: []string{"make"}},
-			[]string{"command(make)"}, []string{"write_file(*)", "edit_file(*)"}},
+			[]string{"mcp(*)", "command(make)"}, []string{"write_file(*)", "edit_file(*)"}},
 		// A rule cannot hold a parenthesis or a glob character: such an
 		// entry is left out, so it allows nothing.
 		{"unsafe names", Turn{Writes: edit, Allow: []string{"x) command(rm"}, ReadFolders: []string{"/a*"}},
-			[]string{"write_file(/w/f)", "edit_file(/w/f)"},
+			[]string{"mcp(*)", "write_file(/w/f)", "edit_file(/w/f)"},
 			[]string{"write_file(/w/f/policy.toml)", "edit_file(/w/f/policy.toml)"}},
 	} {
 		c.t.Prompt = "--model x"
