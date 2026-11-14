@@ -23,7 +23,8 @@ package jobs
 // vendor it cannot reach, is recorded too, with why. A call that never
 // reached control reached no vendor: it stays in the runner's own record. A
 // call without a running turn's token is refused and recorded nowhere: it
-// names no session. A credential goes only on a call the vendor's adapter
+// names no session, but for the one call a listing of models makes with its
+// own token (models.go). A credential goes only on a call the vendor's adapter
 // records (gateway/recorded.go): any other is refused and recorded as
 // call.refused.
 
@@ -141,6 +142,10 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request) {
 	}
 	j, _, ok := s.turnJob(callToken(r))
 	if !ok {
+		if harness, listing := s.listing(callToken(r)); listing {
+			s.relayListing(w, r, up, harness, "/"+rest)
+			return
+		}
 		fail(w, http.StatusUnauthorized, noTurn)
 		return
 	}
@@ -193,6 +198,12 @@ func (s *Server) turnCredential(j queue.Job, up Upstream) (func(http.Header), ga
 	if up.Access == credentials.AccessSubscription {
 		signin = gateway.Signin{Subscription: up.Harness, Connection: cred.Connection}
 	}
+	return credentialHeader(cred), signin, nil
+}
+
+// credentialHeader sets cred on a request to the vendor, in place of the
+// agent's placeholder.
+func credentialHeader(cred credentials.Cred) func(http.Header) {
 	return func(h http.Header) {
 		// The agent's placeholder is in one of these: it goes, whichever
 		// header the real credential takes.
@@ -207,7 +218,7 @@ func (s *Server) turnCredential(j queue.Job, up Upstream) (func(http.Header), ga
 		for k, v := range cred.Headers {
 			h.Set(k, v)
 		}
-	}, signin, nil
+	}
 }
 
 func refusal(status int, why string) *gateway.Refusal {

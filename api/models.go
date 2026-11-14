@@ -41,6 +41,11 @@ type ModelSources struct {
 	// Own runs the unmodified harness in its home on control so it prints
 	// its models (credentials.Subscriptions.OwnModels).
 	Own func(harness string) ([]byte, error)
+	// Served runs the unmodified harness as its model server in a clean
+	// home of its own, its list-models call through control's relay with
+	// the subscription kept on control, and returns what it listed
+	// (harness.ModelServer, models.AppServer). Errors are fixed wording.
+	Served func(ctx context.Context, harness string) ([]models.Model, error)
 }
 
 var modelsRoute = route{method: "GET", path: "/api/v0/harnesses/{id}/models", op: "listModels",
@@ -50,7 +55,7 @@ var modelsRoute = route{method: "GET", path: "/api/v0/harnesses/{id}/models", op
 	doc: "The models a harness can use now on an access, for a form that saves an agent, from each source's own data. " +
 		"access openrouter: OpenRouter's list-models call, made by control with the OpenRouter key. " +
 		"access subscription: claude's aliases opus, sonnet and haiku (always the newest of each); agy's own agy models, run unmodified where its sign-in is, on control; " +
-		"codex's models_cache.json, which unmodified codex writes in a session's home, its model names reported by the runner after a turn. " +
+		"codex's own model/list, from unmodified codex app-server run on control in a clean home of its own, its one call for the list sent through control's relay, which adds the ChatGPT sign-in kept on control and records the call. " +
 		"No subscription's own endpoint is called by AgentBus. A list is kept with the time it was fetched and fetched again at most once an hour, or now with refresh=true. " +
 		"An agent may still name a model the list lacks, and one that names none uses the tool's own default.",
 	query: []param{{name: "access", doc: "subscription, openrouter or api. Required."},
@@ -74,11 +79,12 @@ func (a *API) listModels(w http.ResponseWriter, r *http.Request, id string) {
 	refresh := q.Get("refresh") == "true"
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, ModelList{Harness: id, Access: access, List: a.modelList(ctx, h.Info(), access, refresh)})
+	writeJSON(w, http.StatusOK, ModelList{Harness: id, Access: access, List: a.modelList(ctx, h, access, refresh)})
 }
 
-// modelList is info's list on access.
-func (a *API) modelList(ctx context.Context, info harness.Info, access string, refresh bool) models.List {
+// modelList is h's list on access.
+func (a *API) modelList(ctx context.Context, h harness.Harness, access string, refresh bool) models.List {
+	info := h.Info()
 	src := a.cfg.Models
 	none := func(source, why string) models.List {
 		return models.List{Models: []models.Model{}, Source: source, Error: why}
@@ -106,7 +112,18 @@ func (a *API) modelList(ctx context.Context, info harness.Info, access string, r
 		return a.apiKeyModels(ctx, client, info, refresh)
 	}
 	// A subscription: through the unmodified tool only.
+	_, served := h.(harness.ModelServer)
 	switch {
+	case served:
+		if src.Served == nil {
+			return none(models.FromCommand, "this service runs no harness to list its models")
+		}
+		if st, err := a.subscriptionStatus(info.Name); err != nil || !st.Connected {
+			return none(models.FromCommand, credentials.NotConnected(info.Name))
+		}
+		return src.Cache.Get("own/"+info.Name, models.FromCommand, refresh, func() ([]models.Model, error) {
+			return src.Served(ctx, info.Name)
+		})
 	case info.Login != nil && len(info.Login.ModelsArgs) > 0:
 		if src.Own == nil {
 			return none(models.FromCommand, "this service runs no harness to list its models")

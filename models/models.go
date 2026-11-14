@@ -3,9 +3,11 @@
 // control with the OpenRouter key, each vendor's official list-models call
 // made by control with that vendor's API key (Anthropic, OpenAI, Gemini),
 // the output of an unmodified harness run where its sign-in is
-// (agy models), what an unmodified harness left in a session's home and a
-// runner reported (codex's models_cache.json slugs), or a fixed list
-// (claude's aliases). No subscription's own endpoint is ever called from
+// (agy models), the model/list of an unmodified harness run as its model
+// server in a clean home, its one call through control's relay with the
+// subscription kept on control (codex app-server, AppServer), what an
+// unmodified harness left in a session's home and a runner reported, or a
+// fixed list (claude's aliases). No subscription's own endpoint is ever called from
 // here: a subscription's list comes from its unmodified tool only.
 //
 // Each list is kept with the time it was fetched and fetched again at most
@@ -42,7 +44,7 @@ type Model struct {
 type List struct {
 	Models []Model `json:"models" doc:"The models, in the source's order or sorted by id. Empty when the source has none yet or could not be read."`
 	// Source says where the list came from, for a screen.
-	Source    string     `json:"source" doc:"Where the list comes from: api (the official list-models call of OpenRouter or of the vendor, made by control with the key set in Settings), command (the unmodified harness, where its sign-in is), runner (what the harness left in a session's home, reported by a runner), fixed (a list of the harness's own aliases)."`
+	Source    string     `json:"source" doc:"Where the list comes from: api (the official list-models call of OpenRouter or of the vendor, made by control with the key set in Settings), command (the unmodified harness: where its sign-in is, or in a clean home of its own with its call through control's relay), runner (what the harness left in a session's home, reported by a runner), fixed (a list of the harness's own aliases)."`
 	FetchedAt *time.Time `json:"fetched_at,omitempty" doc:"When the list was fetched or reported. Absent for a fixed list and for one never fetched."`
 	Error     string     `json:"error,omitempty" doc:"Why the list is empty or old, in fixed words, such as connect your agy subscription in Settings. The models kept from before, if any, are still listed."`
 }

@@ -113,6 +113,7 @@ type Server struct {
 	mux          *http.ServeMux
 	reads        readScopes // what each runner may read (blobscope.go)
 	fin          *finisher  // control's one ender of jobs, with a record (finisher.go)
+	listings     listings   // the tokens of listings of models running now (models.go)
 	// Logf writes one line to the service log for each runner that
 	// enrolls. Set before serving; nil: none.
 	Logf func(format string, args ...any)

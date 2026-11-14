@@ -191,6 +191,18 @@ type HomeFiles interface {
 	RelayHome(placeholder string) map[string][]byte
 }
 
+// ModelServer is a harness that lists the models its sign-in may use when
+// run as a model server, JSON-RPC on its standard input and output (codex
+// app-server; models.AppServer reads it). Control runs it unmodified, in a
+// clean home of its own and wired as a relayed turn is, for a list of its
+// subscription's models.
+type ModelServer interface {
+	// WireModels is that run's environment and arguments: its calls go to
+	// base, the relay's path for its vendor on this service, with
+	// placeholder as their credential.
+	WireModels(base, placeholder string) (env, args []string)
+}
+
 // Access is one way a harness reaches a model.
 type Access struct {
 	Kind     string

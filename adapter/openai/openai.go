@@ -29,10 +29,20 @@ func (Adapter) Vendor() string { return "openai" }
 // -p turn makes no other call there (codex-cli 0.164.0, 2026-11-13, against a
 // local listener). chatgpt.com streams the reply with no Content-Type.
 // /responses/compact is not one: its reply is not read.
+//
+// GET /backend-api/codex/models?client_version=<codex's version> is codex's
+// list of the models its sign-in may use: codex app-server asks it for
+// model/list when its provider names it as model_catalog_url, with the
+// provider's bearer, and sends no other call (codex-cli 0.164.0,
+// 2026-11-14, against a local listener; the path and query from codex-rs
+// codex-api/src/endpoint/models.rs at rust-v0.164.0). A service call: its
+// reply is passed on as JSON and not read.
 func (Adapter) Calls() []adapter.Call {
 	return []adapter.Call{
 		{Method: "POST", Path: "/backend-api/codex/responses", Replies: adapter.JSONOrSSEOrNone},
 		{Method: "POST", Path: "/v1/responses", Replies: adapter.JSONOrSSEOrNone},
+		{Method: "GET", Path: "/backend-api/codex/models", Versions: []string{"client_version"}, Replies: adapter.JSONOnly,
+			Service: true, Models: true},
 	}
 }
 

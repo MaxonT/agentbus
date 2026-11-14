@@ -29,6 +29,11 @@ func TestMain(m *testing.M) {
 	if d := os.Getenv(launchDirEnv); d != "" {
 		fakeLaunch(d)
 	}
+	// With AGENTBUS_FAKE_APP_SERVER set, asked app-server it is codex's
+	// model server (models_integration_test.go).
+	if a := os.Args[1:]; os.Getenv("AGENTBUS_FAKE_APP_SERVER") == "1" && len(a) > 0 && a[len(a)-1] == "app-server" {
+		fakeAppServer()
+	}
 	if os.Getenv("AGENTBUS_FAKE_AGENT") == "1" {
 		fakeAgent()
 	}

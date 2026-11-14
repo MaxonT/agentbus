@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/staysup/agentbus/credentials"
-	"github.com/staysup/agentbus/harness"
 	"github.com/staysup/agentbus/models"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/store"
@@ -160,27 +160,38 @@ func TestModelLists(t *testing.T) {
 	}
 }
 
-// codex on its sign-in: the names a runner reported from codex's own cache,
-// the newest report of the runners seen.
-func TestCodexModelsFromRunners(t *testing.T) {
-	e, _, _ := modelsEnv(t, nil)
-	code, l, raw := listOf(t, e, "/api/v0/harnesses/codex/models?access=subscription")
-	if code != 200 || len(l.Models) != 0 || l.Source != models.FromRunner || !strings.Contains(l.Error, "first turn") {
-		t.Fatalf("before a report: %d %s", code, raw)
+// codex on its sign-in: its own model/list (ModelSources.Served), run only
+// once the subscription is connected on control, kept within the hour,
+// fetched again on refresh; a run that fails keeps the list from before,
+// with why in fixed words.
+func TestCodexModelsFromItsModelServer(t *testing.T) {
+	e, subs, _ := modelsEnv(t, nil)
+	var runs atomic.Int32
+	fail := false
+	e.api.cfg.Models.Served = func(_ context.Context, h string) ([]models.Model, error) {
+		runs.Add(1)
+		if h != "codex" || fail {
+			return nil, models.ErrServer
+		}
+		return []models.Model{{ID: "gpt-6.1-sol", Label: "GPT-6.1-Sol"}, {ID: "gpt-6-luna"}}, nil
 	}
-	older, newer := time.Now().Add(-time.Hour).UTC(), time.Now().UTC()
-	for i, rep := range []harness.Report{
-		{Name: "codex", Found: true, Models: []string{"gpt-5.6-luna"}, ModelsAt: &older},
-		{Name: "codex", Found: true, Models: []string{"gpt-6.1-sol", "gpt-6-luna", "bad name"}, ModelsAt: &newer},
-	} {
-		if _, err := e.q.RegisterRunner(queue.DefaultTeam, "r"+string(rune('0'+i)), nil, 1, "hash"+string(rune('0'+i)),
-			&queue.Capabilities{Harnesses: []harness.Report{rep}}); err != nil {
-			t.Fatal(err)
+	code, l, raw := listOf(t, e, "/api/v0/harnesses/codex/models?access=subscription")
+	if code != 200 || len(l.Models) != 0 || l.Source != models.FromCommand || l.Error != "connect your codex subscription in Settings" || runs.Load() != 0 {
+		t.Fatalf("not connected: %d %s", code, raw)
+	}
+	if err := subs.Keep("codex", credentials.Signin{Token: "fake-chatgpt-access", Refresh: "fake-chatgpt-refresh", Expires: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		code, l, raw = listOf(t, e, "/api/v0/harnesses/codex/models?access=subscription")
+		if code != 200 || idsOf(l) != "gpt-6.1-sol=GPT-6.1-Sol,gpt-6-luna" || l.FetchedAt == nil || l.Error != "" || runs.Load() != 1 {
+			t.Fatalf("read %d: %d %s", i, code, raw)
 		}
 	}
-	code, l, raw = listOf(t, e, "/api/v0/harnesses/codex/models?access=subscription")
-	if code != 200 || idsOf(l) != "gpt-6.1-sol,gpt-6-luna" || l.FetchedAt == nil || !l.FetchedAt.Equal(newer.Truncate(0)) && l.FetchedAt.Sub(newer).Abs() > time.Second {
-		t.Fatalf("after reports: %d %s", code, raw)
+	fail = true
+	code, l, raw = listOf(t, e, "/api/v0/harnesses/codex/models?access=subscription&refresh=true")
+	if code != 200 || idsOf(l) != "gpt-6.1-sol=GPT-6.1-Sol,gpt-6-luna" || l.Error != models.ErrServer.Error() || runs.Load() != 2 {
+		t.Fatalf("refresh that failed: %d %s", code, raw)
 	}
 }
 

@@ -131,3 +131,23 @@ func TestCodexModelsCache(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// codex's model server: wired as a relayed turn, with the provider's
+// model_catalog_url at the relay's list of models, the file sign-in store,
+// and app-server last (codex-cli 0.164.0, 2026-11-14).
+func TestCodexWireModels(t *testing.T) {
+	env, args := codex{}.WireModels("http://127.0.0.1:9/relay/chatgpt", "abm_x")
+	want := []string{"-c", "model_provider=agentbus_chatgpt",
+		"-c", `model_providers.agentbus_chatgpt.name="OpenAI"`,
+		"-c", `model_providers.agentbus_chatgpt.base_url="http://127.0.0.1:9/relay/chatgpt/backend-api/codex"`,
+		"-c", `model_providers.agentbus_chatgpt.env_key="AGENTBUS_CODEX_TOKEN"`,
+		"-c", `model_providers.agentbus_chatgpt.wire_api="responses"`,
+		"-c", "model_providers.agentbus_chatgpt.supports_websockets=false",
+		"-c", `model_providers.agentbus_chatgpt.model_catalog_url="http://127.0.0.1:9/relay/chatgpt/backend-api/codex/models"`,
+		"-c", `cli_auth_credentials_store="file"`,
+		"app-server"}
+	if len(env) != 1 || env[0] != "AGENTBUS_CODEX_TOKEN=abm_x" || strings.Join(args, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("%q\n%q", env, args)
+	}
+	var _ ModelServer = codex{}
+}

@@ -100,7 +100,11 @@ func TestOnlyRecordedCallsGetTheCredential(t *testing.T) {
 			{"POST", "/backend-api/codex/responses", oaiRequest, true},
 			{"POST", "/v1/responses", oaiRequest, true},
 			{"POST", "/backend-api/other", "{}", false},
-			{"GET", "/backend-api/codex/models", "", false},
+			// codex's list of models is a service call (TestServiceCallIsRecordedByStatus);
+			// only a version number is its query.
+			{"GET", "/backend-api/codex/models?client_version=latest", "", false},
+			{"GET", "/backend-api/codex/models?client_version=0.164.0&x=1", "", false},
+			{"POST", "/backend-api/codex/models", "{}", false},
 			{"POST", "/backend-api/codex/responses/compact", oaiRequest, false},
 			{"POST", "/v1/responses/compact", oaiRequest, false},
 			{"PUT", "/v1/responses", oaiRequest, false},
@@ -172,24 +176,40 @@ func TestOnlyRecordedCallsGetTheCredential(t *testing.T) {
 	}
 }
 
-// agy's Code Assist methods besides its model calls get the credential and
-// are recorded as vendor.called, by status; their bodies are not read.
+// A harness's calls besides its model calls get the credential and are
+// recorded as vendor.called, by status; their bodies are not read: agy's
+// Code Assist methods, and codex's list of models (GET
+// /backend-api/codex/models?client_version=0.164.0, the call codex-cli
+// 0.164.0 app-server made for model/list, 2026-11-14).
 func TestServiceCallIsRecordedByStatus(t *testing.T) {
-	for _, how := range []string{"relayed", "up"} {
-		vendor := newRuleVendor(t, "application/json; charset=UTF-8", `{"cloudaicompanionProject":"p"}`)
-		do, mem, g, _ := ruleGateway(t, how, gemini.Adapter{}, vendor.URL)
-		status, body := do("POST", "/v1internal:loadCodeAssist", `{"metadata":{}}`)
-		g.Settle("s1", "t_1", 3*time.Second)
-		if status != http.StatusOK || body != `{"cloudaicompanionProject":"p"}` {
-			t.Fatalf("%s: %d %s", how, status, body)
-		}
-		evs := mem.Events()
-		if len(evs) != 1 || evs[0].Kind != event.VendorCalled || evs[0].Call != "POST /v1internal:loadCodeAssist" ||
-			evs[0].Status != 200 || evs[0].LatencyMS == nil || evs[0].Turn != "t_1" {
-			t.Fatalf("%s: events %+v", how, evs)
-		}
-		if got := vendor.calls(); len(got) != 1 || got[0] != "POST /v1internal:loadCodeAssist? cred=yes" {
-			t.Fatalf("%s: the vendor got %v", how, got)
+	for _, c := range []struct {
+		a                   adapter.Adapter
+		method, path, query string
+		body, reply         string
+	}{
+		{gemini.Adapter{}, "POST", "/v1internal:loadCodeAssist", "", `{"metadata":{}}`, `{"cloudaicompanionProject":"p"}`},
+		{openai.Adapter{}, "GET", "/backend-api/codex/models", "client_version=0.164.0", "", `{"models":[{"slug":"gpt-5.5"}]}`},
+	} {
+		for _, how := range []string{"relayed", "up"} {
+			vendor := newRuleVendor(t, "application/json; charset=UTF-8", c.reply)
+			do, mem, g, _ := ruleGateway(t, how, c.a, vendor.URL)
+			target := c.path
+			if c.query != "" {
+				target += "?" + c.query
+			}
+			status, body := do(c.method, target, c.body)
+			g.Settle("s1", "t_1", 3*time.Second)
+			if status != http.StatusOK || body != c.reply {
+				t.Fatalf("%s %s: %d %s", how, c.path, status, body)
+			}
+			evs := mem.Events()
+			if len(evs) != 1 || evs[0].Kind != event.VendorCalled || evs[0].Call != c.method+" "+c.path ||
+				evs[0].Status != 200 || evs[0].LatencyMS == nil || evs[0].Turn != "t_1" {
+				t.Fatalf("%s %s: events %+v", how, c.path, evs)
+			}
+			if got := vendor.calls(); len(got) != 1 || got[0] != c.method+" "+c.path+"?"+c.query+" cred=yes" {
+				t.Fatalf("%s %s: the vendor got %v", how, c.path, got)
+			}
 		}
 	}
 }

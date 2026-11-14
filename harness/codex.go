@@ -137,6 +137,24 @@ func (codex) WireRelay(baseURL, placeholder string) (env, args []string) {
 	}
 }
 
+// WireModels: as WireRelay, with the provider's model_catalog_url at the
+// relay's list of models, and app-server. Without model_catalog_url codex
+// on a provider of its own with a key (env_key) lists only the models built
+// into it and asks nobody (codex-rs models-manager/src/manager.rs,
+// api_key_discovery_disabled, at rust-v0.164.0); with it, model/list asks
+// GET <model_catalog_url>?client_version=<its version> with the bearer and
+// lists what that answers, without the built-in ones (measured, codex-cli
+// 0.164.0, 2026-11-14, against a local listener). The sign-in store is
+// the file: codex then looks for no sign-in in the system's keychain, and
+// the clean home holds none.
+func (c codex) WireModels(base, placeholder string) (env, args []string) {
+	env, args = c.WireRelay(base, placeholder)
+	return env, append(args,
+		"-c", "model_providers."+relayProvider+`.model_catalog_url="`+base+`/backend-api/codex/models"`,
+		"-c", `cli_auth_credentials_store="file"`,
+		"app-server")
+}
+
 // codexModels are the slugs of the models codex's models_cache.json lists
 // ("visibility": "list"; one hidden there is not offered).
 func codexModels(b []byte) []string {

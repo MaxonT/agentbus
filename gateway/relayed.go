@@ -86,6 +86,14 @@ func (g *Gateway) Credentialed(method, path string) bool {
 	return ok && !c.NoCredential
 }
 
+// ListsModels says whether a call of method on path is the harness's own
+// list-models call (adapter.Call Models), the one call of a listing of
+// models that gets a credential of control's.
+func (g *Gateway) ListsModels(method, path string) bool {
+	c, ok := adapter.Find(g.adapter, method, path)
+	return ok && c.Models
+}
+
 // Names says whether exchange is an id this gateway gave, so a relay never
 // lets a runner name a call with an id of control's own.
 func (g *Gateway) Names(exchange string) bool { return strings.HasPrefix(exchange, "x-"+g.run+"-") }

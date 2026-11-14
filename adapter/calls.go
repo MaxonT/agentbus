@@ -35,7 +35,18 @@ type Call struct {
 	// credential at all, such as claude's HEAD /api/hello. Control adds
 	// none, and the gateway takes off any the agent sent.
 	NoCredential bool
+	// Versions are query keys whose value is a version number (digits
+	// and dots), any one, such as codex's client_version. A key listed
+	// here is admitted as a key of Query is.
+	Versions []string
+	// Models: the harness's own list-models call, a service call. Control
+	// adds a subscription to it for a listing of models with no turn
+	// (jobs.Server.ModelsToken), and to no other call of that listing.
+	Models bool
 }
+
+// version is a query value Call.Versions admits.
+var version = regexp.MustCompile(`^[0-9]{1,6}(\.[0-9]{1,6}){0,3}$`)
 
 // segment is what a "*" of Call.Path stands for.
 var segment = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -85,8 +96,8 @@ func (c Call) Model(path string) string {
 }
 
 // Admits says whether rawQuery is a query c may carry: every key one c
-// lists, every value one it lists for that key. A query that does not
-// parse is not.
+// lists, every value one it lists for that key, or a version number for a
+// key of Versions. A query that does not parse is not.
 func (c Call) Admits(rawQuery string) bool {
 	if rawQuery == "" {
 		return true
@@ -96,6 +107,14 @@ func (c Call) Admits(rawQuery string) bool {
 		return false
 	}
 	for k, vs := range q {
+		if contains(c.Versions, k) {
+			for _, v := range vs {
+				if !version.MatchString(v) {
+					return false
+				}
+			}
+			continue
+		}
 		allowed, ok := c.Query[k]
 		if !ok {
 			return false

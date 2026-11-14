@@ -612,6 +612,9 @@ func start(c config) (*service, error) {
 		Logf: svcLog.Printf}
 	if q != nil {
 		acfg.Models = modelSources(c, subs)
+		if runnerJobs != nil {
+			acfg.Models.Served = modelServer(c, runnerJobs, baseURL)
+		}
 	}
 	var relayHandler http.Handler
 	if runnerJobs != nil {
@@ -987,8 +990,9 @@ const (
 
 // modelSources are where control reads the lists of models
 // (api.ModelSources): OpenRouter's list-models call with the OpenRouter key,
-// each vendor's list-models call with its API key set in Settings, and agy's
-// own listing, run unmodified in its home on control.
+// each vendor's list-models call with its API key set in Settings, agy's
+// own listing, run unmodified in its home on control, and codex's own
+// model/list (modelServer, set where control has a relay).
 func modelSources(c config, subs *credentials.Subscriptions) *api.ModelSources {
 	apiBase := map[string]string{}
 	for _, h := range harness.All() {
