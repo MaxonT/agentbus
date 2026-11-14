@@ -20,18 +20,16 @@
 AgentBus sits between your coding agents and every model vendor. It runs the agents you already
 have (Claude Code, Codex, Antigravity or any OpenRouter model) and tracks every step.
 
-- **Everything stays on your machine.** Your sessions, every model call and reply, and your sign-ins
-  and keys are kept in AgentBus's data folder on your machine. No telemetry and no AgentBus servers:
-  the only calls out are your agents' own calls to their model vendors, and a feedback message if
-  you send one.
-- **Switch models without losing context.** Change the agent or model on any message, and the next
-  one picks up where the last left off.
 - **Your agents work together.** Claude can ask Codex, or any agent from any vendor, to answer a
   question, take on a task or check its work. The answer comes back into the same session.
 - **You see every model call**, and what it cost: exactly what each model was sent, piece by piece,
   and what it answered.
 - **Your folder stays as it is.** Each session works in its own copy. You review the changes and
   apply them to your folder. Turn on the sandbox to make the copy a hard wall.
+- **Everything stays on your machine.** Your sessions, every model call and reply, and your sign-ins
+  and keys are kept in AgentBus's data folder on your machine. No telemetry and no AgentBus servers:
+  the only calls out are your agents' own calls to their model vendors, and a feedback message if
+  you send one.
 
 ## Install
 
