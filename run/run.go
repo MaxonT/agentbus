@@ -836,6 +836,13 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	}()
 	spec := turnSpec(hint, t.resumeID, t.model, w, perm, t.context+t.prompt)
 	spec.Access = t.access
+	// The person's own MCP servers in the turn's home: an edit turn loads
+	// them, a read-only one does not (harness.Turn.OwnServers). Names only,
+	// in the service log.
+	spec.OwnServers = harness.OwnServers(h, cmd.Env)
+	if len(spec.OwnServers) > 0 {
+		e.cfg.Logf("run.own_servers session=%s turn=%s read_only=%t names=%q", t.session, t.id, t.readOnly, strings.Join(spec.OwnServers, ","))
+	}
 	if tools {
 		spec.Tools = strings.TrimSuffix(apiURL, "/") + ToolPath
 	}

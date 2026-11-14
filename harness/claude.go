@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -125,9 +126,51 @@ func (claude) Refuse(Turn) string { return "" }
 
 func (claude) OwnInstructions([]string, string) string { return "" }
 
-// OwnTools: --strict-mcp-config loads no server of the person's, so none is
-// in the way.
-func (claude) OwnTools([]string, string) string { return "" }
+// OwnTools says the person's own MCP servers (OwnServers) name one as the
+// tool server, so the turn gets no tool server and its instructions name
+// agentbus-api: their entry wins, as on codex. An edit turn loads their
+// servers beside the --mcp-config one, and two of one name would leave which
+// one Claude Code keeps to it.
+func (c claude) OwnTools(env []string, _ string) string {
+	if slices.Contains(c.OwnServers(env), ToolServer) {
+		return "claude_mcp_server_set"
+	}
+	return ""
+}
+
+// OwnServers are the names in the mcpServers of the .claude.json Claude Code
+// reads: $CLAUDE_CONFIG_DIR/.claude.json, which a session's home sets (Home
+// files merges ~/.claude.json's mcpServers there), else $HOME/.claude.json
+// (Claude Code 2.1.323). Names only: a server's settings are never kept. A
+// missing file, or one that does not parse, names none: Claude Code then
+// loads none of it either.
+func (claude) OwnServers(env []string) []string {
+	path := ""
+	if d := envValue(env, "CLAUDE_CONFIG_DIR"); d != "" {
+		path = filepath.Join(d, ".claude.json")
+	} else if h := envValue(env, "HOME"); h != "" {
+		path = filepath.Join(h, ".claude.json")
+	}
+	if path == "" || !filepath.IsAbs(path) {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var v struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if json.Unmarshal(b, &v) != nil {
+		return nil
+	}
+	names := make([]string, 0, len(v.MCPServers))
+	for n := range v.MCPServers {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names
+}
 
 // Native: Claude Code reads the folder's CLAUDE.md and .claude/CLAUDE.md,
 // and a file such a CLAUDE.md imports with a line "@<file>". With neither
@@ -217,23 +260,40 @@ func (claude) Args(t Turn) []string {
 			allowed = append(allowed, bashRules(t.Allow))
 		}
 		allowed = append(allowed, claudeTools(t.Tools)...)
+		// The person's own MCP servers load (no --strict-mcp-config), and
+		// a -p turn has nobody to approve a call: mcp__<server> lets every
+		// tool of each run without asking, as for the tool server. A name
+		// of another shape gets no rule: Claude Code rewrites it in its
+		// tool names, so a rule could miss or widen; its tools then run
+		// only as the person's own settings allow.
+		for _, n := range t.OwnServers {
+			if r := "mcp__" + n; serverNameShape.MatchString(n) && !slices.Contains(allowed, r) {
+				allowed = append(allowed, r)
+			}
+		}
 		if len(allowed) > 0 {
 			a = append(a, "--allowedTools", strings.Join(allowed, ","))
 		}
 	}
-	// --strict-mcp-config loads only the --mcp-config servers: the tool
-	// server, or none at all. Every turn gets it. --tools restricts
-	// built-in tools only, so an MCP server from the person's settings
-	// could still write in a read-only turn, and in an edit turn it would
-	// act outside the record. Without --mcp-config it loads no server at
-	// all (read-only turns have run that way since d6d279e).
+	// The tool server comes in by --mcp-config on every turn that has it.
 	if t.Tools != "" {
 		a = append(a, "--mcp-config", claudeMCPConfig(t.Tools))
 	}
+	// A read-only turn (a review) gets --strict-mcp-config: only the
+	// --mcp-config servers load, the tool server or none at all. --tools
+	// restricts built-in tools only, so a server of the person's could
+	// still write. An edit turn loads the person's own servers beside it:
+	// in a session's home, those Home files copied in (his decision,
+	// 2026-11-14). Calls are recorded as tool.requested under their
+	// mcp__ names.
+	if readOnly {
+		a = append(a, "--strict-mcp-config")
+	}
 	// --no-chrome: Claude in Chrome is not an MCP server of the person's
 	// settings, so --strict-mcp-config leaves it on (measured 2026-11-14,
-	// research/2026-11-14-use-my-own-tools-design.md). Off on every turn.
-	a = append(a, "--strict-mcp-config", "--no-chrome")
+	// research/2026-11-14-use-my-own-tools-design.md), and it cannot work
+	// with a sign-in AgentBus holds. Off on every turn.
+	a = append(a, "--no-chrome")
 	// forbid: never run, even when allow or the person's settings
 	// approve it; a deny wins over an allow (checked live, 2026-11-07).
 	// The gateway's guard refuses them too, in the shapes this rule
