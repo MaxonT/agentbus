@@ -494,6 +494,22 @@ var routes = slices.Concat([]route{
 			"A session's copy is never listed, though a turn may run in one. No body is read.",
 		replies: []reply{ok(200, FolderList{}, "The folders."), badRequest},
 		serve:   plain((*API).listFolders)},
+	{method: "GET", path: "/api/v0/folders/{id}/home-files", op: "folderHomeFiles",
+		idDoc:   "A folder's reference (fld_ and 16 hex digits), from GET /api/v0/folders. Another shape gets 404.",
+		tag:     "Agents",
+		summary: "List the usual config files",
+		doc: "Which of the usual config files are in the home of the folder's machine, for \"Use my config\": a cockpit fills Home files (home_files) with them, and the person saves. " +
+			"The machine's runner looks, not the server, and answers each path's name, kind (file or folder) and size only, never its content. " +
+			"The paths looked for, in this order: ~/.claude/settings.json, ~/.claude/CLAUDE.md, ~/.claude/skills/, ~/.claude/commands/, ~/.claude/agents/, " +
+			"~/.claude.json (its mcpServers part only), ~/.codex/config.toml, ~/.codex/AGENTS.md, ~/.gemini/config/mcp_config.json (agy's MCP servers), " +
+			"~/.aws/config, ~/.aws/credentials, ~/.config/gh/, ~/.gitconfig and ~/.ssh/config. A path the home does not hold is left out. " +
+			"A vendor sign-in file (claude's .credentials.json, codex's auth.json, agy's token) is never listed or counted, and home_files refuses one. " +
+			"Nothing is stored. The reply waits up to 15 seconds for the folder's machine. No body is read.",
+		query: []param{{name: "connector", doc: "The folder's machine (con_ and 16 hex digits), from GET /api/v0/folders: needed only when two machines hold a folder of that reference."}},
+		replies: []reply{ok(200, HomeFileList{}, "The config files that machine's home holds."), badRequest,
+			fail(404, "No runner holds that folder."), fail(409, "The machine's runner could not list its home: error says why."), tooMany,
+			fail(503, "The folder's machine is offline."), fail(504, "The folder's machine did not answer within 15 seconds."), storeFailed},
+		serve: (*API).homeFiles},
 
 	{method: "GET", path: "/api/v0/events", op: "streamEvents",
 		tag:     "Events",

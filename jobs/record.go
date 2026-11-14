@@ -26,6 +26,22 @@ type RecordBatch struct {
 	Events []json.RawMessage `json:"events" doc:"The turn's events, at most 500, each with its id and the job's turn id as turn."`
 }
 
+// RunnerKinds are the event kinds a runner may send in a RecordBatch: those
+// its run engine (run/), its gateway and adapters, and its replay write for
+// a turn. Every other kind is control's own and is refused: events.dropped
+// (the store's, marking other sessions'), turn.changed and turn.applied
+// (control's record of a job's end, outcome.go), plan.usage (control's
+// reading of a subscription it holds, gateway/plan.go), tools.listed
+// (control's tool server), session.renamed (the API), control's operations
+// in no session, the retired kinds, and a program's x.* kinds.
+var RunnerKinds = map[event.Kind]bool{
+	event.TurnStarted: true, event.ModelRequested: true, event.ModelResponded: true,
+	event.ToolRequested: true, event.ToolCompleted: true, event.TurnCompleted: true,
+	event.SessionOpened: true, event.SessionClosed: true, event.ContextAdded: true,
+	event.NetworkRefused: true, event.SchemaUnexpected: true, event.ReplayFailed: true,
+	event.ToolRefused: true, event.CallRefused: true, event.VendorCalled: true,
+}
+
 // RecordAck answers a RecordBatch: how many events were new.
 type RecordAck struct {
 	Stored int `json:"stored"`
@@ -204,19 +220,11 @@ func (s *Server) record(w http.ResponseWriter, r *http.Request, rn queue.Runner)
 			fail(w, http.StatusBadRequest, "every event needs an id, a kind, a session, and the job's turn as turn")
 			return
 		}
-		// A drop marks other sessions' events as missing: it is the
-		// store's own, never a turn's.
-		if e.Kind == event.EventsDropped {
-			fail(w, http.StatusBadRequest, "events.dropped is not a turn's event")
-			return
-		}
-		// What a turn changed and what was applied are control's own
-		// record of a job's end (outcome.go), never a runner's.
-		// Plan usage is control's own gateway's reading of a subscription
-		// control holds, and is shown for that subscription to everyone:
-		// never a runner's (gateway/plan.go).
-		if e.Kind == event.TurnChanged || e.Kind == event.TurnApplied || e.Kind == event.PlanUsage {
-			fail(w, http.StatusBadRequest, string(e.Kind)+" is control's own event, not a runner's")
+		// Only a kind a runner writes for its turn is taken: anything else
+		// (control's own record, a program's x.* kinds, a kind added later)
+		// is refused until it is listed in RunnerKinds.
+		if !RunnerKinds[e.Kind] {
+			fail(w, http.StatusBadRequest, string(e.Kind)+" is not an event a runner sends")
 			return
 		}
 		e.Seq, e.Folder = 0, ""

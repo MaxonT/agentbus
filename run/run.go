@@ -797,15 +797,26 @@ func (e *Engine) start(t turn) (*Turn, error) {
 				e.cfg.Logf("store.error what=network_refused session=%s turn=%s", session, turn)
 			}
 		}}
-	if perm.Sandbox.Mode == settings.SandboxOn {
+	// The wall is built when the sandbox is on, and when contain is on on a
+	// machine whose only way to close an agent off is the wall (macOS): the
+	// person turns contain on, and the runner builds what it needs.
+	autoWall := perm.Sandbox.Mode != settings.SandboxOn && needsWall(perm)
+	if perm.Sandbox.Mode == settings.SandboxOn || autoWall {
 		// A read-only turn cannot write its folder in the wall. Nor can a
 		// turn that may edit nothing, of a harness whose own sandbox kept it
 		// from writing: that one is off in the wall (harness.Turn.Walled).
 		readOnly := w.ReadOnly || (h.Info().OwnSandbox && len(w.Edit) == 0)
-		box, why := e.sandbox(perm, t.session, t.folder, readOnly, readOnly && h.Info().OwnSandbox,
+		lead := "the sandbox is on in Settings"
+		if autoWall {
+			lead = "Network contain is on in Settings, which on this machine needs the session's sandbox"
+		}
+		box, why := e.sandbox(perm, lead, t.session, t.folder, readOnly, readOnly && h.Info().OwnSandbox,
 			append(sandbox.Program(l.Path), e.apiProgram()...), netSpec)
 		if why != "" {
-			e.cfg.Logf("run.refused agent=%s reason=sandbox", t.harness)
+			e.cfg.Logf("run.refused agent=%s reason=sandbox auto=%t", t.harness, autoWall)
+			if autoWall {
+				return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn Network contain off in the cockpit's Settings (Isolation, Network).")
+			}
 			return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn off \"Run each session in a sandbox\" in the cockpit's Settings (Grants, Sandbox).")
 		}
 		jail = box
@@ -985,17 +996,18 @@ type wall interface {
 // sandbox builds the wall around one of session's turns in
 // folder (read only when readOnly; with no network beyond its gateway and
 // the API when offline, see wallNet), with read readable too, or says why it cannot (fixed wording).
+// lead says why the wall is built, and starts a refusal.
 // It needs the session's own home, which holds the home_files already
 // (copyHomeFiles), so they are readable inside the wall.
 // The network goes through the proxy: the hosts in [network] allow when
 // contain is on, every host when it is off.
-func (e *Engine) sandbox(p settings.Policy, session, folder string, readOnly, offline bool, read []string, net netjail.Spec) (*sandbox.Box, string) {
+func (e *Engine) sandbox(p settings.Policy, lead, session, folder string, readOnly, offline bool, read []string, net netjail.Spec) (*sandbox.Box, string) {
 	if e.cfg.Homes == "" || !SessionShape.MatchString(session) {
-		return nil, "the sandbox is on in Settings, and " + NoHomes
+		return nil, lead + ", and " + NoHomes
 	}
 	home := filepath.Join(e.cfg.Homes, session)
 	if info, err := os.Lstat(home); err != nil || !info.IsDir() {
-		return nil, "the sandbox is on in Settings, and this session has no home of its own: it began before homes"
+		return nil, lead + ", and this session has no home of its own: it began before homes"
 	}
 	net = wallNet(p, offline, net)
 	box, err := sandbox.New(sandbox.Spec{Copy: folder, ReadOnly: readOnly, Home: home, Read: append(read, p.ReadFolders...), Net: net})
@@ -1039,7 +1051,7 @@ func (e *Engine) copyHomeFiles(p settings.Policy, session string) string {
 		return ""
 	}
 	userHome, _ := os.UserHomeDir()
-	if err := sandbox.CopyGrants(home, home+grantsRecord, userHome, p.HomeFiles); err != nil {
+	if err := sandbox.CopyGrants(home, home+grantsRecord, userHome, p.HomeFiles, settings.SignInFile); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -1060,16 +1072,24 @@ func (e *Engine) apiProgram() []string {
 	return []string{filepath.Join(e.cfg.APIDir, APIClient)}
 }
 
+// needsWall says a turn on policy p is closed off from the network by the
+// session's sandbox, built for it even with the sandbox off: contain is on,
+// and this machine has no network namespace but has the wall (macOS).
+// Linux closes an agent off with netjail alone.
+func needsWall(p settings.Policy) bool {
+	return p.Network.Contain == settings.ContainOn && !netjail.Supported && sandbox.Supported
+}
+
 // contained says whether a turn on policy p runs closed off from the
-// network, or why it cannot start: the policy asks for it and this runner
-// cannot do it.
+// network by netjail, or why it cannot start: the policy asks for it and
+// this runner can do it neither with netjail nor with the wall.
 func (e *Engine) contained(p settings.Policy) (bool, string) {
 	if p.Network.Contain != settings.ContainOn {
 		return false, ""
 	}
 	if !netjail.Supported {
-		return false, "[network] contain is \"on\" in the permissions, and network control is Linux-only, so the turn did not start. " +
-			"Run the agent on a Linux runner, or set contain to \"off\"."
+		return false, "[network] contain is \"on\" in the permissions, and this machine can close an agent off on neither Linux's network namespace nor a sandbox, so the turn did not start. " +
+			"Run the agent on a Linux or macOS runner, or set contain to \"off\"."
 	}
 	if err := netjail.Check(); err != nil {
 		return false, err.Error() + ", so the turn did not start. Fix it on this runner, or set [network] contain = \"off\" in the permissions to run agents open."

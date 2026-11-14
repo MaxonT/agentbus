@@ -221,7 +221,7 @@ func TestProbes(t *testing.T) {
 	hostTmp := filepath.Join("/tmp", "agentbus-sbx-probe-"+strconv.Itoa(os.Getpid()))
 	defer os.Remove(hostTmp)
 
-	if err := CopyGrants(tr.homeA, tr.homeA+".grants", tr.user, []string{"~/.aws/config"}); err != nil {
+	if err := CopyGrants(tr.homeA, tr.homeA+".grants", tr.user, []string{"~/.aws/config"}, signIns); err != nil {
 		t.Fatal(err)
 	}
 	self, err := os.Executable()

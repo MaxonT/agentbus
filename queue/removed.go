@@ -33,7 +33,7 @@ func RunnerRemovedWhy(machine string) string {
 
 // folderKind says a job of kind is a folder job (folderKinds).
 func folderKind(kind string) bool {
-	return kind == KindApply || kind == KindPreview || kind == KindFolder
+	return kind == KindApply || kind == KindPreview || kind == KindFolder || kind == KindHome
 }
 
 // endRemovedTx ends every queued job, but folder jobs, of a session whose

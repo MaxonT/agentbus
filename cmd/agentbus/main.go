@@ -66,6 +66,7 @@ import (
 	"github.com/staysup/agentbus/replay"
 	engine "github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/runner"
+	"github.com/staysup/agentbus/sandbox"
 	"github.com/staysup/agentbus/settings"
 	"github.com/staysup/agentbus/store"
 )
@@ -1547,7 +1548,10 @@ func checkListen(addr string) (loopback bool, err error) {
 // networkNote is what a runner says at start about its agents' network.
 func networkNote() string {
 	if !netjail.Supported {
-		return "network control is Linux-only: on this runner, agents reach any host, and a turn under [network] contain = \"on\" is refused"
+		if sandbox.Supported {
+			return "network control is by the session's sandbox here: a turn under [network] contain = \"on\" runs in it, sandbox on or off"
+		}
+		return "this runner has no network control: agents reach any host, and a turn under [network] contain = \"on\" is refused"
 	}
 	if err := netjail.Check(); err != nil {
 		return err.Error() + "; a turn under [network] contain = \"on\" is refused until that is fixed here"

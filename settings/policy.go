@@ -93,7 +93,9 @@ subagents = false
 # home_files: files or folders under your home, such as "~/.aws/config",
 # copied into each session's own home at the start of each turn, at the same
 # place. Every session has a home of its own, so it sees nothing else of
-# yours there. A file the session already has is never replaced.
+# yours there. A folder's files go at any depth. A file the session has is
+# replaced when the original is newer. ~/.claude.json gives its MCP servers
+# only. Vendor sign-in files never go.
 home_files = []      # e.g. ["~/.aws/config"]
 
 # Work agents ask other agents for. A request tree is the person's session and
@@ -118,14 +120,15 @@ tools = true         # true: give each claude and codex turn the agentbus MCP to
                      # call this API as its token may, and hide claude's own Task, Agent,
                      # ListAgents and SendMessage. false: agents call it with agentbus-api
 
-# What a turn's agent may reach on the network. Linux only: macOS has no
-# network control, and its agents reach any host.
+# What a turn's agent may reach on the network. Linux closes an agent off in
+# a network namespace; macOS has none, so there the runner builds the
+# session's sandbox for it, sandbox on or off.
 # contain: whether each agent runs closed off from the network.
 #   "off"   the default: agents reach any host.
 #   "on"    an agent reaches only its runner's gateway, the server's API,
 #           and the hosts in allow, through a proxy. Anything else is
-#           refused and recorded (network.refused). If the runner cannot
-#           close the network off, such as on macOS, the turn is refused.
+#           refused and recorded (network.refused). A runner that can
+#           close the network off neither way refuses the turn.
 # allow: host names an agent may reach, on any port, such as "github.com".
 # "*.example.com" also allows every name under example.com.
 [network]
@@ -143,7 +146,8 @@ allow = []           # e.g. ["github.com", "registry.npmjs.org"]
 # Linux bubblewrap inside the network namespace. A runner that cannot build
 # the wall refuses the turn, and a runner with no home per session (agentbus
 # up) cannot build it. The home_files are in the session's home, so it reads
-# them inside the wall too.
+# them inside the wall too. On macOS, [network] contain = "on" builds the wall
+# even with mode "off": it is the only way there to close an agent off.
 [sandbox]
 mode = "off"
 `
@@ -195,10 +199,10 @@ type Policy struct {
 	Isolation     string   `toml:"isolation" json:"isolation,omitempty" doc:"Where a new session's turns run: auto (copy on macOS; overlay on Linux where the runner can mount one, else copy), overlay, copy (a copy of its folder as it is now), git (a git worktree with the folder's uncommitted edits, in a repo) or none (the folder itself). On ext4, copy and the overlay's snapshot copy every byte: use xfs, btrfs, git or none for a big folder. Absent in a PUT: auto."`
 	ShareReadOnly []string `toml:"share_read_only" json:"share_read_only" doc:"Folders at the top of a session's folder, such as node_modules, that a copy links to one shared read-only copy of instead of copying. A turn cannot write there. Absent in a PUT: none."`
 	Subagents     *bool    `toml:"subagents" json:"subagents,omitempty" doc:"Whether a turn may start the agent's own subagents. Off by default: agents ask other agents through AgentBus, where the work is recorded. Absent in a PUT: false."`
-	HomeFiles     []string `toml:"home_files" json:"home_files" doc:"Files or folders under the home folder, each starting with ~/, copied into each session's own home at the same place at the start of each turn, such as ~/.aws/config. Sandbox on or off. A file the session already has is never replaced. Before 0.5.2 this was sandbox.read, which still reads as home_files. Absent in a PUT: none."`
+	HomeFiles     []string `toml:"home_files" json:"home_files" doc:"Files or folders under the home folder, each starting with ~/, copied into each session's own home at the same place at the start of each turn, such as ~/.aws/config. Sandbox on or off. A folder's files go at any depth, 64 MiB and 10000 files in all. A file the session has is replaced when the original is newer, and kept when it is as new or newer. ~/.claude.json gives only its mcpServers, merged into the session's own .claude.json. A vendor sign-in file (claude's .credentials.json, codex's auth.json, agy's token) is refused, and left out of a folder listed. Before 0.5.2 this was sandbox.read, which still reads as home_files. Absent in a PUT: none."`
 	Limits        Limits   `toml:"limits" json:"limits" doc:"The limits on work agents ask for."`
 	AgentAPI      AgentAPI `toml:"agent_api" json:"agent_api" doc:"What a turn's own token may call."`
-	Network       Network  `toml:"network" json:"network" doc:"What a turn's agent may reach on the network (Linux runners, and any runner with [sandbox] on)."`
+	Network       Network  `toml:"network" json:"network" doc:"What a turn's agent may reach on the network (on Linux by its network namespace, on macOS by the session's sandbox)."`
 	Sandbox       Sandbox  `toml:"sandbox" json:"sandbox" doc:"A wall around each session's agent (a proof of concept)."`
 
 	// where and fix say, in a turn's refusal, where the policy came from and
@@ -227,14 +231,14 @@ type AgentAPI struct {
 // Network says what a turn's agent may reach ([network]). Read by the
 // runner that starts the agent (netjail).
 type Network struct {
-	Contain string   `toml:"contain" json:"contain,omitempty" doc:"Whether each agent runs closed off from the network: off (the default; agents reach any host) or on. On, it reaches only its runner's gateway, the server's API and the hosts in allow; anything else is refused and recorded as network.refused. Linux only: a runner that cannot close an agent off refuses the turn, so on a Mac on refuses every turn unless [sandbox] is on. Host names are checked, not addresses. Absent in a PUT: off."`
+	Contain string   `toml:"contain" json:"contain,omitempty" doc:"Whether each agent runs closed off from the network: off (the default; agents reach any host) or on. On, it reaches only its runner's gateway, the server's API and the hosts in allow; anything else is refused and recorded as network.refused. Linux closes an agent off in a network namespace; on macOS the runner builds the session's sandbox for it, even with [sandbox] off, so a turn there needs a home of its own (not -gateway local). A runner that can do neither refuses the turn with why. Host names are checked, not addresses. Absent in a PUT: off."`
 	Allow   []string `toml:"allow" json:"allow" doc:"Host names a closed-off agent may reach, on any port, such as github.com. *.example.com also allows every name under example.com. Absent in a PUT: none."`
 }
 
 // Sandbox says whether each session runs inside a wall ([sandbox]). Read by
 // the runner that starts the agent (package sandbox).
 type Sandbox struct {
-	Mode string `toml:"mode" json:"mode,omitempty" doc:"off (the default) or on. On, a session's agent reads and writes only the session's folder and home (home_files included), read the system folders and the agent's program, and reach the network only through the runner's proxy. A runner that cannot build it refuses the turn. macOS uses sandbox-exec and Linux bwrap. A runner with -gateway local cannot build it (a session has no home of its own there). The copy's .git stays writable. Absent in a PUT: off."`
+	Mode string `toml:"mode" json:"mode,omitempty" doc:"off (the default) or on. On, a session's agent reads and writes only the session's folder and home (home_files included), read the system folders and the agent's program, and reach the network only through the runner's proxy. A runner that cannot build it refuses the turn. On macOS, [network] contain on builds it even with mode off. macOS uses sandbox-exec and Linux bwrap. A runner with -gateway local cannot build it (a session has no home of its own there). The copy's .git stays writable. Absent in a PUT: off."`
 }
 
 // DefaultPolicy is the policy of a missing or empty file.
@@ -336,6 +340,9 @@ func (p *Policy) Check() error {
 	for _, f := range p.HomeFiles {
 		if err := grantShape(f); err != nil {
 			return fmt.Errorf("home_files entry %s %v", strconv.Quote(f), err)
+		}
+		if what := SignInFile(f); what != "" {
+			return fmt.Errorf("home_files entry %s is %s; vendor sign-ins stay with control and never go into a session's home", strconv.Quote(f), what)
 		}
 	}
 	for _, h := range p.Network.Allow {
