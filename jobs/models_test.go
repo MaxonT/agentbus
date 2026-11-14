@@ -62,8 +62,8 @@ func TestListingGetsTheSubscriptionOnItsListOnly(t *testing.T) {
 		want         int
 	}{
 		{"GET", "/relay/chatgpt/backend-api/codex/models?client_version=0.164.0", 200},
-		{"POST", "/relay/chatgpt/backend-api/codex/responses", 403},             // a model call
-		{"GET", "/relay/chatgpt/backend-api/wham/usage", 403},                   // not recorded
+		{"POST", "/relay/chatgpt/backend-api/codex/responses", 403},              // a model call
+		{"GET", "/relay/chatgpt/backend-api/wham/usage", 403},                    // not recorded
 		{"GET", "/relay/other/backend-api/codex/models?client_version=1.0", 403}, // another harness's vendor
 	} {
 		if code := do(c.method, c.path, tok); code != c.want {

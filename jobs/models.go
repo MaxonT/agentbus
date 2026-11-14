@@ -16,8 +16,8 @@ package jobs
 
 import (
 	"crypto/rand"
-	"errors"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"sync"
 
