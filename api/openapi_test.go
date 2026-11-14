@@ -243,9 +243,10 @@ func TestOneEndpointStartsEveryTurn(t *testing.T) {
 	// with POST /api/v0/signin, the cockpit's one-time sign-in link, and 52
 	// with PUT and DELETE of the anthropic, openai and gemini API keys, and
 	// 53 with GET /api/v0/sessions/{id}/changes, an apply's preview, which
-	// writes nothing.
-	if len(ops) != 53 {
-		t.Errorf("%d endpoints, want 53: %v", len(ops), ops)
+	// writes nothing, and 54 with GET /api/v0/folders/{id}/home-files, which
+	// lists a home's config files and starts no turn.
+	if len(ops) != 54 {
+		t.Errorf("%d endpoints, want 54: %v", len(ops), ops)
 	}
 	for _, want := range []string{"POST /api/v0/turns", "GET /api/v0/turns", "GET /api/v0/turns/{id}", "POST /api/v0/turns/{id}/stop",
 		"GET /api/v0/turns/{id}/diff", "POST /api/v0/turns/{id}/apply", "POST /api/v0/turns/{id}/review",

@@ -9,6 +9,7 @@ import (
 
 	"github.com/staysup/agentbus/netjail"
 	"github.com/staysup/agentbus/sandbox"
+	"github.com/staysup/agentbus/settings"
 )
 
 // canSandbox skips where this machine cannot build the wall.
@@ -118,5 +119,42 @@ func TestHomeFilesTurn(t *testing.T) {
 				t.Error("a file not listed was copied")
 			}
 		})
+	}
+}
+
+// [network] contain on with the sandbox off, on a machine with no network
+// namespace (macOS), runs the turn in the wall the runner builds for it:
+// it writes its folder, cannot write beside it, and its proxy lets through
+// the allow list only. Linux closes it off with netjail and no wall.
+func TestContainOnBuildsWall(t *testing.T) {
+	if !needsWall(settings.Policy{Network: settings.Network{Contain: settings.ContainOn}}) {
+		t.Skip("this machine closes an agent off without the wall")
+	}
+	canSandbox(t)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, outside := filepath.Join(root, "folder"), filepath.Join(root, "outside")
+	for _, d := range []string{folder, outside} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := `echo in > in.txt; echo out > ` + filepath.Join(outside, "turn.txt") + `; echo "$HTTPS_PROXY" > proxy.txt; exit 0`
+	e, _ := sandboxEngine(t, "[network]\ncontain = \"on\"\n", true, script)
+	turn, err := e.Start(Request{Harness: "claude", Folder: folder, Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	<-turn.Done()
+	if _, err := os.Stat(filepath.Join(folder, "in.txt")); err != nil {
+		t.Errorf("the turn could not write its folder")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "turn.txt")); err == nil {
+		t.Errorf("the turn wrote outside its folder: no wall")
+	}
+	if b, err := os.ReadFile(filepath.Join(folder, "proxy.txt")); err != nil || len(b) < 2 {
+		t.Errorf("the turn had no proxy: %q %v", b, err)
 	}
 }

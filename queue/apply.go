@@ -344,7 +344,13 @@ func (q *Queue) DropPreview(team, id string) error {
 // dropPreviews removes team's ended preview jobs that match where (on
 // jobs, with one argument), and their attempts and attempt events.
 func (q *Queue) dropPreviews(team, where string, arg any) error {
-	jobs := `SELECT id FROM jobs WHERE team = ? AND kind = '` + KindPreview + `' AND ended IS NOT NULL AND ` + where
+	return q.dropJobs(team, KindPreview, where, arg)
+}
+
+// dropJobs removes team's ended jobs of kind that match where (on jobs,
+// with one argument), and their attempts and attempt events.
+func (q *Queue) dropJobs(team, kind, where string, arg any) error {
+	jobs := `SELECT id FROM jobs WHERE team = ? AND kind = '` + kind + `' AND ended IS NOT NULL AND ` + where
 	return q.tx(func(tx *sql.Tx) error {
 		for _, del := range []string{
 			`DELETE FROM attempt_events WHERE attempt IN (SELECT id FROM attempts WHERE job IN (` + jobs + `))`,
@@ -352,7 +358,7 @@ func (q *Queue) dropPreviews(team, where string, arg any) error {
 			`DELETE FROM jobs WHERE id IN (` + jobs + `)`,
 		} {
 			if _, err := tx.Exec(del, team, arg); err != nil {
-				return fmt.Errorf("queue: drop previews: %w", err)
+				return fmt.Errorf("queue: drop %s jobs: %w", kind, err)
 			}
 		}
 		return nil

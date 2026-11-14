@@ -94,6 +94,11 @@ const (
 	// named, and registers it there: its result is the folder's reference
 	// (folder.go). It starts no turn.
 	KindFolder = "folder"
+	// KindHome lists which of the usual config files (settings.UsualHomeFiles)
+	// are in the home of the machine named, on its runner: names, kinds and
+	// sizes, never contents (folder.go). It starts no turn and records no
+	// event, and is removed once read.
+	KindHome = "home"
 	// A "command" job (the person's "!" in 0.4) is retired: a "!" is now a
 	// message to the session's agent. One stored before is read as it is,
 	// and a runner refuses to run it.

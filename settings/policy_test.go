@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -318,5 +319,25 @@ func TestCommandsKeyRetired(t *testing.T) {
 	}
 	if _, err := DecodePolicy([]byte(`{"command":true}`)); err == nil {
 		t.Error("JSON accepted an unknown key")
+	}
+}
+
+// A vendor sign-in file is refused in home_files, in words that say why,
+// however it is written; the usual config list holds none.
+func TestHomeFilesSignInRefused(t *testing.T) {
+	for _, f := range []string{"~/.claude/.credentials.json", "~/.codex/auth.json", "~/.codex//auth.json", "~/.codex/./auth.json",
+		"~/.gemini/antigravity-cli/antigravity-oauth-token", "~/.gemini/oauth_creds.json", "~/.claude/.claude.json"} {
+		_, err := ParsePolicy([]byte("home_files = [" + strconv.Quote(f) + "]\n"))
+		if err == nil || !strings.Contains(err.Error(), "sign-ins stay with control") {
+			t.Errorf("%s: %v, want a refusal", f, err)
+		}
+	}
+	for _, f := range UsualHomeFiles {
+		if SignInFile(f) != "" {
+			t.Errorf("the usual list holds the sign-in %s", f)
+		}
+		if _, err := ParsePolicy([]byte("home_files = [" + strconv.Quote(f) + "]\n")); err != nil {
+			t.Errorf("%s: %v", f, err)
+		}
 	}
 }

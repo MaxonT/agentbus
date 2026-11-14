@@ -47,6 +47,9 @@ type Result struct {
 	// FolderRef, for a folder job: the reference the connector registered
 	// the typed folder under.
 	FolderRef string `json:"folder_ref,omitempty"`
+	// Home, for a home job: the usual config files its machine's home
+	// holds. Names, kinds and sizes only.
+	Home []HomeFile `json:"home,omitempty"`
 
 	// Pointers to the outcomes control keeps in its record, from 0.5 (the
 	// record holds every outcome once; the job only names it): the turn's
@@ -205,4 +208,15 @@ func keepFiles(fs []PreviewFile, keep func(int, PreviewFile) bool) []PreviewFile
 		}
 	}
 	return out
+}
+
+// HomeFile is one config path a home job found (KindHome): its name, what
+// it is and its size, never its content.
+type HomeFile struct {
+	Path  string `json:"path" doc:"As home_files takes it, such as ~/.aws/config; a folder's ends in /."`
+	Kind  string `json:"kind" doc:"file or folder."`
+	Size  int64  `json:"size" doc:"Bytes: a file's size, or a folder's files' in all, the vendor sign-in files left out."`
+	Files int    `json:"files,omitempty" doc:"For a folder: how many files it holds, at any depth."`
+	Part  string `json:"part,omitempty" doc:"Set when only a part of the file is copied: mcpServers for ~/.claude.json."`
+	Over  bool   `json:"over,omitempty" doc:"A folder with more files or bytes than home_files copies (10000 files, 64 MiB): listing it would refuse each turn."`
 }

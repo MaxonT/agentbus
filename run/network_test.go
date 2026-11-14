@@ -11,6 +11,7 @@ import (
 	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/harness"
 	"github.com/staysup/agentbus/netjail"
+	"github.com/staysup/agentbus/sandbox"
 	"github.com/staysup/agentbus/settings"
 	"github.com/staysup/agentbus/store"
 )
@@ -63,6 +64,8 @@ func TestContainOnRefusedWhereItCannot(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn, err := e.Start(Request{Harness: "claude", Folder: t.TempDir(), Prompt: "hi"})
+	// This engine has no homes, so on macOS the wall contain needs cannot
+	// be built either (TestContainOnBuildsWall has homes).
 	cannot := !netjail.Supported || netjail.Check() != nil
 	if !cannot {
 		if err != nil {
@@ -75,11 +78,29 @@ func TestContainOnRefusedWhereItCannot(t *testing.T) {
 	if !errors.As(err, &r) || r.Status != 400 || !strings.Contains(r.Msg, "so the turn did not start") {
 		t.Fatalf("Start: %v, want a 400 refusal", err)
 	}
-	if !netjail.Supported && !strings.Contains(r.Msg, "Linux-only") {
+	if needsWall(settings.Policy{Network: settings.Network{Contain: settings.ContainOn}}) {
+		if !strings.Contains(r.Msg, "Network contain is on in Settings, which on this machine needs the session's sandbox") ||
+			!strings.Contains(r.Msg, "turn Network contain off") || strings.Contains(r.Msg, "Run each session in a sandbox") {
+			t.Errorf("refusal: %s", r.Msg)
+		}
+	} else if !netjail.Supported && !strings.Contains(r.Msg, "neither") {
 		t.Errorf("refusal: %s", r.Msg)
 	}
 	if snap, _ := st.Snapshot(); len(snap.Sessions) != 0 {
 		t.Errorf("%d sessions stored, want none", len(snap.Sessions))
+	}
+}
+
+// The wall is built for contain on only where netjail is not and the
+// sandbox is (macOS); the sandbox's own switch, and contain off, never ask
+// for it.
+func TestNeedsWall(t *testing.T) {
+	on := settings.Policy{Network: settings.Network{Contain: settings.ContainOn}}
+	if got, want := needsWall(on), !netjail.Supported && sandbox.Supported; got != want {
+		t.Errorf("contain on: %t, want %t", got, want)
+	}
+	if needsWall(settings.Policy{Network: settings.Network{Contain: settings.ContainOff}, Sandbox: settings.Sandbox{Mode: settings.SandboxOn}}) {
+		t.Error("contain off asks for the wall")
 	}
 }
 

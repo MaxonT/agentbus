@@ -111,3 +111,97 @@ func TestFolderPathNeverStored(t *testing.T) {
 		t.Fatal("an ended folder job was taken again")
 	}
 }
+
+// A home job goes only to the runner of the machine it names, in a folder
+// place, never a turn place. DropHome removes it once ended, and the next
+// AskHome removes any an earlier caller left.
+func TestHomeJob(t *testing.T) {
+	q, _ := open(t)
+	connB := capsRunner(t, q, nil, &Capabilities{Connector: conB})
+	connA := capsRunner(t, q, nil, &Capabilities{Connector: conA})
+	j, err := q.AskHome(DefaultTeam, conA)
+	if err != nil || j.Kind != KindHome || j.Spec.Connector != conA || j.Session != "" {
+		t.Fatalf("home job %+v %v", j, err)
+	}
+	if got := takesFolder(t, q, connB); got != "" {
+		t.Fatalf("another machine took the home job: %s", got)
+	}
+	if got := takes(t, q, connA); got != "" {
+		t.Fatalf("a turn place took the home job: %s", got)
+	}
+	if got := takesFolder(t, q, connA); got != j.ID {
+		t.Fatalf("the machine took %q, want %s", got, j.ID)
+	}
+	a := mustAttempt(t, q, j.ID)
+	if _, _, err := q.Start(connA.ID, a, 1, lease); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.End(connA.ID, a, 1, Finish{Status: Finished, Result: []byte(`{"home":[{"path":"~/.gitconfig","kind":"file","size":7}]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := q.Get(DefaultTeam, j.ID)
+	if res, _ := ReadResult(got.Result); err != nil || len(res.Home) != 1 || res.Home[0].Size != 7 {
+		t.Fatalf("after its end: %s %v", got.Result, err)
+	}
+	if err := q.DropHome(DefaultTeam, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Get(DefaultTeam, j.ID); err == nil {
+		t.Fatal("a read home job is kept")
+	}
+	// One its caller left: cancelled, then gone at the next ask.
+	left, _ := q.AskHome(DefaultTeam, conB)
+	if _, err := q.Cancel(DefaultTeam, left.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.AskHome(DefaultTeam, conB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Get(DefaultTeam, left.ID); err == nil {
+		t.Fatal("a home job left ended is kept")
+	}
+}
+
+// Two callers ask at once: the second ask never drops the first's answer,
+// ended and not yet read (review of 2026-11-14, P1). Only a job its caller
+// gave up on goes.
+func TestHomeJobConcurrentAsks(t *testing.T) {
+	q, _ := open(t)
+	connA := capsRunner(t, q, nil, &Capabilities{Connector: conA})
+	first, err := q.AskHome(DefaultTeam, conA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := takesFolder(t, q, connA); got != first.ID {
+		t.Fatalf("took %q, want %s", got, first.ID)
+	}
+	a := mustAttempt(t, q, first.ID)
+	if _, _, err := q.Start(connA.ID, a, 1, lease); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.End(connA.ID, a, 1, Finish{Status: Finished, Result: []byte(`{"home":[{"path":"~/.gitconfig","kind":"file","size":7}]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	// The second caller asks before the first reads.
+	second, err := q.AskHome(DefaultTeam, conA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := q.Get(DefaultTeam, first.ID)
+	if res, _ := ReadResult(got.Result); err != nil || len(res.Home) != 1 {
+		t.Fatalf("the first caller's answer: %s %v", got.Result, err)
+	}
+	if err := q.DropHome(DefaultTeam, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The second caller gives up; the next ask drops its job.
+	if _, err := q.Cancel(DefaultTeam, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.AskHome(DefaultTeam, conA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Get(DefaultTeam, second.ID); err == nil {
+		t.Fatal("a home job its caller gave up on is kept")
+	}
+}

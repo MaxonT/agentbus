@@ -55,11 +55,31 @@ func (q *Queue) ForgetFolder(team, id string) error {
 	return err
 }
 
-// endFoldersTx ends every folder job still queued FolderWait after it was
-// made: no API waits for it any more.
+// AskHome makes a home job (KindHome): the runner of the machine lists
+// which of the usual config files its home holds. The API waits for it up
+// to FolderWait, reads it, and drops it (DropHome).
+func (q *Queue) AskHome(team, machine string) (Job, error) {
+	// What an earlier ask left: a job its caller gave up on (cancelled)
+	// that ended since. A job another caller is about to read was never
+	// cancelled, and stays until that caller drops it.
+	if err := q.dropJobs(team, KindHome, `cancel = ?`, 1); err != nil {
+		return Job{}, err
+	}
+	job, _, err := q.create(team, KindHome, "", Spec{Connector: machine}, Links{}, Limits{}, "")
+	return job, err
+}
+
+// DropHome removes the home job id once ended, with its attempts: what it
+// listed is read once, and kept nowhere.
+func (q *Queue) DropHome(team, id string) error {
+	return q.dropJobs(team, KindHome, `id = ?`, id)
+}
+
+// endFoldersTx ends every folder or home job still queued FolderWait after
+// it was made: no API waits for it any more.
 func endFoldersTx(tx *sql.Tx, now time.Time) error {
-	if _, err := tx.Exec(`UPDATE jobs SET state = ?, cancel = 1, updated = ?, ended = ? WHERE kind = ? AND state = ? AND created <= ?`,
-		Cancelled, nanos(now), nanos(now), KindFolder, Queued, nanos(now.Add(-FolderWait))); err != nil {
+	if _, err := tx.Exec(`UPDATE jobs SET state = ?, cancel = 1, updated = ?, ended = ? WHERE kind IN (?, ?) AND state = ? AND created <= ?`,
+		Cancelled, nanos(now), nanos(now), KindFolder, KindHome, Queued, nanos(now.Add(-FolderWait))); err != nil {
 		return fmt.Errorf("queue: write job: %w", err)
 	}
 	return nil
