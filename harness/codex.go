@@ -199,8 +199,53 @@ func (codex) WireAPI(w APIWire) (env, args []string) {
 }
 
 // Refuse: every setting of permissions.toml has a flag on codex, or the
-// gateway's guard.
-func (codex) Refuse(Turn) string { return "" }
+// gateway's guard. A read-only turn with one of the person's own MCP servers
+// whose name cannot go in a -c key is refused: it could not be turned off.
+func (codex) Refuse(t Turn) string {
+	if t.Writes.ReadOnly {
+		for _, n := range t.OwnServers {
+			if !serverNameShape.MatchString(n) {
+				return "an MCP server in codex's config.toml has a name AgentBus cannot turn off for a read-only turn (" +
+					"letters, digits, - and _ only), so the turn did not start. Rename it, or leave ~/.codex/config.toml out of Home files."
+			}
+		}
+	}
+	return ""
+}
+
+// OwnServers are the names of the mcp_servers of codex's own config.toml in
+// the home the turn runs in: $CODEX_HOME/config.toml, which a session's home
+// sets (Home files copies ~/.codex/config.toml there), else
+// $HOME/.codex/config.toml. Names only: a server's settings are never kept.
+// A project's .codex/config.toml is not read here. A missing file, or one
+// that does not parse, names none: codex then cannot start on it either.
+func (codex) OwnServers(env []string) []string {
+	dir := envValue(env, "CODEX_HOME")
+	if dir == "" {
+		if h := envValue(env, "HOME"); h != "" {
+			dir = filepath.Join(h, ".codex")
+		}
+	}
+	if dir == "" || !filepath.IsAbs(dir) {
+		return nil
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		return nil
+	}
+	var v struct {
+		MCPServers map[string]toml.Primitive `toml:"mcp_servers"`
+	}
+	if _, err := toml.Decode(string(b), &v); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(v.MCPServers))
+	for n := range v.MCPServers {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names
+}
 
 // codexRelayEnv holds a relayed turn's placeholder.
 const codexRelayEnv = "AGENTBUS_CODEX_TOKEN"
@@ -298,6 +343,20 @@ func (codex) Args(t Turn) []string {
 	// 0.167.0, 2026-11-14, research/2026-11-14-use-my-own-tools-design.md).
 	// Both are stable features, on by default (`codex features list`).
 	a = append(a, "--disable", "apps", "--disable", "plugins")
+	// A read-only turn (a review) turns each of the person's own MCP
+	// servers off for this run: codex's read-only sandbox limits local
+	// writes, not what a server does elsewhere. -c merges enabled = false
+	// into their entry, and codex then leaves the server off (codex-cli
+	// 0.164.0, 2026-11-11, codex mcp list with a scratch CODEX_HOME). An
+	// edit turn loads them as codex does. Before resume, so the resumed
+	// turn gets it too.
+	if t.Writes.ReadOnly {
+		for _, n := range t.OwnServers {
+			if serverNameShape.MatchString(n) {
+				a = append(a, "-c", "mcp_servers."+n+".enabled=false")
+			}
+		}
+	}
 	if t.NoSubagents {
 		a = append(a, "--disable", "multi_agent", "--disable", "multi_agent_v2")
 	}

@@ -309,6 +309,13 @@ type Turn struct {
 	// AGENTBUS_TOKEN, read by the harness itself, so no token is in an
 	// argument or a file. Wired by run flags only, never a settings file.
 	Tools string
+	// OwnServers are the names of the person's own MCP servers in the home
+	// the turn runs in (OwnServers): what Home files copied into a session's
+	// home, or this user's own on a runner that gives sessions no home. An
+	// edit turn loads them and may call them; a read-only turn (a review)
+	// never does. Names only: never a server's settings, which may hold a
+	// token.
+	OwnServers []string
 	// Walled says the runner's sandbox walls the turn in (package sandbox):
 	// the harness's own sandbox stays off, since macOS cannot build one
 	// Seatbelt sandbox inside another ("sandbox_apply: Operation not
@@ -392,6 +399,36 @@ func Unkept(h Harness, t Turn) []string {
 		return u.Unkept(t)
 	}
 	return nil
+}
+
+// ServerLister is a harness that reads the person's own MCP servers from the
+// home its child runs in, env being the child's environment.
+type ServerLister interface {
+	OwnServers(env []string) []string
+}
+
+// OwnServers is the names of the MCP servers h finds in the home of env
+// (ServerLister), sorted, or none.
+func OwnServers(h Harness, env []string) []string {
+	if l, ok := h.(ServerLister); ok {
+		return l.OwnServers(env)
+	}
+	return nil
+}
+
+// serverNameShape is a server name that goes into a rule or a dotted config
+// key as it is: no character there could end it or widen it.
+var serverNameShape = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// envValue is the value of key in env, or "".
+func envValue(env []string, key string) string {
+	v := ""
+	for _, kv := range env {
+		if k, val, ok := strings.Cut(kv, "="); ok && k == key {
+			v = val
+		}
+	}
+	return v
 }
 
 // registry is every harness turns can start, in the order they are listed.

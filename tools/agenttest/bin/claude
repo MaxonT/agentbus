@@ -7,8 +7,8 @@
 # can add connectors (such as Claude Docs) that no settings file names.
 # --setting-sources does not keep those connectors out; --strict-mcp-config
 # does (Claude Code 2.1.321, 2026-11-11, read from the init message's
-# mcp_servers). AgentBus passes it only on a turn with its tool server or a
-# read-only turn, so without this a tools-off turn had the connectors. The
+# mcp_servers). AgentBus passes it only on a read-only turn, so without this
+# an edit turn would have the connectors. The
 # sign-in is untouched. Every other call (the version, the sign-in status)
 # passes through.
 # AT_REAL_CLAUDE is the real program, set by agenttest.py up.

@@ -252,11 +252,11 @@ func TestRunWithSessionRunsNextTurnInSameSession(t *testing.T) {
 		want                  string // BASE is the session's base URL, ID the first resume id
 	}{
 		{"claude", claudeResultA, idA, nil, "haiku",
-			"-p --output-format json --append-system-prompt HINT --resume ID --allowedTools EDIT --strict-mcp-config --no-chrome --disallowedTools PROTECT --model haiku -- --next"},
+			"-p --output-format json --append-system-prompt HINT --resume ID --allowedTools EDIT --no-chrome --disallowedTools PROTECT --model haiku -- --next"},
 		{"claude", claudeResultA, idA, true, "haiku",
 			"-p --output-format json --append-system-prompt HINT --resume ID --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config --no-chrome --model haiku -- --next"},
 		{"claude", claudeResultA, idA, false, "",
-			"-p --output-format json --append-system-prompt HINT --resume ID --allowedTools EDIT --strict-mcp-config --no-chrome --disallowedTools PROTECT -- --next"},
+			"-p --output-format json --append-system-prompt HINT --resume ID --allowedTools EDIT --no-chrome --disallowedTools PROTECT -- --next"},
 		{"codex", codexEventsA, codexIDA, nil, "",
 			codexRelayArgs + ` exec --skip-git-repo-check --sandbox workspace-write -c developer_instructions=HINT -c sandbox_workspace_write.network_access=true --disable apps --disable plugins resume --json -- ID --next`},
 		{"codex", codexEventsA, codexIDA, true, "",
