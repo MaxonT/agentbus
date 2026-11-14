@@ -34,6 +34,11 @@ func TestMain(m *testing.M) {
 	if a := os.Args[1:]; os.Getenv("AGENTBUS_FAKE_APP_SERVER") == "1" && len(a) > 0 && a[len(a)-1] == "app-server" {
 		fakeAppServer()
 	}
+	// With AGENTBUS_FAKE_AGY_MODELS set, asked models it is agy's listing
+	// (models_integration_test.go).
+	if a := os.Args[1:]; os.Getenv("AGENTBUS_FAKE_AGY_MODELS") != "" && len(a) > 0 && a[len(a)-1] == "models" {
+		fakeAgyModels()
+	}
 	if os.Getenv("AGENTBUS_FAKE_AGENT") == "1" {
 		fakeAgent()
 	}

@@ -95,6 +95,25 @@ func (agy) WireAPI(w APIWire) (env, args []string) {
 	return []string{"GOOGLE_GEMINI_BASE_URL=" + w.Base, "GEMINI_API_KEY=" + w.Placeholder}, nil
 }
 
+// WireKeyModels: agy on a Gemini API key takes as --model only the models
+// it knows, not the Gemini API's catalogue: "gemini-2.5-flash-preview-tts",
+// from that catalogue, was refused with "invalid model selection ... is not
+// recognized as a known model or custom model in settings" and its own list,
+// before any call (agy 1.5.9, 2026-11-14, his own run). agy models, with
+// the gemini provider in --settings (before the subcommand: "models
+// --settings" is refused) and any GEMINI_API_KEY, prints that list as
+// "slug<TAB>label" lines, such as gemini-3.8-flash-low<TAB>Gemini 3.8 Flash
+// (Low), with no sign-in and no call: a local listener as
+// GOOGLE_GEMINI_BASE_URL got nothing, and a turn so set took both the slug
+// and the label as --model (agy 1.5.9, 2026-11-14, a scratch HOME and a
+// placeholder key). With no GEMINI_API_KEY it lists nothing. The base URL
+// is a loopback port nothing listens on, so a later agy that did ask the
+// API could send the placeholder nowhere.
+func (agy) WireKeyModels(placeholder string) (env, args []string) {
+	return []string{"GEMINI_API_KEY=" + placeholder, "GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:9", "DBUS_SESSION_BUS_ADDRESS=disabled:"},
+		[]string{"--settings", `{"modelProvider":"gemini"}`, "models"}
+}
+
 // WireOpenRouter is never used: agy offers no OpenRouter access (Info).
 func (agy) WireOpenRouter(OpenRouterWire) (env, args []string) { return nil, nil }
 

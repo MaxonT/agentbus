@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/staysup/agentbus/event"
 )
 
 // Bounds of an error tail.
@@ -38,16 +40,47 @@ var (
 
 // errorTail is the last lines of b, a child's stderr, as session.closed
 // holds them: at most ErrorTailLines lines and ErrorTailMax bytes, the end
-// kept, as UTF-8 with no control characters but newlines and tabs, with each
-// of hide and anything shaped like a secret replaced. Empty when b holds no
-// text. cut says b lost its start (the buffer kept only its last bytes):
-// then its first line is dropped, as it may start inside a secret that
-// neither hide nor the shapes would know.
+// kept, as errorLines cleans them. Empty when b holds no text.
 func errorTail(b []byte, cut bool, hide ...string) string {
+	lines := errorLines(b, cut, hide...)
+	if len(lines) > ErrorTailLines {
+		lines = lines[len(lines)-ErrorTailLines:]
+	}
+	out := strings.Join(lines, "\n")
+	if len(out) > ErrorTailMax {
+		out = out[len(out)-ErrorTailMax:]
+		// Start at a whole line, or at least a whole character.
+		if i := strings.IndexByte(out, '\n'); i >= 0 && i < len(out)-1 {
+			out = out[i+1:]
+		}
+		out = strings.ToValidUTF8(out, "")
+	}
+	return out
+}
+
+// errorReason is why a child that exited with code failed, for its
+// session.closed's error: the line of all of b, its stderr as kept, that
+// says so (event.ErrorLine), cleaned as errorLines cleans it, else its exit
+// code. Read from all that is kept, not from the tail: a harness can print
+// its error and then a list longer than the tail (agy 1.5.9 prints
+// "error: invalid model selection ..." and then 22 lines of its models).
+func errorReason(b []byte, cut bool, code int, hide ...string) string {
+	if l := event.ErrorLine(strings.Join(errorLines(b, cut, hide...), "\n")); l != "" {
+		return l
+	}
+	return event.ExitError(code)
+}
+
+// errorLines are the non-empty lines of b, a child's stderr, as UTF-8 with
+// no control characters but tabs, with each of hide and anything shaped
+// like a secret replaced. cut says b lost its start (the buffer kept only
+// its last bytes): then its first line is dropped, as it may start inside a
+// secret that neither hide nor the shapes would know.
+func errorLines(b []byte, cut bool, hide ...string) []string {
 	if cut {
 		i := bytes.IndexByte(b, '\n')
 		if i < 0 {
-			return "" // one cut line: all of it may be part of a secret
+			return nil // one cut line: all of it may be part of a secret
 		}
 		b = b[i+1:]
 	}
@@ -72,9 +105,6 @@ func errorTail(b []byte, cut bool, hide ...string) string {
 			lines = append(lines, l)
 		}
 	}
-	if len(lines) > ErrorTailLines {
-		lines = lines[len(lines)-ErrorTailLines:]
-	}
 	for i, l := range lines {
 		l = secretScheme.ReplaceAllString(l, "$1 "+hidden)
 		l = secretNamed.ReplaceAllString(l, "${1}"+hidden)
@@ -85,16 +115,7 @@ func errorTail(b []byte, cut bool, hide ...string) string {
 			return hidden
 		})
 	}
-	out := strings.Join(lines, "\n")
-	if len(out) > ErrorTailMax {
-		out = out[len(out)-ErrorTailMax:]
-		// Start at a whole line, or at least a whole character.
-		if i := strings.IndexByte(out, '\n'); i >= 0 && i < len(out)-1 {
-			out = out[i+1:]
-		}
-		out = strings.ToValidUTF8(out, "")
-	}
-	return out
+	return lines
 }
 
 // secretValues are the values of env's variables whose names say they hold

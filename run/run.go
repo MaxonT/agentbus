@@ -876,7 +876,7 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	// or the session would read open until the next restart.
 	closeHoldWhy := func(why string) {
 		if _, _, err := e.cfg.Store.Append(event.Event{ID: newEventID(), Kind: event.SessionClosed,
-			Time: e.cfg.Now().UTC(), Session: t.session, Turn: t.id, Hold: holdID, Error: why}); err != nil {
+			Time: e.cfg.Now().UTC(), Session: t.session, Turn: t.id, Hold: holdID, Error: why, State: store.TurnFailed}); err != nil {
 			e.cfg.Logf("run.unclosed session=%s turn=%s hold=%s reason=store", t.session, t.id, holdID)
 		}
 	}
@@ -967,14 +967,24 @@ func (e *Engine) start(t turn) (*Turn, error) {
 		}
 		e.cfg.Logf("%s.exit session=%s agent=%s turn=%s hold=%s exit=%d stopped=%t duration=%s", kind, t.session, t.harness, t.id, holdID,
 			code, stopped, ended.Sub(begun).Round(time.Millisecond))
-		var tail string
-		if code != 0 && !stopped {
+		// The turn's end, with how it ended and, when it failed, why: the
+		// record says it, not only the runner's log.
+		var tail, why string
+		state := store.TurnFailed
+		switch {
+		case stopped:
+			state = store.TurnStopped
+		case code == 0:
+			state = store.TurnFinished
+		default:
 			b, cut := errs.Bytes()
-			tail = errorTail(b, cut, append(secretValues(cmd.Env), tok, childTok)...)
+			hide := append(secretValues(cmd.Env), tok, childTok)
+			tail = errorTail(b, cut, hide...)
+			why = errorReason(b, cut, code, hide...)
 		}
 		if _, _, err := e.cfg.Store.Append(event.Event{ID: newEventID(), Kind: event.SessionClosed,
 			Time: ended.UTC(), Session: t.session, Turn: t.id, Hold: holdID, ExitCode: &code, ResumeID: ids.ID(),
-			Unsettled: unsettled, Stopped: stopped, ErrorTail: tail}); err != nil {
+			Unsettled: unsettled, Stopped: stopped, ErrorTail: tail, State: state, Error: why}); err != nil {
 			// The session reads open until the next start.
 			e.cfg.Logf("run.unclosed session=%s turn=%s hold=%s reason=store", t.session, t.id, holdID)
 		}

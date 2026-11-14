@@ -15,6 +15,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,18 +190,23 @@ func TestCodexModelsFromAppServer(t *testing.T) {
 	if left, _ := os.ReadDir(filepath.Join(home, modelHomesDir)); len(left) != 0 {
 		t.Fatalf("homes left: %v", left)
 	}
-	// The call is in control's record, by its status, under the listings'
-	// session.
+	// The call is in control's record, by its status, in no session: a
+	// listing is control's own, as a subscription connected is.
 	waitFor(t, "the listing's call in the record", func() bool {
-		recs, _ := svc.store.After(0, store.Filter{Session: "models", Only: true}, 1000)
+		recs, _ := svc.store.After(0, store.Filter{Session: "", Only: true}, 1000)
 		for _, r := range recs {
-			var e struct{ Call string }
+			var e struct{ Call, Session, Turn string }
 			if r.Kind == "vendor.called" && json.Unmarshal(r.Data, &e) == nil && e.Call == "GET /backend-api/codex/models" {
-				return true
+				return e.Session == "" && e.Turn == ""
 			}
 		}
 		return false
 	})
+	// And so it is no session of the person's: GET /api/v0/sessions lists
+	// none (0.5.7 listed one named "models").
+	if code, raw := getAPI(t, svc, tok, "/api/v0/sessions"); code != http.StatusOK || !strings.Contains(raw, `"sessions":[]`) {
+		t.Fatalf("sessions: %d %s", code, raw)
+	}
 	// Within the hour the list kept is used: codex is not run again.
 	os.Remove(out)
 	if raw := list(false); !strings.Contains(raw, "gpt-6-luna") {
@@ -220,5 +227,88 @@ func TestCodexModelsFromAppServer(t *testing.T) {
 	installed.Store(false)
 	if raw := list(true); !strings.Contains(raw, `"error":"Codex is not installed where control runs`) {
 		t.Fatalf("not installed: %s", raw)
+	}
+}
+
+// fakeAgyModels is agy models as agy 1.5.9 printed it on 2026-11-14 with the
+// gemini provider and a placeholder key: "Fetching available models..." to
+// stderr and one "slug<TAB>label" a line to stdout, and nothing on stdout
+// without GEMINI_API_KEY. What it saw goes to AGENTBUS_FAKE_AGY_MODELS as
+// JSON.
+func fakeAgyModels() {
+	entries, _ := os.ReadDir(os.Getenv("HOME"))
+	b, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "args": os.Args[1:], "home": os.Getenv("HOME"), "home_empty": len(entries) == 0,
+		"key": os.Getenv("GEMINI_API_KEY"), "base": os.Getenv("GOOGLE_GEMINI_BASE_URL")})
+	os.WriteFile(os.Getenv("AGENTBUS_FAKE_AGY_MODELS"), b, 0o600)
+	os.Stderr.WriteString("Fetching available models...\n")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		os.Stderr.WriteString("no key\n")
+		os.Exit(1)
+	}
+	os.Stdout.WriteString("gemini-4-argon-medium\tGemini 4 Argon (Medium)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n")
+	os.Exit(0)
+}
+
+// agy on a Gemini API key lists the models agy takes as --model, from agy's
+// own listing, not the Gemini API's catalogue (0.5.7 offered
+// gemini-2.5-flash-preview-tts, which agy refused): control runs agy models
+// unmodified in a clean home of its own with a placeholder key, never the
+// person's, and keeps only the model lines.
+func TestAgyAPIKeyModelsFromItsOwnListing(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "agy.json")
+	t.Setenv("AGENTBUS_FAKE_AGY_MODELS", out)
+	// The person's own key in control's environment never reaches agy.
+	t.Setenv("GEMINI_API_KEY", "AIzaPersonsOwnKeyNeverPassed000000000")
+	gemini := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the Gemini API was asked %s", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(gemini.Close)
+	home := t.TempDir()
+	svc, err := start(config{mode: modeServer, listen: "127.0.0.1:0", home: home, upstream: mustURL("http://127.0.0.1:1"),
+		openrouter: mustURL("http://127.0.0.1:1"), getenv: os.Getenv, lookPath: func(string) (string, error) { return self, nil },
+		logf: t.Logf, heartbeat: 100 * time.Millisecond, apiKeys: map[string]*url.URL{"agy": mustURL(gemini.URL)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(svc.stop)
+	tok := readToken(t, home)
+	path := "/api/v0/harnesses/agy/models?access=api"
+	// No key set in Settings: no run, and why.
+	if code, raw := getAPI(t, svc, tok, path); code != http.StatusOK || !strings.Contains(raw, "set your Gemini API key in Settings") {
+		t.Fatalf("no key: %d %s", code, raw)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Fatal("agy ran with no key set")
+	}
+	if code, _ := sendAPI(t, svc, tok, "PUT", "/api/v0/subscriptions/gemini/key", map[string]any{"key": "AIzaFakeSettingsKey000011112222333344"}); code != http.StatusNoContent {
+		t.Fatalf("set the key: %d", code)
+	}
+	code, raw := getAPI(t, svc, tok, path)
+	if code != http.StatusOK || !strings.Contains(raw, `"models":[{"id":"gemini-4-argon-medium","label":"Gemini 4 Argon (Medium)"},{"id":"gemini-3.8-flash-low","label":"Gemini 3.8 Flash (Low)"}]`) ||
+		!strings.Contains(raw, `"source":"command"`) || strings.Contains(raw, "Fetching") {
+		t.Fatalf("listed: %d %s", code, raw)
+	}
+	var seen struct {
+		PID       int      `json:"pid"`
+		Args      []string `json:"args"`
+		Home      string   `json:"home"`
+		HomeEmpty bool     `json:"home_empty"`
+		Key       string   `json:"key"`
+		Base      string   `json:"base"`
+	}
+	b, _ := os.ReadFile(out)
+	json.Unmarshal(b, &seen)
+	if !strings.HasPrefix(seen.Home, filepath.Join(home, modelHomesDir)+string(filepath.Separator)) || !seen.HomeEmpty ||
+		seen.Key != keyListingPlaceholder || !strings.HasPrefix(seen.Base, "http://127.0.0.1:") ||
+		strings.Join(seen.Args, " ") != `--settings {"modelProvider":"gemini"} models` {
+		t.Fatalf("agy saw %s", b)
+	}
+	if left, _ := os.ReadDir(filepath.Join(home, modelHomesDir)); len(left) != 0 {
+		t.Fatalf("homes left: %v", left)
 	}
 }

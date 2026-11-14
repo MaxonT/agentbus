@@ -227,6 +227,16 @@ func TestAPIKeyModelLists(t *testing.T) {
 	e.api.cfg.Models.Client = vendor.Client()
 	e.api.cfg.Models.APIBase = map[string]string{"anthropic": vendor.URL + "/anthropic", "openai": vendor.URL + "/openai", "gemini": vendor.URL + "/gemini"}
 	e.api.cfg.Models.APIKey = func(name string) string { k, _ := subs.Key(name); return k }
+	// agy takes only the models it knows on a key (harness.KeyModelLister):
+	// its own listing, never the Gemini API's catalogue.
+	var agyRuns atomic.Int32
+	e.api.cfg.Models.KeyListed = func(_ context.Context, h string) ([]byte, error) {
+		agyRuns.Add(1)
+		if h != "agy" {
+			return nil, errors.New("no")
+		}
+		return []byte("gemini-4-argon-medium\tGemini 4 Argon (Medium)\n"), nil
+	}
 
 	for _, h := range []string{"claude", "codex", "agy"} {
 		code, l, raw := listOf(t, e, "/api/v0/harnesses/"+h+"/models?access=api")
@@ -242,9 +252,14 @@ func TestAPIKeyModelLists(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for h, want := range map[string]string{"claude": "claude-opus-5-5=Claude Opus 5.5", "codex": "gpt-5.5,gpt-6.1", "agy": "gemini-4-argon=Gemini 4 Argon"} {
+	before := calls.Load()
+	for h, want := range map[string]string{"claude": "claude-opus-5-5=Claude Opus 5.5", "codex": "gpt-5.5,gpt-6.1", "agy": "gemini-4-argon-medium=Gemini 4 Argon (Medium)"} {
 		code, l, raw := listOf(t, e, "/api/v0/harnesses/"+h+"/models?access=api")
-		if code != 200 || l.Source != models.FromAPI || l.FetchedAt == nil || idsOf(l) != want {
+		source := models.FromAPI
+		if h == "agy" {
+			source = models.FromCommand
+		}
+		if code != 200 || l.Source != source || l.FetchedAt == nil || idsOf(l) != want {
 			t.Fatalf("%s: %d %s", h, code, raw)
 		}
 		for _, k := range []string{fakeAnthModelsKey, fakeOAIModelsKey, fakeGeminiModelsKey} {
@@ -252,6 +267,9 @@ func TestAPIKeyModelLists(t *testing.T) {
 				t.Fatalf("%s: a reply holds a key", h)
 			}
 		}
+	}
+	if n := calls.Load() - before; n != 2 || agyRuns.Load() != 1 {
+		t.Fatalf("%d vendor calls and %d agy listings, want 2 and 1: agy's list is never the Gemini API's", n, agyRuns.Load())
 	}
 	// Replaced through Settings: the list fetched with the old key goes.
 	if resp, raw := do(t, e.req(t, "PUT", "/api/v0/subscriptions/anthropic/key", strings.NewReader(`{"key":"sk-ant-api03-fake-other-key-99998888777766665555"}`))); resp.StatusCode != 204 {

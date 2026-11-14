@@ -105,7 +105,8 @@ func TestRunKeepsChildOutputInItsOwnLogAndItsExitInServiceLog(t *testing.T) {
 		}
 	}
 	// The output stays out of the events too, but for the last stderr
-	// lines of an agent that failed, on its session.closed (error_tail).
+	// lines of an agent that failed and its error line, on its
+	// session.closed (error_tail and error).
 	recs, err := svc.store.After(0, store.Filter{}, 10000)
 	if err != nil {
 		t.Fatal(err)
@@ -119,9 +120,12 @@ func TestRunKeepsChildOutputInItsOwnLogAndItsExitInServiceLog(t *testing.T) {
 			continue
 		}
 		var e event.Event
-		if json.Unmarshal(r.Data, &e) != nil || e.Kind != event.SessionClosed || !strings.Contains(e.ErrorTail, "not signed in") ||
-			strings.Contains(strings.Replace(string(r.Data), e.ErrorTail, "", 1), "not signed in") {
-			t.Errorf("an event holds the child's stderr outside session.closed's error_tail: %s", r.Data)
+		rest := ""
+		if json.Unmarshal(r.Data, &e) == nil {
+			rest = strings.Replace(strings.Replace(string(r.Data), e.ErrorTail, "", 1), e.Error, "", 1)
+		}
+		if e.Kind != event.SessionClosed || !strings.Contains(e.ErrorTail, "not signed in") || strings.Contains(rest, "not signed in") {
+			t.Errorf("an event holds the child's stderr outside session.closed's error_tail and error: %s", r.Data)
 		}
 		tails++
 	}

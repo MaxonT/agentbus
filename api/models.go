@@ -46,6 +46,11 @@ type ModelSources struct {
 	// the subscription kept on control, and returns what it listed
 	// (harness.ModelServer, models.AppServer). Errors are fixed wording.
 	Served func(ctx context.Context, harness string) ([]models.Model, error)
+	// KeyListed runs the unmodified harness in a clean home of its own so it
+	// prints the models it takes on an API key, with a placeholder key and
+	// no call (harness.KeyModelLister), and returns what it printed, for
+	// models.Lines. Errors are fixed wording.
+	KeyListed func(ctx context.Context, harness string) ([]byte, error)
 }
 
 var modelsRoute = route{method: "GET", path: "/api/v0/harnesses/{id}/models", op: "listModels",
@@ -56,6 +61,8 @@ var modelsRoute = route{method: "GET", path: "/api/v0/harnesses/{id}/models", op
 		"access openrouter: OpenRouter's list-models call, made by control with the OpenRouter key. " +
 		"access subscription: claude's aliases opus, sonnet and haiku (always the newest of each); agy's own agy models, run unmodified where its sign-in is, on control; " +
 		"codex's own model/list, from unmodified codex app-server run on control in a clean home of its own, its one call for the list sent through control's relay, which adds the ChatGPT sign-in kept on control and records the call. " +
+		"access api: the vendor's list-models call, made by control with the key set in Settings; for agy, whose --model takes only the models agy knows, not the Gemini API's whole list, " +
+		"agy's own agy models instead, run unmodified on control in a clean home of its own with the Gemini provider and a placeholder key, which makes no call. " +
 		"No subscription's own endpoint is called by AgentBus. A list is kept with the time it was fetched and fetched again at most once an hour, or now with refresh=true. " +
 		"An agent may still name a model the list lacks, and one that names none uses the tool's own default.",
 	query: []param{{name: "access", doc: "subscription, openrouter or api. Required."},
@@ -109,7 +116,7 @@ func (a *API) modelList(ctx context.Context, h harness.Harness, access string, r
 			return models.OpenRouter(ctx, client, src.OpenRouterBase, key)
 		})
 	case agents.API:
-		return a.apiKeyModels(ctx, client, info, refresh)
+		return a.apiKeyModels(ctx, client, h, refresh)
 	}
 	// A subscription: through the unmodified tool only.
 	_, served := h.(harness.ModelServer)
@@ -178,10 +185,12 @@ func (a *API) reportedModels(ctx context.Context, name string) ([]string, time.T
 	return ids, at
 }
 
-// apiKeyModels is the list of info's access "api": its vendor's
-// list-models call with the key set in Settings. With no key set there is
-// no call and no list.
-func (a *API) apiKeyModels(ctx context.Context, client *http.Client, info harness.Info, refresh bool) models.List {
+// apiKeyModels is the list of h's access "api": its vendor's list-models
+// call with the key set in Settings, or, for a harness that takes only the
+// models it knows (harness.KeyModelLister), its own listing. With no key set
+// there is no call and no list.
+func (a *API) apiKeyModels(ctx context.Context, client *http.Client, h harness.Harness, refresh bool) models.List {
+	info := h.Info()
 	k := info.APIKey
 	src := a.cfg.Models
 	none := func(why string) models.List {
@@ -193,6 +202,18 @@ func (a *API) apiKeyModels(ctx context.Context, client *http.Client, info harnes
 	key := src.APIKey(k.Name)
 	if key == "" {
 		return none("set your " + k.Label + " in Settings")
+	}
+	if _, own := h.(harness.KeyModelLister); own {
+		if src.KeyListed == nil {
+			return models.List{Models: []models.Model{}, Source: models.FromCommand, Error: "this service runs no harness to list its models"}
+		}
+		return src.Cache.Get("key-own/"+info.Name, models.FromCommand, refresh, func() ([]models.Model, error) {
+			out, err := src.KeyListed(ctx, info.Name)
+			if err != nil {
+				return nil, err
+			}
+			return models.Lines(out), nil
+		})
 	}
 	list := models.OpenAI
 	switch k.Format {

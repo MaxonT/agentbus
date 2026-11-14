@@ -569,7 +569,7 @@ func (s *Store) CloseStaleHolds(now time.Time, newID func() string) (int, error)
 	}
 	for _, h := range holds {
 		if _, _, err := s.Append(event.Event{ID: newID(), Kind: event.SessionClosed, Time: now,
-			Session: h.Session, Turn: h.Turn, Hold: h.Hold, Unsettled: true}); err != nil {
+			Session: h.Session, Turn: h.Turn, Hold: h.Hold, Unsettled: true, State: TurnFailed}); err != nil {
 			return 0, err
 		}
 	}

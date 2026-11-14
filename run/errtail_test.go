@@ -63,3 +63,26 @@ func TestErrorTailCutDropsFirstLine(t *testing.T) {
 		t.Fatalf("one cut line kept: %q", got)
 	}
 }
+
+// A failed agent's reason is its error line from all of its kept stderr,
+// with secrets hidden, even when a list after it pushed it out of the tail
+// (agy 1.5.9's unknown --model, 2026-11-14), else its exit code.
+func TestErrorReason(t *testing.T) {
+	b := `error: invalid model selection (--model "x"): model x is not recognized, key sk-ant-api03-AbCdEf0123456789AbCdEf0123456789xyz` + "\nAvailable models:\n"
+	for i := range 25 {
+		b += "  Gemini " + strings.Repeat("9", i%3+1) + " Flash (Low)\n"
+	}
+	if tail := errorTail([]byte(b), false); strings.Contains(tail, "invalid model") {
+		t.Fatalf("the tail still holds the error line; the test needs a longer list:\n%s", tail)
+	}
+	got := errorReason([]byte(b), false, 1)
+	if !strings.HasPrefix(got, `error: invalid model selection (--model "x")`) || strings.Contains(got, "AbCdEf0123456789") {
+		t.Fatalf("reason %q", got)
+	}
+	if got := errorReason([]byte("  Gemini 3.1 Pro (Low)\n"), false, 2); got != "the agent exited with code 2 and wrote no reason to its error output" {
+		t.Fatalf("a list only: %q", got)
+	}
+	if got := errorReason([]byte("b2c3d4 secret rest\nError: boom\n"), true, 1, "sk-or-v1-a1b2c3d4"); got != "Error: boom" {
+		t.Fatalf("cut: %q", got)
+	}
+}

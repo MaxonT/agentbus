@@ -8,7 +8,7 @@ package jobs
 // on control to that call only: the harness's own list-models call
 // (adapter.Call Models) on its own vendor's upstream. Any other call with
 // the token is refused in the vendor's place and recorded. Every call of a
-// listing is recorded under ModelsSession, with no turn.
+// listing is recorded in no session (ModelsSession) and no turn.
 //
 // A listing token is random, kept in memory while the listing runs, and
 // stops with it (the func ModelsToken returns), across nothing: a restart
@@ -25,8 +25,12 @@ import (
 	"github.com/staysup/agentbus/gateway"
 )
 
-// ModelsSession is the record's session of control's listings of models.
-const ModelsSession = "models"
+// ModelsSession is the session of control's listings of models in the
+// record: none. A listing is control's own operation, as a subscription
+// connected is, not a person's session, so no list of sessions shows it
+// (store.Snapshot leaves out the events of no session); its calls are still
+// recorded, read with GET /api/v0/events.
+const ModelsSession = ""
 
 // ListingPrefix marks a listing token.
 const ListingPrefix = "abm_"

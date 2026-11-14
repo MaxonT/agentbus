@@ -139,7 +139,7 @@ var Kinds = []KindInfo{
 	{EventsDropped, "Events were lost because the output did not keep up: dropped, and sessions or all_sessions.", []string{"dropped"}},
 	{SessionRegistered, "Older stores only: a launcher or a run registered the session, with agent and folder. Nothing writes it now.", []string{"session"}},
 	{SessionOpened, "A run's child is starting: hold names it; agent and folder say what and where; turn is the turn it runs. Stored just before the child starts.", []string{"session", "hold"}},
-	{SessionClosed, "A run's child exited: hold, exit_code, resume_id, turn, stopped when the person stopped the turn, error_tail (the last lines the agent wrote to stderr, when it exited with an error), and unsettled when the gateway could not confirm all of the turn's calls were stored. Also stored at start, with unsettled, for a child the previous service left running.", []string{"session"}},
+	{SessionClosed, "A run's turn ended: its child exited, or could not start. hold, exit_code, resume_id, turn, state (finished, failed or stopped), error when it failed (the agent's own error line from its stderr, else its exit code, or why it could not start), stopped when the person stopped the turn, error_tail (the last lines the agent wrote to stderr, when it exited with an error), and unsettled when the gateway could not confirm all of the turn's calls were stored. Also stored at start, with unsettled and state failed, for a child the previous service left running, and by control for a turn whose runner stopped answering.", []string{"session"}},
 	{SchemaUnexpected, "The vendor sent a shape the adapter does not know: unexpected, as names only. Show it as a quiet warning.", []string{"unexpected"}},
 	{ReplayFailed, "A model request of a replayed turn (a turn.started with replay_from) could not be given the earlier turn's history: error says why, such as the harness's request layout not being one the gateway knows. The gateway refused that request with 400 and did not send it to the vendor, so the turn fails rather than continue without its history. Show it as an error.", []string{"error"}},
 	{ToolRefused, "The gateway refused a tool call before the agent could run it, because its command matched a forbid entry of permissions.toml: tool_id, tool_name, tool_input, rule (the entry), and text (what the model is told in place of the output). The call's tool.requested is still stored, and its tool.completed carries that text. Show it as a warning.", []string{"tool_id", "rule"}},
@@ -331,6 +331,10 @@ type Event struct {
 	// an error and was not stopped: the last lines it wrote to stderr,
 	// bounded, with anything shaped like a secret hidden.
 	ErrorTail string `json:"error_tail,omitempty" doc:"On a run's session.closed of an agent that exited with an error: the last lines it wrote to stderr, at most 20 lines and 2 KiB, with anything shaped like a token or key replaced by [hidden]. Absent when it exited 0, was stopped, or wrote nothing there, and when all it kept is one line whose start was cut (it may begin inside a secret)."`
+	// State, only on a run's session.closed: how the turn ended, as the
+	// turn list says it (finished, failed or stopped). With failed, Error
+	// says why (ErrorLine).
+	State string `json:"state,omitempty" doc:"On a run's session.closed: how the turn ended: finished (its agent exited 0), stopped (someone stopped it) or failed (anything else). A failed turn's error says why: the agent's own error line from its stderr, else its exit code, or why it could not start. Absent on records from before 0.5.7."`
 
 	// Changes, only on turn.changed: what the turn changed.
 	Changes *TurnChanges `json:"changes,omitempty" doc:"On turn.changed: every file the turn added, modified or deleted, with diffs."`

@@ -13,6 +13,7 @@ package main
 // list is read. Nothing it prints is kept but the models' names and labels.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -108,4 +109,77 @@ func modelServer(c config, js *jobs.Server, baseURL string) func(ctx context.Con
 		}()
 		return models.AppServer(ctx, in, out, "agentbus", version)
 	}
+}
+
+// keyListingPlaceholder is the API key a key listing runs with: not a key.
+// The listing needs one set (harness.KeyModelLister) and makes no call.
+const keyListingPlaceholder = "agentbus-listing-no-key"
+
+// keyListingOut bounds what a key listing prints.
+const keyListingOut = 1 << 20
+
+// keyModelLister runs a harness's own listing of the models it takes on an
+// API key (harness.KeyModelLister: agy models) as modelServer runs a model
+// server: unmodified, in a clean home of its own, made for the one listing
+// and removed after, with none of this user's home variables, bounded, in
+// its own process group. Its key is a placeholder, never the person's, and
+// only its standard output is read, for models.Lines. Errors are fixed
+// wording.
+func keyModelLister(c config) func(ctx context.Context, name string) ([]byte, error) {
+	return func(ctx context.Context, name string) ([]byte, error) {
+		h, ok := harness.Get(name)
+		if !ok {
+			return nil, models.ErrServer
+		}
+		kl, ok := h.(harness.KeyModelLister)
+		if !ok {
+			return nil, models.ErrServer
+		}
+		info := h.Info()
+		bin, err := c.lookPath(name)
+		if err != nil {
+			return nil, errors.New(info.Label + " is not installed where control runs, so its models cannot be listed; install " + info.Product)
+		}
+		dir := filepath.Join(c.home, modelHomesDir)
+		if os.MkdirAll(dir, 0o700) != nil {
+			return nil, models.ErrServer
+		}
+		home, err := os.MkdirTemp(dir, name+"-key-")
+		if err != nil {
+			return nil, models.ErrServer
+		}
+		defer os.RemoveAll(home)
+		env, args := kl.WireKeyModels(keyListingPlaceholder)
+		parent := slices.DeleteFunc(c.environ(), func(kv string) bool {
+			k, _, _ := strings.Cut(kv, "=")
+			return slices.Contains(homeEnv, k)
+		})
+		ctx, cancel := context.WithTimeout(ctx, modelServerWait)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Env = childEnv(parent, append([]string{"HOME=" + home}, env...))
+		cmd.Dir = home
+		// Its own process group, so a timeout stops whatever it started.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+		var out bytes.Buffer
+		cmd.Stdout = &cappedWriter{b: &out, n: keyListingOut}
+		if cmd.Run() != nil {
+			return nil, errors.New("the harness could not list its models just now")
+		}
+		return out.Bytes(), nil
+	}
+}
+
+// cappedWriter keeps the first n bytes written to it and drops the rest.
+type cappedWriter struct {
+	b *bytes.Buffer
+	n int
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	if room := w.n - w.b.Len(); room > 0 {
+		w.b.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
 }

@@ -44,7 +44,7 @@ type Model struct {
 type List struct {
 	Models []Model `json:"models" doc:"The models, in the source's order or sorted by id. Empty when the source has none yet or could not be read."`
 	// Source says where the list came from, for a screen.
-	Source    string     `json:"source" doc:"Where the list comes from: api (the official list-models call of OpenRouter or of the vendor, made by control with the key set in Settings), command (the unmodified harness: where its sign-in is, or in a clean home of its own with its call through control's relay), runner (what the harness left in a session's home, reported by a runner), fixed (a list of the harness's own aliases)."`
+	Source    string     `json:"source" doc:"Where the list comes from: api (the official list-models call of OpenRouter or of the vendor, made by control with the key set in Settings), command (the unmodified harness: where its sign-in is, in a clean home of its own with its call through control's relay, or, for agy on an API key, in a clean home of its own with no call), runner (what the harness left in a session's home, reported by a runner), fixed (a list of the harness's own aliases)."`
 	FetchedAt *time.Time `json:"fetched_at,omitempty" doc:"When the list was fetched or reported. Absent for a fixed list and for one never fetched."`
 	Error     string     `json:"error,omitempty" doc:"Why the list is empty or old, in fixed words, such as connect your agy subscription in Settings. The models kept from before, if any, are still listed."`
 }
