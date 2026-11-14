@@ -22,7 +22,8 @@ have (Claude Code, Codex, Antigravity or any OpenRouter model) and tracks every 
 
 - **Everything stays on your machine.** Your sessions, every model call and reply, and your sign-ins
   and keys are kept in AgentBus's data folder on your machine. No telemetry and no AgentBus servers:
-  the only calls out are your agents' own calls to their model vendors.
+  the only calls out are your agents' own calls to their model vendors, and a feedback message if
+  you send one.
 - **Switch models without losing context.** Change the agent or model on any message, and the next
   one picks up where the last left off.
 - **Your agents work together.** Claude can ask Codex, or any agent from any vendor, to answer a
