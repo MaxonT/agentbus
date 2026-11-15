@@ -435,7 +435,7 @@ func envValue(env []string, key string) string {
 var registry = []Harness{claude{}, codex{}, agy{}}
 
 // planned are harnesses listed as coming, which no agent can use yet.
-var planned = []Info{{Name: "opencode", Label: "opencode"}}
+var planned = []Info{{Name: "opencode", Label: "OpenCode"}}
 
 // Get returns the harness turns can start under name.
 func Get(name string) (Harness, bool) {

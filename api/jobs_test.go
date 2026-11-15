@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,14 +22,18 @@ const enrollTok = "abe_ENROLL-NEVER-ECHOED"
 
 // newJobsEnv is an API with a job queue behind it, on loopback, every origin
 // allowed.
-func newJobsEnv(t *testing.T) *env {
+func newJobsEnv(t *testing.T) *env { return newJobsEnvAt(t, nil) }
+
+// newJobsEnvAt is newJobsEnv whose queue reads the time from now (nil: the
+// clock).
+func newJobsEnvAt(t *testing.T, now func() time.Time) *env {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "events.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := queue.Open(filepath.Join(dir, "jobs.db"), nil)
+	q, err := queue.Open(filepath.Join(dir, "jobs.db"), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,5 +142,44 @@ func TestJobsOff(t *testing.T) {
 	resp, raw = do(t, e.req(t, "POST", "/api/v0/turns/t_1/review", strings.NewReader(`{"agent":"claude"}`)))
 	if resp.StatusCode != http.StatusNotFound || !strings.Contains(raw, "no queue") {
 		t.Fatalf("POST /api/v0/turns/t_1/review: %d %s", resp.StatusCode, raw)
+	}
+}
+
+// A session whose runner was removed takes no more work: the API answers a
+// next turn with 409 and the reason, which names the machine
+// (queue/removed.go; 0.5.1 F1 note). A review goes through the same
+// queue.create, which queue/removed_test.go covers.
+func TestRemovedRunnerRefusesNextTurnAndReview(t *testing.T) {
+	var later atomic.Int64 // how far the queue's clock is ahead
+	e := newJobsEnvAt(t, func() time.Time { return time.Now().Add(time.Duration(later.Load())) })
+	const machine = "con_0123456789abcdef"
+	r, err := e.q.RegisterRunner(queue.DefaultTeam, "studio mac", nil, 4, queue.HashToken(queue.NewID("tok_")), &queue.Capabilities{Connector: machine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.q.Create(queue.DefaultTeam, queue.KindTurn, "", queue.Spec{Harness: "claude", Prompt: "p",
+		FolderRef: "fld_0123456789abcdef", Connector: machine, Isolate: true}, queue.Links{}); err != nil {
+		t.Fatal(err)
+	}
+	j, a, ok, _, err := e.q.Take(r.ID, time.Minute, false)
+	if err != nil || !ok {
+		t.Fatalf("take: %v %v", ok, err)
+	}
+	if _, _, err := e.q.Start(r.ID, a.ID, 1, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.q.End(r.ID, a.ID, 1, queue.Finish{Status: queue.Finished, Session: j.Session,
+		Result: []byte(`{"changeset":"` + strings.Repeat("1", 64) + `"}`), Workspace: &queue.Workspace{Kind: queue.WorkspaceCopy, Space: j.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	later.Store(int64(2 * queue.RunnerFresh)) // the runner went offline
+	if err := e.q.RemoveRunner(queue.DefaultTeam, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	want := queue.RunnerRemovedWhy("studio mac")
+	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","session":"`+j.Session+`","prompt":"again"}`)))
+	var got struct{ Error string }
+	if resp.StatusCode != http.StatusConflict || json.Unmarshal([]byte(raw), &got) != nil || got.Error != want {
+		t.Errorf("POST /api/v0/turns: %d %s, want 409 %q", resp.StatusCode, raw, want)
 	}
 }

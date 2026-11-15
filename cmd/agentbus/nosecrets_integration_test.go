@@ -192,7 +192,7 @@ func TestRunnerAgentClosedOff(t *testing.T) {
 		for _, r := range recs {
 			var e struct{ Host, Error string }
 			if r.Kind == "network.refused" && json.Unmarshal(r.Data, &e) == nil {
-				if e.Host != "blocked.example:80" || !strings.Contains(e.Error, "not in [network] allow") {
+				if e.Host != "blocked.example:80" || !strings.Contains(e.Error, "not in Allow hosts") {
 					t.Fatalf("network.refused: %+v", e)
 				}
 				return true

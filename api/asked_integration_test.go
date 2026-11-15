@@ -260,7 +260,7 @@ func TestAskCaps(t *testing.T) {
 	ask(t, e, tok, `{"agent":"claude","prompt":"d1"}`)
 	ask(t, e, tokenOf(t, dir, "d1"), `{"agent":"claude","prompt":"d2"}`)
 	code, out := as(t, e, tokenOf(t, dir, "d2"), "POST", "/api/v0/turns", `{"agent":"claude","prompt":"d3"}`)
-	if code != 403 || !strings.Contains(out, "levels") || !strings.Contains(out, "[limits]") {
+	if code != 403 || !strings.Contains(out, "levels") || !strings.Contains(out, "(Depth in Settings, Limits)") {
 		t.Errorf("depth 3: %d %s", code, out)
 	}
 	for i := 1; i < settings.DefaultMaxJobsPerTurn; i++ {
@@ -308,7 +308,7 @@ func TestAskPolicyFromPermissions(t *testing.T) {
 	ask(t, e, tok, `{"agent":"claude","prompt":"quick"}`)
 	ask(t, e, tok, `{"agent":"claude","prompt":"child"}`)
 	code, out := as(t, e, tok, "POST", "/api/v0/turns", `{"agent":"claude","prompt":"quick"}`)
-	if code != 403 || !strings.Contains(out, "at most 2 turns or reviews") || !strings.Contains(out, "max_jobs_per_turn") {
+	if code != 403 || !strings.Contains(out, "at most 2 turns or reviews") || !strings.Contains(out, "(Turns per request in Settings, Limits)") {
 		t.Fatalf("past max_jobs_per_turn = 2: %d %s", code, out)
 	}
 	// The file is read again for the next request.
@@ -396,7 +396,7 @@ func TestAskPolicyFromPermissions(t *testing.T) {
 	}
 	write("[limits]\nmax_cost_usd_per_tree = 0.25\n")
 	code, out = as(t, e, child, "POST", "/api/v0/turns", `{"agent":"claude","prompt":"quick"}`)
-	if code != 403 || !strings.Contains(out, "max_cost_usd_per_tree") || !strings.Contains(out, "$0.30") {
+	if code != 403 || !strings.Contains(out, "(Cost per request tree in Settings, Limits)") || !strings.Contains(out, "$0.30") {
 		t.Errorf("past the cost cap: %d %s", code, out)
 	}
 	if again := ask(t, e, child, keyed); !again.Existing || again.Turn != first.Turn {

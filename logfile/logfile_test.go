@@ -72,6 +72,33 @@ func TestTailKeepsTheLastBytes(t *testing.T) {
 	}
 }
 
+// Lines says whether what is kept starts inside a line: a drop that ended
+// at a line end leaves whole lines (0.5.1 F1 P3, evt_f9ef33ce87f2a10f).
+func TestTailLines(t *testing.T) {
+	for _, c := range []struct {
+		writes []string
+		kept   string
+		mid    bool
+	}{
+		{[]string{"ab\n"}, "ab\n", false},
+		{[]string{"ab\n", "cdef"}, "\ncdef", true},
+		{[]string{"abc\n", "defg"}, "\ndefg", true},
+		{[]string{"ab\n", "cd", "efg"}, "cdefg", false},
+		{[]string{"abcdefg"}, "cdefg", true},
+		{[]string{"a\ncdefg"}, "cdefg", false},
+		{[]string{"x", "abcde"}, "abcde", true},
+		{[]string{"\n", "abcde"}, "abcde", false},
+	} {
+		tl := &Tail{Max: 5}
+		for _, w := range c.writes {
+			tl.Write([]byte(w))
+		}
+		if b, mid := tl.Lines(); string(b) != c.kept || mid != c.mid {
+			t.Errorf("%q: kept %q, mid %v; want %q, %v", c.writes, b, mid, c.kept, c.mid)
+		}
+	}
+}
+
 func TestAppendTailBoundsTheFileAtALineBreak(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "s.log")
 	for i := 0; i < 20; i++ {

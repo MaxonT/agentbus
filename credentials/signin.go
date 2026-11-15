@@ -31,10 +31,31 @@ func (l Login) home(dir string) (env []string, home string, err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, "", errors.New("credentials: the subscriptions folder could not be made")
 	}
-	if home, err = os.MkdirTemp(dir, ".login-*"); err != nil {
+	if home, err = os.MkdirTemp(dir, leftLogin+"*"); err != nil {
 		return nil, "", errors.New("credentials: the login's folder could not be made")
 	}
 	return l.envWith(home), home, nil
+}
+
+// leftLogin is how the folder home makes for a login is named.
+const leftLogin = ".login-"
+
+// RemoveLeftLogins removes the folders logins left in the subscriptions
+// folder, and says how many. A login's folder goes when its login ends, but
+// not when control is stopped first, and it may hold a sign-in. Call it as
+// control starts, before any login runs.
+func (m *Manager) RemoveLeftLogins() int {
+	ents, err := os.ReadDir(m.Store.Dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range ents {
+		if e.IsDir() && strings.HasPrefix(e.Name(), leftLogin) && os.RemoveAll(filepath.Join(m.Store.Dir, e.Name())) == nil {
+			n++
+		}
+	}
+	return n
 }
 
 // envWith is the environment l runs in: l.Home set to home, l.Set set, and

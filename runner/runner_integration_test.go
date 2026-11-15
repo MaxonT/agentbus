@@ -562,11 +562,13 @@ func TestFoldersTypedAtOnceAllListed(t *testing.T) {
 	for round := range 5 {
 		var ids []string
 		for _, p := range paths {
-			j, err := w.q.RegisterFolder(queue.DefaultTeam, w.r.cfg.Folders.Connector(), fmt.Sprintf("%s-%d", p, round))
-			if err != nil {
+			// The folder is there before its job is queued, so a fast
+			// runner never checks it first (codex, evt_18366367fd3ff929).
+			if err := os.MkdirAll(fmt.Sprintf("%s-%d", p, round), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.MkdirAll(fmt.Sprintf("%s-%d", p, round), 0o755); err != nil {
+			j, err := w.q.RegisterFolder(queue.DefaultTeam, w.r.cfg.Folders.Connector(), fmt.Sprintf("%s-%d", p, round))
+			if err != nil {
 				t.Fatal(err)
 			}
 			ids = append(ids, j.ID)

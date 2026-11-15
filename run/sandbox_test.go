@@ -57,7 +57,7 @@ func TestSandboxRefusedBeforeStart(t *testing.T) {
 			}
 			// It points to the switch a person can reach: the cockpit's
 			// Settings, not a file key (0.5.1).
-			if !strings.Contains(r.Msg, `turn off "Run each session in a sandbox" in the cockpit's Settings`) || strings.Contains(r.Msg, "[sandbox] mode") {
+			if !strings.Contains(r.Msg, "turn Sandbox off in the cockpit's Settings (Isolation)") || strings.Contains(r.Msg, "[sandbox] mode") {
 				t.Errorf("refusal %q does not point to the Settings switch", r.Msg)
 			}
 			if snap, _ := st.Snapshot(); len(snap.Sessions) != 0 {

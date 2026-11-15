@@ -182,8 +182,10 @@ func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 			t.Errorf("%v: %d tools, want %d", tc.gone, len(got), len(e.api.tools)-len(tc.gone))
 		}
 	}
-	// tools = false refuses the tool server to a turn token.
-	if msg := turnRefusal(toolList, *g, off(func(a *settings.AgentAPI) { a.Tools = &no })); !strings.Contains(msg, "tools is false") {
+	// tools = false refuses the tool server to a turn token, naming the
+	// switch as Settings shows it.
+	if msg := turnRefusal(toolList, *g, off(func(a *settings.AgentAPI) { a.Tools = &no })); !strings.Contains(msg, "AgentBus tools is off in Settings (Permissions)") ||
+		strings.Contains(msg, "permissions.toml") {
 		t.Errorf("tools off: %q", msg)
 	}
 }
@@ -267,6 +269,15 @@ func TestMCPToolSchemas(t *testing.T) {
 	}
 	if r := req("search_history"); slices.Contains(r, "session") || !slices.Contains(r, "q") {
 		t.Errorf("search requires %v", r)
+	}
+	// A turn input says it takes the id, not the turn's number: agents
+	// passed "3" in 5 of 6 MCP runs (2026-11-11).
+	for _, name := range []string{"get_turn", "stop_turn", "turn_diff", "apply_turn", "review_turn"} {
+		props, _ := e.api.toolSchemas[name]["properties"].(map[string]any)
+		turn, _ := props["turn"].(map[string]any)
+		if d, _ := turn["description"].(string); !strings.Contains(d, "never the turn's number") {
+			t.Errorf("%s: turn input says %q", name, d)
+		}
 	}
 }
 

@@ -125,6 +125,9 @@ var touchCalls = map[string][]string{
 	"path/filepath": {"EvalSymlinks", "Walk", "WalkDir", "Glob"},
 	"os/exec":       {"Command", "CommandContext", "LookPath"},
 	"syscall":       {"Exec", "ForkExec", "Open", "Stat", "Lstat"},
+	// The same calls through x/sys, which a package may use in place of
+	// syscall (the login's terminal opens /dev/ptmx that way).
+	"golang.org/x/sys/unix": {"Exec", "Open", "Openat", "Stat", "Lstat", "Unlink", "Rmdir", "Mkdir", "Rename", "Renameat", "Clonefile", "Clonefileat"},
 }
 
 // controlAllowed are "file function package.call" in control packages that
@@ -136,11 +139,16 @@ var controlAllowed = []string{
 	"credentials/connect.go Manager.Connect exec.Command",
 	// The terminal the login runs in: a device, not a folder.
 	"credentials/pty_darwin.go openPty os.OpenFile",
+	"credentials/pty_darwin.go openPty unix.Open",
 	"credentials/pty_linux.go openPty os.OpenFile",
+	"credentials/pty_linux.go openPty unix.Open",
 	// A login that keeps its sign-in in a file gets a folder of its own
-	// inside the subscriptions folder, read and removed when it ends.
+	// inside the subscriptions folder, read and removed when it ends; one a
+	// stopped control left is removed when control starts again.
 	"credentials/connect.go removeHome os.RemoveAll",
 	"credentials/signin.go Login.home os.MkdirAll",
+	"credentials/signin.go Manager.RemoveLeftLogins os.ReadDir",
+	"credentials/signin.go Manager.RemoveLeftLogins os.RemoveAll",
 	"credentials/signin.go Login.home os.MkdirTemp",
 	"credentials/signin.go Login.signin os.ReadFile",
 	"credentials/subscriptions.go Subscriptions.writeFile os.CreateTemp",
@@ -169,6 +177,7 @@ var controlAllowed = []string{
 	"settings/upgrade.go DB.importFiles os.ReadFile",
 	"settings/upgrade.go realPath filepath.EvalSymlinks",
 	"settings/upgrade.go Upgrade.Run os.Stat",
+	"settings/clone_darwin.go cloneFile unix.Clonefile",
 	"settings/upgrade.go copyFile os.Open",
 	"settings/upgrade.go copyFile os.OpenFile",
 	"settings/upgrade.go copyFolder filepath.WalkDir",

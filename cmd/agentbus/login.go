@@ -52,6 +52,8 @@ type loginDeps struct {
 	poll time.Duration
 	// signals ends the wait on Ctrl-C.
 	signals func(context.Context) (context.Context, context.CancelFunc)
+	// save writes the approved identity; nil is runner.SaveIdentity.
+	save func(path string, rn queue.Runner, token string, heartbeatMS, leaseMS int64) error
 }
 
 func systemLogin() loginDeps {
@@ -212,9 +214,21 @@ func runLogin(args []string, home string, stdout, stderr io.Writer, d loginDeps)
 			return 1
 		}
 	}
-	if err := runner.SaveIdentity(statePath, *st.Runner, started.Token, st.Heartbeat, st.Lease); err != nil {
-		fmt.Fprintf(stderr, "agentbus login: approved, but %s could not be written. "+
-			"Runner %s, which this one was approved as, will take no work: remove it on the Runners page\n", statePath, st.Runner.ID)
+	save := d.save
+	if save == nil {
+		save = runner.SaveIdentity
+	}
+	if err := save(statePath, *st.Runner, started.Token, st.Heartbeat, st.Lease); err != nil {
+		// The sign-in kept aside goes back, so a failed write never leaves
+		// the machine with none. A link, so nothing written meanwhile is
+		// replaced.
+		back := ""
+		if kept != "" && os.Link(kept, statePath) == nil {
+			_ = os.Remove(kept)
+			back = " The sign-in that was there is back in place."
+		}
+		fmt.Fprintf(stderr, "agentbus login: approved, but %s could not be written.%s "+
+			"Runner %s, which this one was approved as, will take no work: remove it on the Runners page\n", statePath, back, st.Runner.ID)
 		return 1
 	}
 	fmt.Fprintf(stdout, "Approved: this machine is runner %s of %s. Its credential is in %s (mode 0600).\n", st.Runner.ID, target, statePath)

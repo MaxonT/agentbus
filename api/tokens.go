@@ -89,9 +89,10 @@ const (
 	turnAskedRefused   = "a turn token stops only turns its request tree asked for"
 )
 
-// The refusal when [agent_api] turns a kind of call off. Fixed wording.
-func turnSwitchedOff(what, key string) string {
-	return "a turn token may not " + what + " here: " + key + " is false in [agent_api] of permissions.toml"
+// The refusal when [agent_api] turns a kind of call off, naming the
+// switch as the cockpit's Settings shows it. Fixed wording.
+func turnSwitchedOff(what, label string) string {
+	return "a turn token may not " + what + " here: " + label + " is off in Settings (Permissions)"
 }
 
 // turnPolicyBroken is the refusal when the policy cannot be used. It names
@@ -300,9 +301,9 @@ func turnRefusal(turn int, g run.Grant, api settings.AgentAPI) string {
 	case turn == mainOnly:
 		return turnWriteRefused
 	case turn == applyTurnTok && !*api.Apply:
-		return turnSwitchedOff("apply a turn's changes", "apply")
+		return turnSwitchedOff("apply a turn's changes", "Agents may apply")
 	case turn == toolList && !*api.Tools:
-		return turnSwitchedOff("use the agentbus MCP tools", "tools")
+		return turnSwitchedOff("use the agentbus MCP tools", "AgentBus tools")
 	}
 	return ""
 }
@@ -343,7 +344,7 @@ func (a *API) overBudget(g run.Grant, perm settings.Policy, key string) (string,
 		return "", err
 	}
 	if cost >= max {
-		return fmt.Sprintf("work started from one session may cost at most $%.2f in all, and it has cost $%.2f (max_cost_usd_per_tree in [limits] of permissions.toml)", max, cost), nil
+		return fmt.Sprintf("work started from one session may cost at most $%.2f in all, and it has cost $%.2f (Cost per request tree in Settings, Limits)", max, cost), nil
 	}
 	return "", nil
 }

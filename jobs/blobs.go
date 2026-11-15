@@ -95,8 +95,12 @@ func (s *Server) blobGet(w http.ResponseWriter, r *http.Request, rn queue.Runner
 			w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 		}
 	}
+	// As a fetched pack: every write has a deadline, so a client that
+	// stops reading does not hold the file open, and the connection then
+	// closes.
+	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, rc)
+	_, _ = io.Copy(&deadlineWriter{w: w, rc: http.NewResponseController(w)}, rc)
 }
 
 // readable says rn may read every blob of hs (mayRead), and answers the

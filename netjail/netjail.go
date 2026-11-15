@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -318,12 +319,12 @@ func (j *Jail) vet(target string) (why, dial string) {
 		}
 		return "", net.JoinHostPort(ip.String(), port)
 	}
-	return host + " is not in [network] allow of permissions.toml", ""
+	return host + " is not in Allow hosts in Settings (Isolation, Network)", ""
 }
 
 // public says host is, and resolves only to, addresses of the public
-// internet: global unicast, not private (RFC 1918, fc00::/7), not shared
-// (100.64.0.0/10, as Tailscale uses), and none of this machine's own. The
+// internet: global unicast, not private (RFC 1918, fc00::/7), in none of
+// notPublic, and none of this machine's own. The
 // one rule an open proxy keeps: whatever is local, on this machine or its
 // networks, is reached only through Forward, Pass or allow. A name that
 // does not resolve is not public. It returns the address to dial, the
@@ -348,7 +349,7 @@ func public(host string) net.IP {
 	}
 	own, _ := net.InterfaceAddrs()
 	for _, ip := range ips {
-		if !ip.IsGlobalUnicast() || ip.IsPrivate() || shared.Contains(ip) {
+		if !ip.IsGlobalUnicast() || ip.IsPrivate() || slices.ContainsFunc(notPublic, func(n *net.IPNet) bool { return n.Contains(ip) }) {
 			return nil
 		}
 		for _, a := range own {
@@ -360,17 +361,33 @@ func public(host string) net.IP {
 	return ips[0]
 }
 
-// shared is the shared address space, 100.64.0.0/10 (RFC 6598).
-var shared = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+// notPublic are global unicast ranges that are not the public internet:
+// the shared address space (RFC 6598, as Tailscale uses), the benchmark
+// range (RFC 2544), and the IPv6 ranges that carry an IPv4 address inside
+// them, NAT64 (RFC 6052, RFC 8215) and 6to4 (RFC 3056), which could carry a
+// private one (review of 2026-11-12).
+var notPublic = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, c := range []string{"100.64.0.0/10", "198.18.0.0/15", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16"} {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, n)
+	}
+	return out
+}()
 
 // Allowed says whether host is in allow: the same name, or a name under an
-// entry that starts with "*.". Case does not matter.
+// entry that starts with "*.". Case does not matter. A name with an empty
+// label (".npmjs.org", "a..npmjs.org") is under no entry.
 func Allowed(allow []string, host string) bool {
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	for _, a := range allow {
 		a = strings.ToLower(a)
 		if rest, ok := strings.CutPrefix(a, "*."); ok {
-			if strings.HasSuffix(host, "."+rest) {
+			if under, ok := strings.CutSuffix(host, "."+rest); ok && under != "" &&
+				!strings.HasPrefix(under, ".") && !strings.HasSuffix(under, ".") && !strings.Contains(under, "..") {
 				return true
 			}
 			continue

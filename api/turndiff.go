@@ -48,8 +48,8 @@ type TurnFiles struct {
 	To       string `json:"to,omitempty" doc:"The checkpoint the turn ended with. The same as from: the turn changed nothing."`
 	Kind     string `json:"kind" doc:"Always snapshot: the files were compared by their SHA-256."`
 	// Count is every change; Changes holds at most workspace.MaxChanges.
-	Count          int          `json:"count" doc:"Every file the turn added, modified or deleted."`
-	Truncated      bool         `json:"truncated,omitempty" doc:"changes holds fewer files than count."`
+	Count          int          `json:"count" doc:"The files the turn added, modified or deleted; with truncated, see there."`
+	Truncated      bool         `json:"truncated,omitempty" doc:"changes is not every change: files were left out past 1000, or to fit the runner's finish, and count still counts them; or the copy held more files than a checkpoint keeps, and count misses some too."`
 	Changes        []FileChange `json:"changes" doc:"Each changed file, sorted by path."`
 	DiffsCut       bool         `json:"diffs_cut,omitempty" doc:"Some text files have no diff here: all the turn's diffs together passed 1 MiB, and the later ones were left out (each marked diff_left_out)."`
 	ContentLeftOut bool         `json:"content_left_out,omitempty" doc:"Some small text files have no content here, to keep the result small."`

@@ -69,7 +69,10 @@ func TestAskedCaps(t *testing.T) {
 
 func isLimit(err error, word string) bool {
 	var l *LimitError
-	return errors.As(err, &l) && strings.Contains(l.Msg, word) && strings.Contains(l.Msg, "[limits]")
+	// A limit names its line in the cockpit's Settings, never the
+	// permissions.toml settings.db replaced.
+	return errors.As(err, &l) && strings.Contains(l.Msg, word) && strings.Contains(l.Msg, "in Settings, Limits)") &&
+		!strings.Contains(l.Msg, "permissions.toml")
 }
 
 // SessionRoot names the tree a session was asked for in; a session the
