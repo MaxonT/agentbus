@@ -33,6 +33,10 @@ const PolicyStarter = `# What AgentBus turns may do without asking. Read at the 
 # read_folders: folders claude may read and search beyond its own folder. Reads only in the
 # default and acceptEdits modes; under your own "auto" mode, Claude Code may still write there.
 # allow: commands claude may run without asking (a command and its arguments).
+# ask: commands that wait for a person. The gateway refuses a matching call and
+# records it; a person allows it (which moves it to allow and continues the
+# session so the agent can run it) or refuses it. forbid wins over ask, ask wins
+# over allow.
 # forbid: commands claude and codex may never run. The gateway refuses them.
 # It reads the command text, so it cannot see a command built at run time or
 # run from a script. For a hard rule, also leave out what the command needs.
@@ -40,6 +44,7 @@ const PolicyStarter = `# What AgentBus turns may do without asking. Read at the 
 
 read_folders = []   # e.g. ["~/.agents", "~/Sites/agentbus-notes"]
 allow = []          # e.g. ["go test", "make test", "git commit"]
+ask = []            # e.g. ["git push", "npm publish"] — refused until a person allows
 forbid = []         # e.g. ["git push", "git checkout"]
 
 # edit: where a turn may create and change files without asking.
@@ -194,6 +199,7 @@ const (
 type Policy struct {
 	ReadFolders   []string `toml:"read_folders" json:"read_folders" doc:"Folders claude may read and search beyond its own folder: absolute, or starting with ~/. Each must exist on the machine that runs the turn."`
 	Allow         []string `toml:"allow" json:"allow" doc:"Commands claude may run without asking: a command and its leading arguments, such as \"go test\"."`
+	Ask           []string `toml:"ask" json:"ask" doc:"Commands that wait for a person before an agent runs them. The gateway refuses a matching call and records it for a person; an allow moves the entry to allow and continues the session so the agent can run it, a refusal records the decision. Matched like forbid, by leading words and base name. Forbid wins over ask; ask wins over allow."`
 	Forbid        []string `toml:"forbid" json:"forbid" doc:"Commands claude and codex may never run. The gateway refuses them. It matches each simple command by its leading words and the program's base name, through pipes, sh -c, sudo and env. It reads the command text, so it is not a sandbox: a command built at run time is not seen."`
 	Edit          string   `toml:"edit" json:"edit,omitempty" doc:"Where a turn may edit files without asking: session (its own session's folder) or none. Absent in a PUT: session."`
 	Isolation     string   `toml:"isolation" json:"isolation,omitempty" doc:"Where a new session's turns run: auto (copy on macOS; overlay on Linux where the runner can mount one, else copy), overlay, copy (a copy of its folder as it is now), git (a git worktree with the folder's uncommitted edits, in a repo) or none (the folder itself). On ext4, copy and the overlay's snapshot copy every byte: use xfs, btrfs, git or none for a big folder. Absent in a PUT: auto."`
@@ -250,7 +256,7 @@ func DefaultPolicy() Policy {
 
 // fill sets every value left out to its default.
 func (p *Policy) fill() {
-	for _, l := range []*[]string{&p.ReadFolders, &p.Allow, &p.Forbid, &p.ShareReadOnly, &p.HomeFiles, &p.Network.Allow} {
+	for _, l := range []*[]string{&p.ReadFolders, &p.Allow, &p.Ask, &p.Forbid, &p.ShareReadOnly, &p.HomeFiles, &p.Network.Allow} {
 		if *l == nil {
 			*l = []string{}
 		}
@@ -358,7 +364,7 @@ func (p *Policy) Check() error {
 	for _, list := range []struct {
 		name string
 		cmds []string
-	}{{"allow", p.Allow}, {"forbid", p.Forbid}} {
+	}{{"allow", p.Allow}, {"ask", p.Ask}, {"forbid", p.Forbid}} {
 		for _, c := range list.cmds {
 			if err := checkCommand(c); err != nil {
 				return fmt.Errorf("%s entry %s %v", list.name, strconv.Quote(c), err)
@@ -398,7 +404,7 @@ func parsePolicy(b []byte) (Policy, error) {
 	}
 	extra := slices.DeleteFunc(md.Undecoded(), func(k toml.Key) bool { return slices.Contains(retiredKeys, strings.Join(k, ".")) })
 	if len(extra) > 0 {
-		return Policy{}, fmt.Errorf("unknown key %s; the keys are read_folders, allow, forbid, edit, isolation, share_read_only, subagents, home_files, [limits], [agent_api], [network] and [sandbox] (see the README)", strconv.Quote(extra[0].String()))
+		return Policy{}, fmt.Errorf("unknown key %s; the keys are read_folders, allow, ask, forbid, edit, isolation, share_read_only, subagents, home_files, [limits], [agent_api], [network] and [sandbox] (see the README)", strconv.Quote(extra[0].String()))
 	}
 	if err := p.Check(); err != nil {
 		return Policy{}, err
@@ -407,7 +413,7 @@ func parsePolicy(b []byte) (Policy, error) {
 }
 
 // wrongTypeTOML is a permissions.toml's error for a value of the wrong type.
-const wrongTypeTOML = "a value has the wrong type: read_folders, allow, forbid, share_read_only and home_files are lists of strings, such as [\"go test\"]; " +
+const wrongTypeTOML = "a value has the wrong type: read_folders, allow, ask, forbid, share_read_only and home_files are lists of strings, such as [\"go test\"]; " +
 	"edit, isolation, contain and mode are strings; [network] allow is a list of strings; subagents is true or false; the [limits] are numbers; the [agent_api] switches are true or false"
 
 // over is p, read with the keys it leaves out unset, on top of base: each key
@@ -516,12 +522,12 @@ func DecodePolicyChange(b []byte) (Policy, error) {
 		var se *json.SyntaxError
 		switch {
 		case errors.As(err, &te) && te.Field != "":
-			return Policy{}, fmt.Errorf("%s has the wrong type: read_folders, allow, forbid, share_read_only and home_files are lists of strings; "+
+			return Policy{}, fmt.Errorf("%s has the wrong type: read_folders, allow, ask, forbid, share_read_only and home_files are lists of strings; "+
 				"edit, isolation, contain and mode are strings; network.allow is a list of strings; subagents and the agent_api switches are true or false; the limits are numbers", te.Field)
 		case errors.As(err, &se):
 			return Policy{}, errors.New("the body is not valid JSON")
 		case strings.HasPrefix(err.Error(), "json: unknown field "):
-			return Policy{}, fmt.Errorf("unknown key %s; the keys are read_folders, allow, forbid, edit, isolation, share_read_only, subagents, home_files, limits, agent_api, network and sandbox",
+			return Policy{}, fmt.Errorf("unknown key %s; the keys are read_folders, allow, ask, forbid, edit, isolation, share_read_only, subagents, home_files, limits, agent_api, network and sandbox",
 				strings.TrimPrefix(err.Error(), "json: unknown field "))
 		}
 		return Policy{}, errors.New("the body must be one JSON object: the policy")
@@ -545,7 +551,7 @@ var starterLine = regexp.MustCompile(`^([a-z_]+) = (\S+)( +#.*)?$`)
 func FormatPolicy(p Policy) []byte {
 	p.fill()
 	values := map[string]any{
-		"read_folders": p.ReadFolders, "allow": p.Allow, "forbid": p.Forbid, "edit": p.Edit, "isolation": p.Isolation,
+		"read_folders": p.ReadFolders, "allow": p.Allow, "ask": p.Ask, "forbid": p.Forbid, "edit": p.Edit, "isolation": p.Isolation,
 		"share_read_only": p.ShareReadOnly, "subagents": *p.Subagents, "home_files": p.HomeFiles,
 		"limits.max_depth": *p.Limits.MaxDepth, "limits.max_jobs_per_turn": *p.Limits.MaxJobsPerTurn,
 		"limits.max_jobs_per_tree": *p.Limits.MaxJobsPerTree, "limits.max_cost_usd_per_tree": *p.Limits.MaxCostUSDPerTree,

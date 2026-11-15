@@ -59,9 +59,12 @@ type Gateway struct {
 	bodies  *bodyQueue // nil unless KeepBodies was called
 	rewrite Rewriter   // nil unless SetRewriter was called
 	guard   Guard      // nil unless SetGuard was called
-	refused refusals   // which rule refused each call (guard.go)
-	plans   planSeen   // the plan usage last stored (plan.go)
-	prefix  string     // cut from the vendor path before anything reads it (SetPrefix)
+	refused refusals   // the refusal text of each refused call (guard.go)
+	// approvals are the ask commands refused and recorded, waiting for a person
+	// to answer through the API (approvals.go).
+	approvals approvalRegistry
+	plans     planSeen // the plan usage last stored (plan.go)
+	prefix    string   // cut from the vendor path before anything reads it (SetPrefix)
 	// sendExchange: each call's exchange goes upstream in ExchangeHeader
 	// (SendExchange).
 	sendExchange bool
@@ -239,8 +242,9 @@ type exchange struct {
 	// every event of the exchange carries Probe.
 	probe bool
 	// forbid: the run turn's forbid entries, which the guard applies to the
-	// reply (guard.go).
+	// reply (guard.go). ask: its ask entries, held for a person (approvals.go).
 	forbid []string
+	ask    []string
 	// relayed: control's relay took the call for a runner's turn
 	// (ServeRelayed).
 	relayed bool
@@ -575,6 +579,7 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, session, runTurn
 		}
 		if g.guard != nil && runTurn != "" && rl == nil {
 			ex.forbid = g.guard.Forbid(session, runTurn)
+			ex.ask = g.guard.Ask(session, runTurn)
 		}
 		var replayed int
 		if g.rewrite != nil && runTurn != "" && rl == nil {
@@ -666,7 +671,7 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	// for no encoding (Accept-Encoding is dropped); a reply compressed anyway
 	// is not guarded.
 	guarded := false
-	if len(ex.forbid) > 0 && !ex.probe && status == http.StatusOK {
+	if (len(ex.forbid) > 0 || len(ex.ask) > 0) && !ex.probe && status == http.StatusOK {
 		switch strings.ToLower(strings.TrimSpace(header.Get("Content-Encoding"))) {
 		case "", "identity":
 			guarded = true
@@ -720,7 +725,7 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	if guarded {
 		// The agent gets the reply with each refused call renamed; the
 		// adapter reads the tee, so it sees the calls as the model wrote them.
-		resp.Body = g.guardReply(ex, ex.forbid, resp.Body, guardEnd)
+		resp.Body = g.guardReply(ex, ex.forbid, ex.ask, resp.Body, guardEnd)
 		resp.Header.Del("Content-Length")
 		resp.ContentLength = -1
 	}

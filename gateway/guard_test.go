@@ -20,6 +20,7 @@ import (
 type guardFunc func(session, turn string) []string
 
 func (f guardFunc) Forbid(session, turn string) []string { return f(session, turn) }
+func (f guardFunc) Ask(session, turn string) []string    { return nil }
 
 // guardGateway is a gateway with forbid = ["git push"] on turn s1/t_1, in
 // front of a vendor that answers every model call with reply.
@@ -260,7 +261,7 @@ func TestGuardRefusesCodexStream(t *testing.T) {
 func TestGuardHoldsTheCallUntilItEnds(t *testing.T) {
 	pr, pw := io.Pipe()
 	g := New(&url.URL{}, openai.Adapter{}, &event.Memory{})
-	b := g.guardReply(&exchange{}, []string{"git push"}, pr, nil)
+	b := g.guardReply(&exchange{}, []string{"git push"}, nil, pr, func() {})
 	frames := strings.SplitAfter(codexStream, "\n\n")
 	got := make(chan string, 16)
 	go func() {

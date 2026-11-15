@@ -86,6 +86,12 @@ type Config struct {
 	// turns' own tokens are accepted here. Nil accepts none.
 	Engine *run.Engine
 
+	// Approvals is where GET /api/v0/approvals and POST /api/v0/approvals/{id}
+	// read and answer the calls the gateway holds for a person (ask in
+	// permissions.toml). Nil means none are held: the list is empty and an
+	// answer is 404.
+	Approvals ApprovalSource
+
 	// Environ is this service's environment: GET /api/v0/harnesses says
 	// whether an agent's key variable is set in it, never its value.
 	Environ func() []string

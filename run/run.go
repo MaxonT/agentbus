@@ -667,10 +667,11 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	}
 	perm := snap.Policy
 	hint := e.fillInstructions(snap.Instructions, t.session)
-	// The gateway refuses a command of this turn that forbid names, for
-	// claude and codex alike (gateway/guard.go). A harness whose format the
-	// guard does not read refuses a turn with forbid (Harness.Refuse).
-	e.turnRules.set(t.session, t.id, perm.Forbid)
+	// The gateway refuses a command of this turn that forbid names, and holds
+	// one that ask names until a person answers, for claude and codex alike
+	// (gateway/guard.go, gateway/approvals.go). A harness whose format the
+	// guard does not read refuses a turn with forbid or ask (Harness.Refuse).
+	e.turnRules.set(t.session, t.id, perm.Forbid, perm.Ask)
 	baseURL := e.cfg.BaseURL + "/s/" + t.session + "/t/" + t.id
 	if e.cfg.Wire == nil {
 		return nil, refuse(http.StatusNotFound, "this service starts no turns")
@@ -1241,7 +1242,7 @@ func turnArgs(h harness.Harness, hint, resumeID, model string, w Writes, perm se
 // turnSpec is what a turn's command line is built from (turnArgs).
 func turnSpec(hint, resumeID, model string, w Writes, perm settings.Policy, prompt string) harness.Turn {
 	return harness.Turn{Hint: hint, ResumeID: resumeID, Model: model, Writes: w,
-		ReadFolders: perm.ReadFolders, Allow: perm.Allow, Forbid: perm.Forbid,
+		ReadFolders: perm.ReadFolders, Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid,
 		NoSubagents: perm.Subagents != nil && !*perm.Subagents, Walled: perm.Sandbox.Mode == settings.SandboxOn, Prompt: prompt}
 }
 

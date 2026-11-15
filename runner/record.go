@@ -45,7 +45,7 @@ const callBudget = jobs.MaxBody - 128<<10
 // the runner's gateway makes and control's relay cannot: own replay's refusal
 // and the guard's. Every other event of a relayed call control records
 // itself.
-var relayOnly = map[event.Kind]bool{event.ReplayFailed: true, event.ToolRefused: true}
+var relayOnly = map[event.Kind]bool{event.ReplayFailed: true, event.ToolRefused: true, event.ApprovalRequested: true}
 
 // LiveEvery is how often a running turn's new record goes to control, at
 // most.

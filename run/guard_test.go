@@ -7,8 +7,8 @@ import (
 
 func TestTurnRules(t *testing.T) {
 	e := &Engine{}
-	e.turnRules.set("s1", "t_1", []string{"git push"})
-	e.turnRules.set("s1", "t_2", nil)
+	e.turnRules.set("s1", "t_1", []string{"git push"}, nil)
+	e.turnRules.set("s1", "t_2", nil, nil)
 	if got := e.Forbid("s1", "t_1"); !slices.Equal(got, []string{"git push"}) {
 		t.Errorf("Forbid = %q", got)
 	}

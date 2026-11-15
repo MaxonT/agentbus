@@ -40,6 +40,7 @@ var RunnerKinds = map[event.Kind]bool{
 	event.SessionOpened: true, event.SessionClosed: true, event.ContextAdded: true,
 	event.NetworkRefused: true, event.SchemaUnexpected: true, event.ReplayFailed: true,
 	event.ToolRefused: true, event.CallRefused: true, event.VendorCalled: true,
+	event.ApprovalRequested: true,
 }
 
 // RecordAck answers a RecordBatch: how many events were new.

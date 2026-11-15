@@ -324,3 +324,11 @@ func TestCloseLost(t *testing.T) {
 		t.Fatalf("closed again: %d", n)
 	}
 }
+
+// A runner emits approval.requested when an ask rule triggers, so control must
+// accept it in a record batch (else the batch is refused and forwarding wedges).
+func TestRunnerKindsHasApprovalRequested(t *testing.T) {
+	if !RunnerKinds[event.ApprovalRequested] {
+		t.Fatal("approval.requested is not an event a runner may send")
+	}
+}

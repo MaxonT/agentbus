@@ -297,8 +297,10 @@ type Turn struct {
 	ResumeID string
 	Model    string
 	Writes   Writes
-	// The lists of permissions.toml.
-	ReadFolders, Allow, Forbid []string
+	// The lists of permissions.toml. Ask commands wait for a person: the
+	// gateway holds them (gateway/approvals.go), and claude lets them through
+	// its own rules as Allow does, so it does not refuse one after an allow.
+	ReadFolders, Allow, Ask, Forbid []string
 	// NoSubagents turns the harness's own subagents off for the turn, on
 	// its command line (permissions.toml subagents = false). Its own config
 	// files are never edited.

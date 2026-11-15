@@ -32,6 +32,8 @@ type stack struct {
 	before func(st *store.Store)
 	// settings, when set, is the settings store, in place of permissions.
 	settings settings.Store
+	// approvals, when set, is the held-reply source for /api/v0/approvals.
+	approvals ApprovalSource
 }
 
 // stackEnv is an API on loopback with a whole stack behind it.
@@ -85,6 +87,9 @@ func stackEnv(t *testing.T, s stack) *env {
 		Settings: cfgStore, Folders: fr}
 	if s.turnsToken {
 		cfg.TurnsToken = turnsTok
+	}
+	if s.approvals != nil {
+		cfg.Approvals = s.approvals
 	}
 	a, err := New(cfg)
 	if err != nil {
