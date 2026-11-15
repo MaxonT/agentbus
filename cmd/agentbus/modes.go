@@ -85,7 +85,7 @@ func (c config) modeName() string {
 	return c.mode
 }
 
-const usage = `usage: agentbus up     [-listen 127.0.0.1:8787] [-origin http://localhost:5173] [-replay=false] [-max-runs 4] [-open=false]
+const usage = `usage: agentbus up     [-listen 127.0.0.1:8787] [-origin http://localhost:5173] [-replay=false] [-max-runs 4] [-open]
        agentbus server [-listen 127.0.0.1:8787] [-origin http://localhost:5173] [-replay=false]
        agentbus runner -server URL [-gateway server|local] [-capacity 4] [-name NAME] [-folder DIR]... [-labels a,b] [-listen 127.0.0.1:0] [-replay=false]
        agentbus login URL [runner's flags]   (on a machine, once: sign it in to the control at URL; approve it on the Runners page)
@@ -134,7 +134,7 @@ func parse(args []string, home string, stderr io.Writer) (config, bool) {
 	openOn := new(bool)
 	switch c.mode {
 	case modeUp:
-		fl.BoolVar(openOn, "open", true, "open the cockpit's sign-in link in the browser on a desktop; false only prints it")
+		fl.BoolVar(openOn, "open", false, "also open the cockpit's sign-in link in this desktop's browser; without it the link is only printed")
 		fl.IntVar(maxRuns, "max-runs", engine.DefaultMaxRuns, "how many turns the built-in runner runs at once, 1 to 64; more wait in the queue")
 	case modeRunner:
 		fl.IntVar(maxRuns, "capacity", engine.DefaultMaxRuns, "how many jobs this runner runs at once, 1 to 64")

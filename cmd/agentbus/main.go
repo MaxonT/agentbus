@@ -207,7 +207,7 @@ type config struct {
 	runGrace time.Duration
 	// logMax is where logs/service.log rotates, in bytes. Zero means 10 MiB.
 	logMax int64
-	// noOpen: agentbus up -open=false, which prints the sign-in link and
+	// noOpen: agentbus up without -open (the default), which prints the sign-in link and
 	// opens no browser.
 	noOpen bool
 	// noReplay turns own replay off: claude's and codex's next turns use the

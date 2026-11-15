@@ -62,16 +62,17 @@ installed, and a Claude and a ChatGPT subscription.
 1. **Start AgentBus.**
 
    ```sh
-   agentbus up
+   agentbus up -open
    ```
 
-   It prints a sign-in link, `http://127.0.0.1:8787/?t=…`, and opens it in your browser. The
-   cockpit comes with `agentbus up`: nothing else to install. The link works once, for 10 minutes.
-   No browser opened, or the link expired? Stop `agentbus up` (Ctrl-C) and start it again for a
-   new link.
+   It prints a sign-in link, `http://127.0.0.1:8787/?t=…`, and with `-open` opens it in your
+   browser. Without `-open` (on a server, say) it only prints the link. The cockpit comes with
+   `agentbus up`: nothing else to install. The link works once, for 10 minutes. The link expired?
+   Stop `agentbus up` (Ctrl-C) and start it again for a new one.
 
    In another tab or browser, paste your token on the connect screen instead. The token is the file
-   `token` in the data folder (`$AGENTBUS_HOME`, by default `~/.local/share/agentbus`). Copy it
+   `token` in the data folder that `agentbus up` prints when it starts (`$AGENTBUS_HOME`, by default
+   `~/.local/share/agentbus`). Copy it
    without showing it: `pbcopy < ~/.local/share/agentbus/token` on a Mac, or
    `xclip -sel c < ~/.local/share/agentbus/token` on Linux. Anyone with the token controls your
    agents, so keep it to yourself.
