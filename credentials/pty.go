@@ -30,7 +30,7 @@ func startInPty(cmd *exec.Cmd) (*os.File, error) {
 	}
 	defer tty.Close() // cmd holds its own copy
 	fd := int(tty.Fd())
-	if err := unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, &unix.Winsize{Row: 50, Col: ptyColumns}); err != nil {
+	if err := unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, &unix.Winsize{Row: ptyRows, Col: ptyColumns}); err != nil {
 		m.Close()
 		return nil, err
 	}

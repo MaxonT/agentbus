@@ -89,6 +89,14 @@ read code
 printf '\rOAuth error: That code was not accepted.\r\rPress Enter to retry.\r'
 sleep 60 &
 read again`, "code was rejected", true, time.Minute},
+		// claude 2.1.321 places words by column and skips cells that show
+		// the right character already (2026-11-15): "OAuth" is left from
+		// an earlier frame, and only "error: ..." is written after it.
+		"drawn": {`printf 'Open https://example.test/auth\r\nOAuth\r\n'
+read code
+printf '\033[2;1H\033[6Cerror:\033[14GThat code was not accepted.\r\n'
+sleep 60 &
+read again`, "code was rejected", true, time.Minute},
 		// claude setup-token 2.1.321 given the right state and a wrong code
 		// (2026-11-12): nothing more is printed, and it keeps running.
 		"silent": {`echo "Open https://example.test/auth"
@@ -224,5 +232,44 @@ func TestConnectNotOnPath(t *testing.T) {
 	want := "agentbus-no-such-login is not on PATH (searched: /nowhere/bin); add the folder that holds agentbus-no-such-login to PATH"
 	if !errors.As(err, &missing) || missing.Why != want {
 		t.Fatalf("%v", err)
+	}
+}
+
+// A login that turns bracketed paste on gets the code as a paste and Enter
+// as a key of its own, as claude setup-token 2.1.321 needs on Linux
+// (2026-11-15): given both in one write it did nothing. Its token is drawn
+// with a cursor jump over characters an earlier frame left on the screen,
+// and is read whole.
+func TestConnectPastesTheCode(t *testing.T) {
+	m := &Manager{Store: &Subscriptions{Dir: t.TempDir()},
+		Logins: map[string]Login{"claude": fakeLogin(t, `stty raw -echo
+printf '\033[?2004h'
+printf '\033[3;9Hoat01\033[1;1HOpen https://example.test/auth\r\n'
+p=$(dd bs=256 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+[ "$p" = 1b5b3230307e633064651b5b3230317e ] || exit 3
+e=$(dd bs=256 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+[ "$e" = 0d ] || exit 4
+printf '\033[2;1HYour\033[6GOAuth\033[12Gtoken:\r\033[1B'
+printf 'sk-fake-\033[5C-AAAABBBBCCCCDDDDEEEEFFFF0000\033[K\r\r\n'`)}}
+	if _, err := m.Connect("claude"); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if v, _ := m.View("claude"); len(v.Output) == 1 || v.State != Running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no link")
+		}
+	}
+	if err := m.Input("claude", "c0de"); err != nil {
+		t.Fatal(err)
+	}
+	if v := waitState(t, m, "claude"); v.State != Connected {
+		t.Fatalf("%+v", v)
+	}
+	got, err := m.Store.Credential(Need{Access: AccessSubscription, Harness: "claude"})
+	if err != nil || got.Token != fakeToken {
+		t.Fatalf("credential: %v", err)
 	}
 }

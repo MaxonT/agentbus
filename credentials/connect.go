@@ -12,7 +12,6 @@ package credentials
 // so no form of the token, reaches a reply or a log.
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -21,7 +20,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -98,10 +99,6 @@ type View struct {
 // maxLines bounds the links kept.
 const maxLines = 20
 
-// escapes are terminal escape sequences, taken out before a token is looked
-// for, so one inside a token does not hide it.
-var escapes = regexp.MustCompile("\x1b(\\[[0-9;?]*[ -/]*[@-~]|\\][^\x07\x1b]*(\x07|\x1b\\\\)|[()*+./-][ -~]|[ -/]*[0-~])")
-
 // link is a web address in what the login prints.
 var link = regexp.MustCompile(`https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+`)
 
@@ -112,7 +109,8 @@ type connecting struct {
 	mu      sync.Mutex
 	links   []string
 	code    string // the one-time code it printed, to enter at the link
-	text    []byte // what it printed, escapes taken out, for the token
+	token   string // the latest token on its screen
+	paste   bool   // its terminal takes a paste as one (bracketed paste)
 	state   string
 	why     string
 	late    bool // it ran past the Manager's Wait and was stopped
@@ -140,57 +138,67 @@ func (c *connecting) view() View {
 		Rejected: c.state == Failed && (c.refused || c.unanswered) && !c.cancelled, Cancelled: c.state == Failed && c.cancelled}
 }
 
-// take reads the login's output until it ends: each ended line's links are
+// take reads the login's output until it ends, as its terminal shows it
+// (screen.go). Each line on the screen, once drawn, is read: its links are
 // kept for showing while it runs (a link that names the token's prefix
-// never is), and the text, for the token. It calls shown with each new link.
+// never is), and its token. It calls shown with each new link.
 func (c *connecting) take(r io.Reader, shown func(string)) {
-	var line []byte
+	var s *screen
+	// The paste mode goes with each line: a link is shown with the mode
+	// that holds when the person reads it.
+	s = newScreen(ptyColumns, ptyRows, func(line string) { c.line(line, s.paste, shown) })
 	buf := make([]byte, 4096)
-	end := func() {
-		plain := escapes.ReplaceAll(line, nil)
-		c.mu.Lock()
-		c.text = append(append(c.text, plain...), '\n')
-		refused := !c.refused && c.onRefused != nil && c.login.Refused != nil && c.login.Refused.Match(plain)
-		if refused {
-			c.refused = true
-		}
-		var added []string
-		// A connect that ended shows nothing more, even when its login
-		// still prints.
-		ended := c.state == Connected || c.state == Failed
-		if t := bytes.TrimSpace(plain); !ended && c.login.Code != nil && c.code == "" && c.login.Code.Match(t) {
-			c.code = string(t)
-			added = append(added, c.code)
-		}
-		for _, l := range link.FindAll(plain, -1) {
-			if !ended && (c.login.Prefix == "" || !bytes.Contains(l, []byte(c.login.Prefix))) && len(c.links) < maxLines {
-				c.links = append(c.links, string(l))
-				added = append(added, string(l))
-			}
-		}
-		c.mu.Unlock()
-		for _, l := range added {
-			shown(l)
-		}
-		if refused {
-			c.onRefused()
-		}
-		line = line[:0]
-	}
 	for {
 		n, err := r.Read(buf)
-		for _, b := range buf[:n] {
-			if b == '\n' || b == '\r' {
-				end()
-			} else {
-				line = append(line, b)
-			}
-		}
+		s.Write(buf[:n])
 		if err != nil {
 			break
 		}
+		// A line the cursor is not on is drawn; the cursor's may be half.
+		s.report(true)
+		c.mu.Lock()
+		c.paste = s.paste
+		c.mu.Unlock()
 	}
-	end()
+	s.report(false)
+}
+
+// line reads one line of the login's screen; paste is its terminal's paste
+// mode.
+func (c *connecting) line(line string, paste bool, shown func(string)) {
+	c.mu.Lock()
+	c.paste = paste
+	if c.login.Token != nil {
+		if t := c.login.Token.FindString(line); t != "" {
+			c.token = t
+		}
+	}
+	refused := !c.refused && c.onRefused != nil && c.login.Refused != nil && c.login.Refused.MatchString(line)
+	if refused {
+		c.refused = true
+	}
+	var added []string
+	// A connect that ended shows nothing more, even when its login
+	// still prints.
+	ended := c.state == Connected || c.state == Failed
+	if t := strings.TrimSpace(line); !ended && c.login.Code != nil && c.code == "" && c.login.Code.MatchString(t) {
+		c.code = t
+		added = append(added, c.code)
+	}
+	for _, l := range link.FindAllString(line, -1) {
+		// A line is read again each time it is drawn: a link is shown once.
+		if !ended && (c.login.Prefix == "" || !strings.Contains(l, c.login.Prefix)) && len(c.links) < maxLines && !slices.Contains(c.links, l) {
+			c.links = append(c.links, l)
+			added = append(added, l)
+		}
+	}
+	c.mu.Unlock()
+	for _, l := range added {
+		shown(l)
+	}
+	if refused {
+		c.onRefused()
+	}
 }
 
 // Manager runs at most one login per harness, and keeps what they print.
@@ -221,6 +229,10 @@ type Manager struct {
 
 // MaxWait is how long a login may run by default.
 const MaxWait = 10 * time.Minute
+
+// pasteSettle is the pause between a paste and the Enter after it, so the
+// login reads them as two inputs: 150ms worked on claude 2.1.321.
+const pasteSettle = 150 * time.Millisecond
 
 // DefaultAnswerWait is how long a login may run after a code by default.
 const DefaultAnswerWait = 30 * time.Second
@@ -330,8 +342,8 @@ func (m *Manager) Connect(harness string) (View, error) {
 		}
 		tty.Close()
 		c.mu.Lock()
-		si, ok := l.signin(c.text, home, m.Store.now())
-		c.text = nil
+		si, ok := l.signin(c.token, home, m.Store.now())
+		c.token = ""
 		wasLate, wasRefused, wasUnanswered, wasCancelled := c.late, c.refused, c.unanswered, c.cancelled
 		// From here a Cancel finds nothing to stop: what was read above
 		// decides how the connect ends.
@@ -409,7 +421,24 @@ func (m *Manager) Input(harness, line string) error {
 	// Enter is a carriage return, as a terminal sends it: a login that
 	// reads the terminal raw (claude's) takes it as Enter, and one that
 	// reads it by lines gets a newline.
-	if _, err := io.WriteString(c.tty, line+"\r"); err != nil {
+	//
+	// A login that turned bracketed paste on is sent the line as a terminal
+	// sends a paste, and Enter after it as a key of its own. claude
+	// setup-token 2.1.321 (Linux, 2026-11-15) given code+"\r" in one write
+	// showed the code and did nothing more; given the paste, a pause and
+	// then "\r", it printed its token within two seconds.
+	c.mu.Lock()
+	paste := c.paste
+	c.mu.Unlock()
+	typed := line
+	if paste {
+		if _, err := io.WriteString(c.tty, "\x1b[200~"+line+"\x1b[201~"); err != nil {
+			return err
+		}
+		time.Sleep(pasteSettle)
+		typed = ""
+	}
+	if _, err := io.WriteString(c.tty, typed+"\r"); err != nil {
 		return err
 	}
 	m.logf("subscription.input_received harness=%s", harness)

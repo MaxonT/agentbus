@@ -215,12 +215,12 @@ printf 'https://example.test/x?t=`+fakeToken+`\n'`)
 	read := &connecting{login: l}
 	read.take(r, func(s string) { shown = append(shown, s) })
 	cmd.Wait()
-	if si, _ := l.signin(read.text, "", time.Now()); si.Token != fakeToken || len(shown) != 1 || shown[0] != "https://example.test/auth" {
+	if si, _ := l.signin(read.token, "", time.Now()); si.Token != fakeToken || len(shown) != 1 || shown[0] != "https://example.test/auth" {
 		t.Fatalf("%q %q", shown, si.Token)
 	}
 	c := &connecting{login: l}
 	c.take(strings.NewReader("a https://example.test/a "+fakeToken+"\nx sk-fa\x1b(Bke-oat01-AAAABBBBCCCCDDDDEEEEFFFF0000\n"), func(string) {})
-	if si, _ := l.signin(c.text, "", time.Now()); len(c.view().Output) != 1 || c.view().Output[0] != "https://example.test/a" || si.Token != fakeToken {
+	if si, _ := l.signin(c.token, "", time.Now()); len(c.view().Output) != 1 || c.view().Output[0] != "https://example.test/a" || si.Token != fakeToken {
 		t.Fatalf("%q %q", c.view().Output, si.Token)
 	}
 }

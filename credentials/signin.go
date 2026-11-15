@@ -58,13 +58,12 @@ func (l Login) envWith(home string) []string {
 	return append(append(env, l.Set...), l.Home+"="+home)
 }
 
-// signin is what the login gave: the token it printed (printed is its
-// output), or the sign-in it kept in its folder home. ok is false when it
+// signin is what the login gave: the token it printed (printed, read off
+// its screen), or the sign-in it kept in its folder home. ok is false when it
 // gave none.
-func (l Login) signin(printed []byte, home string, now time.Time) (Signin, bool) {
+func (l Login) signin(printed string, home string, now time.Time) (Signin, bool) {
 	if l.Home == "" {
-		tok := string(l.Token.Find(printed))
-		return Signin{Token: tok, Expires: now.UTC().Add(l.Valid)}, tok != ""
+		return Signin{Token: printed, Expires: now.UTC().Add(l.Valid)}, printed != ""
 	}
 	b, err := os.ReadFile(filepath.Join(home, l.File))
 	if err != nil {
