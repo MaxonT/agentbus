@@ -142,10 +142,10 @@ their defaults are in `/docs`, under Settings).
   signs in with OAuth keeps its token in the Keychain, and macOS asks to let the session read it;
   deny it to keep that server off. What a server does is outside AgentBus's record.
 - Claude's browser (Chrome) cannot run in AgentBus sessions: it needs the tool's own sign-in.
-- Antigravity: on a Mac, use a Gemini API key, since its Google sign-in lives in the Keychain; on
-  Linux the Google sign-in connects in Settings. It gets no instructions from AgentBus, a turn with
-  forbidden commands set is refused on it, and it cannot turn off its own subagents. Using its Google
-  sign-in through a third-party tool is at your own risk with Google (its terms, clause 6).
+- Antigravity: use it with a Gemini API key (Settings, Subscriptions). Its Google sign-in does not
+  work through AgentBus yet: before any work it checks your account with Google directly, outside
+  AgentBus, and that check fails. It gets no instructions from AgentBus, a turn with forbidden
+  commands set is refused on it, and it cannot turn off its own subagents.
 
 ## Docs
 
