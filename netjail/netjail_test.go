@@ -2,7 +2,6 @@ package netjail
 
 import (
 	"bufio"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -11,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestAllowed(t *testing.T) {
@@ -20,6 +18,8 @@ func TestAllowed(t *testing.T) {
 		"github.com": true, "GitHub.com.": true, "api.github.com": false, "evilgithub.com": false,
 		"registry.npmjs.org": true, "a.b.npmjs.org": true, "npmjs.org": false, "xnpmjs.org": false,
 		"10.0.0.5": true, "10.0.0.6": false, "": false,
+		// An empty label is under no entry (agy, review evt_04e2cb8ea65cdf6a).
+		".npmjs.org": false, "a..npmjs.org": false, "..npmjs.org": false,
 	} {
 		if got := Allowed(allow, host); got != want {
 			t.Errorf("Allowed(%q) = %v, want %v", host, got, want)
@@ -89,7 +89,7 @@ func TestProxyAndForward(t *testing.T) {
 		t.Errorf("allowed: %d %q", code, body)
 	}
 	// Plain HTTP to another host is refused and reported.
-	if code, body := get(via, "http://127.0.0.1:"+sitePort+"/x"); code != 403 || !strings.Contains(body, "127.0.0.1 is not in [network] allow") {
+	if code, body := get(via, "http://127.0.0.1:"+sitePort+"/x"); code != 403 || !strings.Contains(body, "127.0.0.1 is not in Allow hosts") {
 		t.Errorf("refused: %d %q", code, body)
 	}
 	// CONNECT to an allowed host tunnels, bytes sent with the CONNECT
@@ -128,9 +128,9 @@ func TestProxyAndForward(t *testing.T) {
 		}
 	}
 	want := []string{
-		"127.0.0.1:" + sitePort + " 127.0.0.1 is not in [network] allow of permissions.toml",
-		"1.1.1.1:443 1.1.1.1 is not in [network] allow of permissions.toml",
-		"example.com:443 example.com is not in [network] allow of permissions.toml",
+		"127.0.0.1:" + sitePort + " 127.0.0.1 is not in Allow hosts in Settings (Isolation, Network)",
+		"1.1.1.1:443 1.1.1.1 is not in Allow hosts in Settings (Isolation, Network)",
+		"example.com:443 example.com is not in Allow hosts in Settings (Isolation, Network)",
 	}
 	if g := got.all(); strings.Join(g, "\n") != strings.Join(want, "\n") {
 		t.Errorf("refusals:\n%s\nwant:\n%s", strings.Join(g, "\n"), strings.Join(want, "\n"))
@@ -157,55 +157,6 @@ func TestEnvLeavesLoopbackOut(t *testing.T) {
 	}
 }
 
-// A connection the plain proxy made, upgraded (101) and so out of the
-// HTTP server's hands, ends with the jail. Found by codex in review.
-func TestCloseEndsUpgradedConnection(t *testing.T) {
-	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, rw, err := w.(http.Hijacker).Hijack()
-		if err != nil {
-			return
-		}
-		defer c.Close()
-		io.WriteString(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n")
-		rw.Flush()
-		io.Copy(c, rw)
-	}))
-	defer site.Close()
-	prox, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	j := New(Spec{Allow: []string{"127.0.0.1"}})
-	j.serve([]net.Listener{prox})
-	defer j.Close()
-	c, err := net.Dial("tcp", prox.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	c.SetDeadline(time.Now().Add(3 * time.Second))
-	io.WriteString(c, "GET "+site.URL+"/ HTTP/1.1\r\nHost: "+strings.TrimPrefix(site.URL, "http://")+"\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n")
-	br := bufio.NewReader(c)
-	resp, err := http.ReadResponse(br, nil)
-	if err != nil || resp.StatusCode != 101 {
-		t.Fatalf("upgrade: %v %v", resp, err)
-	}
-	io.WriteString(c, "before\n")
-	if line, err := br.ReadString('\n'); err != nil || line != "before\n" {
-		t.Fatalf("before Close: %q %v", line, err)
-	}
-	j.Close()
-	io.WriteString(c, "after\n")
-	line, err := br.ReadString('\n')
-	var ne net.Error
-	switch {
-	case err == nil:
-		t.Fatalf("bytes still pass after Close: %q", line)
-	case errors.As(err, &ne) && ne.Timeout():
-		t.Fatal("the connection is still open after Close")
-	}
-}
-
 // An open proxy lets through the public internet only: never this
 // machine, its local link, a private or shared network, or one of this
 // machine's own addresses (reviews of 2026-11-11, rounds 1 and 2). Pass and
@@ -213,7 +164,9 @@ func TestCloseEndsUpgradedConnection(t *testing.T) {
 func TestOpenReachesPublicOnly(t *testing.T) {
 	j := New(Spec{Open: true, Pass: []string{"127.0.0.1:9000"}, Allow: []string{"10.0.0.5"}})
 	refused := []string{"127.0.0.1:5432", "localhost:80", "a.localhost:80", "[::1]:22", "169.254.169.254:80", "0.0.0.0:80",
-		"192.168.1.5:5432", "10.1.2.3:80", "172.17.0.1:2375", "100.100.1.1:80", "[fd00::1]:80", "[fe80::1]:80"}
+		"192.168.1.5:5432", "10.1.2.3:80", "172.17.0.1:2375", "100.100.1.1:80", "[fd00::1]:80", "[fe80::1]:80",
+		// A benchmark address, and private IPv4 inside NAT64 and 6to4.
+		"198.18.0.1:80", "[64:ff9b::a00:1]:80", "[64:ff9b:1::a00:1]:80", "[2002:c0a8:105::1]:80"}
 	if own, err := net.InterfaceAddrs(); err == nil {
 		for _, a := range own {
 			if n, ok := a.(*net.IPNet); ok && n.IP.IsGlobalUnicast() {

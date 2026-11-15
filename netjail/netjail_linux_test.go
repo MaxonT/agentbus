@@ -135,7 +135,7 @@ func TestAgentClosedOff(t *testing.T) {
 		t.Errorf("agent said:\n%s\n%s", stdout.String(), stderr.String())
 	}
 	r := got.all()
-	if len(r) != 1 || r[0] != "blocked.example:80 blocked.example is not in [network] allow of permissions.toml" {
+	if len(r) != 1 || r[0] != "blocked.example:80 blocked.example is not in Allow hosts in Settings (Isolation, Network)" {
 		t.Errorf("refusals: %q", r)
 	}
 }

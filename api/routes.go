@@ -136,7 +136,7 @@ var tags = []struct {
 }
 
 const (
-	turnIDDoc = "A turn id, as POST /api/v0/turns named it. Another shape gets 404."
+	turnIDDoc = "A turn id (such as t_cf58baf9ca42cb1d), as POST /api/v0/turns named it, never the turn's number in its session. Another shape gets 404."
 	// turnSessionQuery is the session query of a route on one turn.
 	turnSessionDoc = "Only this session's turn of that id. The same turn id can be in two sessions; without session the newest is used."
 )
@@ -269,7 +269,7 @@ var routes = slices.Concat([]route{
 				"A file the person changed since refuses the whole apply, and nothing is written. Applying a turn again changes nothing."}},
 		serve: (*API).applyTurn},
 	{method: "POST", path: "/api/v0/turns/{id}/review", op: "reviewTurn",
-		idDoc:   "The id of the turn to review. Another shape gets 404.",
+		idDoc:   "The id of the turn to review (such as t_cf58baf9ca42cb1d), never the turn's number in its session. Another shape gets 404.",
 		tag:     "Turns",
 		summary: "Review a turn",
 		doc: "Ask another agent to review a turn: this starts a review turn, by agent, read-only, in a session of its own, in the reviewed turn's copy as it is.\n\n" +
@@ -391,9 +391,8 @@ var routes = slices.Concat([]route{
 		tag:     "Agents",
 		summary: "List agents",
 		doc: "The saved agents, in the order they were made. A turn names one by id in agent.\n\n" +
-			"A new data folder of agentbus up starts with one agent for each harness its machine has, of claude (Claude Code), codex (Codex) and agy (Antigravity), " +
-			"each on its own subscription with its default model, its id the harness's name. One of agentbus server starts with none: add them from what GET /api/v0/harnesses reports. " +
-			"A data folder made before 0.5.1 keeps the agents it had.",
+			"A new data folder starts with none, under agentbus up as under agentbus server: add them from what GET /api/v0/harnesses reports. " +
+			"A data folder that already had agents keeps them.",
 		replies: []reply{ok(200, AgentList{}, "The agents."), badRequest},
 		turn:    anyRead,
 		tools: []tool{{name: "list_agents", effect: effectNone,

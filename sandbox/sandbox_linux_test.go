@@ -61,6 +61,7 @@ func TestClosedToRoot(t *testing.T) {
 		"/srv":              {mode: dir | 0o750, gid: 50},
 		"/srv/data":         {mode: dir | 0o750, uid: 0, gid: 50},
 		"/srv/groupread":    {mode: 0o040, uid: 501, gid: 0},
+		"/srv/rootgroup":    {mode: 0o050, uid: 0, gid: 50},
 	}
 	stat := func(p string) (os.FileInfo, error) {
 		if f, ok := files[p]; ok {
@@ -75,6 +76,9 @@ func TestClosedToRoot(t *testing.T) {
 		{"/home/open/codex", ""},
 		{"/srv/data", ""},
 		{"/srv/groupread", ""},
+		// root's own file, open only to its group: root reads by its owner
+		// bits, which give nothing (review evt_f098e0f288b88388).
+		{"/srv/rootgroup", "/srv/rootgroup"},
 		{"/home/u/claude", "/home/u"},
 		{"/home/open/secret", "/home/open/secret"},
 		{"/home/open/folder", "/home/open/folder"},

@@ -74,7 +74,7 @@ func checkAsked(tx *sql.Tx, team string, links Links, lim Limits) error {
 		return ErrBadState
 	}
 	if links.Chain.Depth > lim.MaxDepth {
-		return &LimitError{fmt.Sprintf("work may be asked for at most %d levels below the person's turn, and this would be level %d (max_depth in [limits] of permissions.toml)", lim.MaxDepth, links.Chain.Depth)}
+		return &LimitError{fmt.Sprintf("work may be asked for at most %d levels below the person's turn, and this would be level %d (Depth in Settings, Limits)", lim.MaxDepth, links.Chain.Depth)}
 	}
 	var n int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE team = ? AND json_extract(links, '$.asker.session') = ?
@@ -82,14 +82,14 @@ func checkAsked(tx *sql.Tx, team string, links Links, lim Limits) error {
 		return fmt.Errorf("queue: count asked: %w", err)
 	}
 	if n >= lim.MaxPerTurn {
-		return &LimitError{fmt.Sprintf("one turn may ask for at most %s, and this turn has asked for %d (max_jobs_per_turn in [limits] of permissions.toml)", turnsOrReviews(lim.MaxPerTurn), n)}
+		return &LimitError{fmt.Sprintf("one turn may ask for at most %s, and this turn has asked for %d (Turns per request in Settings, Limits)", turnsOrReviews(lim.MaxPerTurn), n)}
 	}
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE team = ? AND json_extract(links, '$.asker.session') IS NOT NULL
 		AND json_extract(links, '$.chain.root') = ?`, team, links.Chain.Root).Scan(&n); err != nil {
 		return fmt.Errorf("queue: count asked: %w", err)
 	}
 	if n >= lim.MaxPerTree {
-		return &LimitError{fmt.Sprintf("work started from one session may ask for at most %s in all, and %d have been asked for (max_jobs_per_tree in [limits] of permissions.toml)", turnsOrReviews(lim.MaxPerTree), n)}
+		return &LimitError{fmt.Sprintf("work started from one session may ask for at most %s in all, and %d have been asked for (Turns per request tree in Settings, Limits)", turnsOrReviews(lim.MaxPerTree), n)}
 	}
 	return nil
 }

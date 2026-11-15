@@ -50,10 +50,10 @@ const RefusedPrefix = "AgentBusRefused_"
 // refusalText is what the model reads in place of a refused call's output.
 func refusalText(rule string) string {
 	if rule == "" {
-		return "Refused by the AgentBus gateway: a forbid rule in permissions.toml matched this command. The command did not run."
+		return "Refused by the AgentBus gateway: a Forbid rule in Settings matched this command. The command did not run."
 	}
-	return "Refused by the AgentBus gateway: the forbid rule " + strconv.Quote(rule) +
-		" in permissions.toml matched this command. The command did not run."
+	return "Refused by the AgentBus gateway: the Forbid rule " + strconv.Quote(rule) +
+		" in Settings matched this command. The command did not run."
 }
 
 // refusals remembers which rule refused each call id, for the refusal text.

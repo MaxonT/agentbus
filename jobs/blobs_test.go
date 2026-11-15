@@ -84,6 +84,19 @@ func TestBlobPacks(t *testing.T) {
 			t.Fatalf("%s not fetched", h)
 		}
 	}
+	// One blob read alone comes whole, and its connection closes after it,
+	// as a fetched pack's does: its writes have a deadline.
+	req1, _ := http.NewRequest("GET", srv.URL+"/api/v0/runner/blobs/"+hs[1], nil)
+	req1.Header.Set("Authorization", "Bearer "+e.Token)
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body1, _ := io.ReadAll(resp1.Body)
+	resp1.Body.Close()
+	if resp1.StatusCode != 200 || string(body1) != "file 1" || !resp1.Close {
+		t.Fatalf("one blob: %d %q, connection closed %v", resp1.StatusCode, body1, resp1.Close)
+	}
 	// Named but not held: 404, the missing named.
 	if err := c.GetPack(ctx, []string{hs[0], gone}, func(string, io.Reader) error { return nil }); !errors.Is(err, blobs.ErrNotFound) {
 		t.Fatalf("a pack with a blob not held: %v", err)

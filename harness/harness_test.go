@@ -42,6 +42,11 @@ func TestRegistry(t *testing.T) {
 	if _, ok := Get("opencode"); ok {
 		t.Error("a planned harness can start turns")
 	}
+	// A planned harness is shown by its product's own name, as the others
+	// are (Claude Code, Codex, Antigravity).
+	if p := Planned(); len(p) != 1 || p[0].Name != "opencode" || p[0].Label != "OpenCode" {
+		t.Errorf("Planned = %+v", p)
+	}
 	if got := NameList(); got != "claude, codex or agy" {
 		t.Errorf("NameList = %q", got)
 	}

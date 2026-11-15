@@ -129,6 +129,7 @@ type Tail struct {
 	mu  sync.Mutex
 	buf []byte
 	cut bool // bytes were dropped from the front
+	mid bool // the last byte dropped was not a line end: buf starts inside a line
 }
 
 func (t *Tail) Write(p []byte) (int, error) {
@@ -138,23 +139,39 @@ func (t *Tail) Write(p []byte) (int, error) {
 	if len(p) >= t.Max {
 		// Cut only when bytes were dropped: one write of exactly Max into
 		// an empty buffer keeps it all.
-		t.cut = t.cut || len(p) > t.Max || len(t.buf) > 0
+		switch {
+		case len(p) > t.Max:
+			t.drop(p[len(p)-t.Max-1])
+		case len(t.buf) > 0:
+			t.drop(t.buf[len(t.buf)-1])
+		}
 		t.buf = append(t.buf[:0], p[len(p)-t.Max:]...)
 		return n, nil
 	}
 	if over := len(t.buf) + len(p) - t.Max; over > 0 {
+		t.drop(t.buf[over-1])
 		t.buf = append(t.buf[:0], t.buf[over:]...)
-		t.cut = true
 	}
 	t.buf = append(t.buf, p...)
 	return n, nil
 }
+
+// drop notes that bytes were dropped, last the byte last.
+func (t *Tail) drop(last byte) { t.cut, t.mid = true, last != '\n' }
 
 // Bytes returns what is kept, and whether anything was dropped before it.
 func (t *Tail) Bytes() ([]byte, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]byte(nil), t.buf...), t.cut
+}
+
+// Lines returns what is kept, and whether it starts inside a line whose
+// start was dropped. A drop that ended at a line end leaves whole lines.
+func (t *Tail) Lines() ([]byte, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]byte(nil), t.buf...), t.mid
 }
 
 // AppendTail appends data to the file at path, creating it 0600, then cuts the

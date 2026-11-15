@@ -184,12 +184,12 @@ func TestTurnDiffAndApply(t *testing.T) {
 	third := startTurn(t, e, `{"agent":"claude","session":"`+first.Session+`","prompt":"hold"}`)
 	tok := tokenOf(t, dir, "hold")
 	os.WriteFile(perm, []byte("[agent_api]\napply = false\n"), 0o600)
-	if code, out := as(t, e, tok, "POST", "/api/v0/turns/"+second.Turn+"/apply", ""); code != 403 || !strings.Contains(out, "apply is false") {
+	if code, out := as(t, e, tok, "POST", "/api/v0/turns/"+second.Turn+"/apply", ""); code != 403 || !strings.Contains(out, "Agents may apply is off in Settings") {
 		t.Fatalf("apply switched off: %d %s", code, out)
 	}
 	// Off by default too: the person turns it on.
 	os.WriteFile(perm, nil, 0o600)
-	if code, out := as(t, e, tok, "POST", "/api/v0/turns/"+second.Turn+"/apply", ""); code != 403 || !strings.Contains(out, "apply is false") {
+	if code, out := as(t, e, tok, "POST", "/api/v0/turns/"+second.Turn+"/apply", ""); code != 403 || !strings.Contains(out, "Agents may apply is off in Settings") {
 		t.Fatalf("apply by default: %d %s", code, out)
 	}
 	os.WriteFile(perm, []byte("[agent_api]\napply = true\n"), 0o600)

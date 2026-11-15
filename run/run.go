@@ -817,7 +817,7 @@ func (e *Engine) start(t turn) (*Turn, error) {
 			if autoWall {
 				return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn Network contain off in the cockpit's Settings (Isolation, Network).")
 			}
-			return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn off \"Run each session in a sandbox\" in the cockpit's Settings (Grants, Sandbox).")
+			return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn Sandbox off in the cockpit's Settings (Isolation).")
 		}
 		jail = box
 		cmd.Env = setEnv(cmd.Env, box.Env())
@@ -984,7 +984,7 @@ func (e *Engine) start(t turn) (*Turn, error) {
 		case code == 0:
 			state = store.TurnFinished
 		default:
-			b, cut := errs.Bytes()
+			b, cut := errs.Lines()
 			hide := append(secretValues(cmd.Env), tok, childTok)
 			tail = errorTail(b, cut, hide...)
 			why = errorReason(b, cut, code, hide...)
@@ -1105,11 +1105,11 @@ func (e *Engine) contained(p settings.Policy) (bool, string) {
 		return false, ""
 	}
 	if !netjail.Supported {
-		return false, "[network] contain is \"on\" in the permissions, and this machine can close an agent off on neither Linux's network namespace nor a sandbox, so the turn did not start. " +
-			"Run the agent on a Linux or macOS runner, or set contain to \"off\"."
+		return false, "Network contain is on in Settings, and this machine can close an agent off on neither Linux's network namespace nor a sandbox, so the turn did not start. " +
+			"Run the agent on a Linux or macOS runner, or turn Network contain off in the cockpit's Settings (Isolation, Network)."
 	}
 	if err := netjail.Check(); err != nil {
-		return false, err.Error() + ", so the turn did not start. Fix it on this runner, or set [network] contain = \"off\" in the permissions to run agents open."
+		return false, err.Error() + ", so the turn did not start. Fix it on this runner, or turn Network contain off in the cockpit's Settings (Isolation, Network) to run agents open."
 	}
 	return true, ""
 }

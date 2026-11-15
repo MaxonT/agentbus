@@ -222,6 +222,15 @@ func served(t *testing.T, e *env, method, path string) bool {
 // the person's "!" of 0.4, is gone (a "!" is a message to the agent now).
 // Every other action is on a turn.
 // /runs, /jobs, /attempts, /workspaces and /calls are gone with no alias.
+// A new data folder starts with no agents, under up as under server
+// (87f63b2): the agents list says so, not the starters it had before.
+func TestOpenAPIAgentsStartEmpty(t *testing.T) {
+	op := loadSpec(t).Paths.Find("/api/v0/agents").Get
+	if !strings.Contains(op.Description, "A new data folder starts with none") || strings.Contains(op.Description, "one agent for each harness") {
+		t.Errorf("GET /api/v0/agents says: %s", op.Description)
+	}
+}
+
 func TestOneEndpointStartsEveryTurn(t *testing.T) {
 	doc := loadSpec(t)
 	var ops []string

@@ -186,7 +186,7 @@ func TestGuardFixesClaudeHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(m.Messages[1].Content), `"name":"Bash"`) ||
-		!strings.Contains(string(m.Messages[2].Content), `the forbid rule \"git push\" in permissions.toml`) {
+		!strings.Contains(string(m.Messages[2].Content), `the Forbid rule \"git push\" in Settings matched`) {
 		t.Errorf("history %s", sent)
 	}
 	// The adapter reads the fixed request: the call completes, with the
@@ -249,7 +249,7 @@ func TestGuardRefusesCodexStream(t *testing.T) {
 	post(t, srv.URL+codexPath, next)
 	sent := upstream()[1]
 	if strings.Contains(sent, "AgentBusRefused_") || strings.Contains(sent, "unsupported") ||
-		!strings.Contains(sent, `"output":"Refused by the AgentBus gateway: the forbid rule \"git push\"`) ||
+		!strings.Contains(sent, `"output":"Refused by the AgentBus gateway: the Forbid rule \"git push\"`) ||
 		!strings.Contains(sent, `"output":"a b"`) {
 		t.Errorf("history not fixed: %s", sent)
 	}

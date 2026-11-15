@@ -1371,9 +1371,10 @@ func sweepTx(tx *sql.Tx, now time.Time) (int, error) {
 
 // A session is ended when its first job, the turn that opened it, has
 // ended and the queue holds no workspace for it. (A session the queue
-// first saw as a next turn, known only to the record, is not opened here.) A workspace is bound only by the first turn's
-// accepted finish; every other way that turn ends (cancelled, lease lost,
-// finish refused, refused at setup) leaves nothing to continue in. Every
+// first saw as a next turn, known only to the record, is not opened here.)
+// A workspace is bound only by the first turn's accepted finish; every
+// other way that turn ends (cancelled, lease lost, finish refused, refused
+// at setup) leaves nothing to continue in. Every
 // queued and later turn of an ended session, and every result for it, gets
 // SessionEnded; nothing else waits on it. This is the one place the rule is
 // decided: sessionEnded below, read by create and by sweepTx.

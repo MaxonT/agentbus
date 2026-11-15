@@ -80,7 +80,7 @@ func TestContainOnRefusedWhereItCannot(t *testing.T) {
 	}
 	if needsWall(settings.Policy{Network: settings.Network{Contain: settings.ContainOn}}) {
 		if !strings.Contains(r.Msg, "Network contain is on in Settings, which on this machine needs the session's sandbox") ||
-			!strings.Contains(r.Msg, "turn Network contain off") || strings.Contains(r.Msg, "Run each session in a sandbox") {
+			!strings.Contains(r.Msg, "turn Network contain off") || strings.Contains(r.Msg, "turn Sandbox off") {
 			t.Errorf("refusal: %s", r.Msg)
 		}
 	} else if !netjail.Supported && !strings.Contains(r.Msg, "neither") {

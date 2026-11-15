@@ -506,6 +506,11 @@ func start(c config) (*service, error) {
 	}
 	if logins != nil {
 		logins.Logf = svcLog.Printf
+		// The store's lock is held, so no login of another control runs
+		// here: a login folder now is one a stopped control left.
+		if n := logins.RemoveLeftLogins(); n > 0 {
+			svcLog.Printf("subscriptions.left_logins_removed n=%d", n)
+		}
 		logins.Ended = func(h, state, why string) {
 			e := event.Event{ID: queue.NewID("evt_"), Kind: event.SubscriptionFailed, Time: time.Now().UTC(), Harness: h, Error: why}
 			if state == credentials.Connected {

@@ -413,7 +413,7 @@ type TurnChanges struct {
 	Isolated bool   `json:"isolated" doc:"The turn ran in an isolated copy, between two checkpoints: POST /api/v0/turns/{id}/apply can put its changes in the person's folder."`
 	From     string `json:"from,omitempty" doc:"The checkpoint the turn started from. In an isolated copy only."`
 	To       string `json:"to,omitempty" doc:"The checkpoint the turn ended with. The same as from: the turn changed nothing."`
-	Count    int    `json:"count" doc:"Every file the turn added, modified or deleted."`
+	Count    int    `json:"count" doc:"The files the turn added, modified or deleted; with truncated, see there."`
 	// Truncated: Files is not every change.
 	Truncated bool `json:"truncated,omitempty" doc:"files is not every change: files were left out past 1000, or to fit the runner's finish, and count still counts them; or the copy held more files than a checkpoint keeps, and count misses some too."`
 	// Partial: taken while the turn may still have run.
