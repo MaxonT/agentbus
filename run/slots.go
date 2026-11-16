@@ -263,23 +263,33 @@ func turnEnv(env, parent []string, base, tok, apiDir string, asked *event.Origin
 
 type turnKey struct{ session, turn string }
 
-// turnRules are the live turns' forbid entries from permissions.toml, for the
-// gateway's guard.
+// turnRules are the live turns' forbid and ask entries from permissions.toml,
+// for the gateway's guard.
 type turnRules struct {
 	mu sync.Mutex
-	m  map[turnKey][]string
+	m  map[turnKey]turnRule
 }
 
-func (t *turnRules) set(session, turn string, forbid []string) {
-	if len(forbid) == 0 {
+// turnRule is one turn's command rules: forbid (refused) and ask (held for a
+// person).
+type turnRule struct {
+	forbid []string
+	ask    []string
+}
+
+func (t *turnRules) set(session, turn string, forbid, ask []string) {
+	if len(forbid) == 0 && len(ask) == 0 {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.m == nil {
-		t.m = map[turnKey][]string{}
+		t.m = map[turnKey]turnRule{}
 	}
-	t.m[turnKey{session, turn}] = append([]string(nil), forbid...)
+	t.m[turnKey{session, turn}] = turnRule{
+		forbid: append([]string(nil), forbid...),
+		ask:    append([]string(nil), ask...),
+	}
 }
 
 func (t *turnRules) clear(session, turn string) {
@@ -293,5 +303,13 @@ func (t *turnRules) clear(session, turn string) {
 func (e *Engine) Forbid(session, turn string) []string {
 	e.turnRules.mu.Lock()
 	defer e.turnRules.mu.Unlock()
-	return e.turnRules.m[turnKey{session, turn}]
+	return e.turnRules.m[turnKey{session, turn}].forbid
+}
+
+// Ask is the ask list of a live turn, for the gateway's guard: commands it
+// holds until a person answers. A turn that is not live, or has none, gets nil.
+func (e *Engine) Ask(session, turn string) []string {
+	e.turnRules.mu.Lock()
+	defer e.turnRules.mu.Unlock()
+	return e.turnRules.m[turnKey{session, turn}].ask
 }

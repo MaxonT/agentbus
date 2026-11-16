@@ -185,6 +185,9 @@ func (agy) Refuse(t Turn) string {
 	if len(t.Forbid) > 0 {
 		return "forbid in permissions.toml is not enforced for agy yet; remove it, or use " + "claude or codex"
 	}
+	if len(t.Ask) > 0 {
+		return "ask in permissions.toml is not enforced for agy yet; remove it, or use " + "claude or codex"
+	}
 	return ""
 }
 

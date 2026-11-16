@@ -36,9 +36,11 @@ import (
 	"github.com/staysup/agentbus/event"
 )
 
-// Guard gives the forbid entries of a run's turn: commands it may never run.
+// Guard gives a run's turn's command rules: forbid entries it may never run,
+// and ask entries held until a person answers.
 type Guard interface {
 	Forbid(session, turn string) []string
+	Ask(session, turn string) []string
 }
 
 // SetGuard sets the Guard. Call it before serving.
@@ -56,8 +58,10 @@ func refusalText(rule string) string {
 		" in Settings matched this command. The command did not run."
 }
 
-// refusals remembers which rule refused each call id, for the refusal text.
-// A call it does not know, as after a restart, gets the text without a rule.
+// refusals remembers the refusal text for each refused call id (a forbid rule's
+// text, or an ask command's "waiting for a person" text), for fixHistory to put
+// in place of the call's output. A call it does not know, as after a restart,
+// gets a generic refusal.
 type refusals struct {
 	mu sync.Mutex
 	m  map[string]string
@@ -66,19 +70,25 @@ type refusals struct {
 // maxRefusals bounds the memory; past it the oldest names are forgotten.
 const maxRefusals = 4096
 
-func (r *refusals) add(id, rule string) {
+func (r *refusals) add(id, text string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.m == nil || len(r.m) >= maxRefusals {
 		r.m = map[string]string{}
 	}
-	r.m[id] = rule
+	r.m[id] = text
 }
 
-func (r *refusals) rule(id string) string {
+// text is the refusal a call id was refused with, or the generic refusal when
+// the call is not known.
+func (r *refusals) text(id string) string {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.m[id]
+	t := r.m[id]
+	r.mu.Unlock()
+	if t == "" {
+		return refusalText("")
+	}
+	return t
 }
 
 // decodeJSON reads b keeping numbers as written.
@@ -140,7 +150,7 @@ func (g *Gateway) fixHistory(vendor string, body []byte) ([]byte, bool) {
 		})
 		blocks(func(c map[string]any) {
 			if id, _ := c["tool_use_id"].(string); c["type"] == "tool_result" && ids[id] {
-				c["content"] = refusalText(g.refused.rule(id))
+				c["content"] = g.refused.text(id)
 				c["is_error"] = true
 			}
 		})
@@ -157,7 +167,7 @@ func (g *Gateway) fixHistory(vendor string, body []byte) ([]byte, bool) {
 			if id, _ := c["call_id"].(string); strings.HasSuffix(t, "_call_output") && ids[id] {
 				// A plain string: codex sent a list of parts, and the API
 				// took the string every time (2026-11-08).
-				c["output"] = refusalText(g.refused.rule(id))
+				c["output"] = g.refused.text(id)
 			}
 		}
 	}
@@ -272,7 +282,8 @@ type guardBody struct {
 	g      *Gateway
 	ex     *exchange
 	vendor string
-	rules  []string
+	forbid []string
+	ask    []string
 	src    io.ReadCloser
 	br     *bufio.Reader
 	end    func()
@@ -284,7 +295,25 @@ type guardBody struct {
 
 	held    [][]byte
 	open    map[string]*openCall // by Anthropic block index or OpenAI item id
-	refused map[string]string    // the same keys, refused: the rule
+	refused map[string]string    // the same keys, refused: the matched rule
+
+	// asked are the ask-matched calls of the reply, collected as it streams.
+	// Each is refused inline, like forbid, so the agent gets a refusal and the
+	// turn ends; at the reply's end they are recorded as one approval
+	// (registerApproval). No connection is held.
+	asked      []heldCall
+	registered bool
+	complete   bool // the reply reached its terminal event (message_stop / response.completed)
+}
+
+// heldCall is one ask-matched call: the guard's key for it, the model's ids,
+// its command and the rule it matched.
+type heldCall struct {
+	key     string
+	callID  string
+	name    string
+	command string
+	rule    string
 }
 
 type openCall struct {
@@ -294,8 +323,8 @@ type openCall struct {
 
 // guardReply wraps src. end runs once, when the guard has read the whole
 // reply or the reply is closed: every tool.refused is emitted by then.
-func (g *Gateway) guardReply(ex *exchange, rules []string, src io.ReadCloser, end func()) io.ReadCloser {
-	return &guardBody{g: g, ex: ex, vendor: g.adapter.Vendor(), rules: rules, src: src, end: end,
+func (g *Gateway) guardReply(ex *exchange, forbid, ask []string, src io.ReadCloser, end func()) io.ReadCloser {
+	return &guardBody{g: g, ex: ex, vendor: g.adapter.Vendor(), forbid: forbid, ask: ask, src: src, end: end,
 		br: bufio.NewReaderSize(src, 64<<10), open: map[string]*openCall{}, refused: map[string]string{}}
 }
 
@@ -324,7 +353,9 @@ func (b *guardBody) Read(p []byte) (int, error) {
 	return 0, b.err
 }
 
-// step reads one SSE frame, or the whole of an unstreamed reply.
+// step reads one SSE frame, or the whole of an unstreamed reply. A forbid or
+// ask call is renamed as it passes; at the reply's clean end any ask commands
+// are recorded as one approval (registerApproval).
 func (b *guardBody) step() {
 	if !b.sniffed {
 		b.sniffed = true
@@ -334,7 +365,14 @@ func (b *guardBody) step() {
 		// wait, so Peek never asks for more than the next byte.
 		if b.firstByte() == '{' {
 			all, err := io.ReadAll(b.br)
-			b.out.Write(b.rewriteJSON(all))
+			// Decide and rename every call (forbid and ask refuse alike), then,
+			// only if the whole reply was read cleanly, record its ask commands
+			// as one approval.
+			out := b.rewriteJSON(all)
+			if err == nil {
+				b.registerApproval()
+			}
+			b.out.Write(out)
 			b.err = err
 			if b.err == nil {
 				b.err = io.EOF
@@ -347,11 +385,42 @@ func (b *guardBody) step() {
 		b.frame(frame)
 	}
 	if err != nil {
-		// A reply that ends inside a call: what is held goes on as it is.
-		// The call never ended, so the agent does not run it.
+		// Only a reply that reached its terminal event records an approval: a
+		// stream that ends without message_stop / response.completed (a cut, an
+		// error, or a clean EOF after a partial reply) is one the agent discards
+		// and whose tool.requested the gateway drops, so recording an approval
+		// for it would leave a pending command the agent never really asked.
+		if b.complete {
+			b.registerApproval()
+		}
 		b.flush()
 		b.err = err
 	}
+}
+
+// registerApproval records the reply's ask commands as one approval and emits
+// approval.requested, once. The person answers later through the API.
+func (b *guardBody) registerApproval() {
+	if b.registered || len(b.asked) == 0 {
+		return
+	}
+	b.registered = true
+	var commands, rules []string
+	seenCmd, seenRule := map[string]bool{}, map[string]bool{}
+	for i := range b.asked {
+		if c := b.asked[i].command; !seenCmd[c] {
+			seenCmd[c] = true
+			commands = append(commands, c)
+		}
+		if r := b.asked[i].rule; !seenRule[r] {
+			seenRule[r] = true
+			rules = append(rules, r)
+		}
+	}
+	primary := b.asked[0]
+	b.g.recordApproval(b.ex.session, b.ex.turn, primary.callID, primary.name, commands, rules)
+	b.g.emit(b.ex, []event.Event{{Kind: event.ApprovalRequested, ToolID: primary.callID,
+		ToolName: primary.name, Rule: primary.rule, Text: strings.Join(commands, "\n")}})
 }
 
 // firstByte is the reply's first byte that is not white space, or 0.
@@ -403,6 +472,13 @@ func (b *guardBody) frame(f []byte) {
 	var d map[string]any
 	_ = decodeJSON(data, &d) // a frame that is not JSON, such as [DONE], has no type
 	typ, _ := d["type"].(string)
+	// The reply's terminal event: only a reply that reaches it is complete, so
+	// only then is an approval recorded (an early EOF after an error or a
+	// partial stream is not a real ask).
+	switch typ {
+	case "message_stop", "response.completed", "response.incomplete":
+		b.complete = true
+	}
 	if b.vendor == "anthropic" {
 		idx := string(jsonText(d["index"]))
 		switch typ {
@@ -475,25 +551,62 @@ func jsonText(v any) []byte {
 	return b
 }
 
-// decide refuses a finished call whose command a rule forbids, and records
-// the refusal as an event.
+// decide refuses a finished call whose command a rule forbids or asks, and
+// records the refusal as an event. A single call can run several commands (a
+// codex exec script), so forbid is checked across every command first (forbid
+// wins over ask), then ask across every command: an ask call is refused with a
+// "waiting for a person" message, and each of its ask commands is collected for
+// the reply's one approval (registerApproval).
 func (b *guardBody) decide(key, callID, name string, input json.RawMessage, item map[string]any) {
-	for _, c := range commandsOf(b.vendor, item) {
-		rule, ok := forbidden(b.rules, c)
-		if !ok {
-			continue
+	cmds := commandsOf(b.vendor, item)
+	for _, c := range cmds {
+		if rule, ok := forbidden(b.forbid, c); ok {
+			b.refuse(key, callID, name, input, rule, refusalText(rule))
+			return
 		}
-		b.refused[key] = rule
-		if callID != "" {
-			b.g.refused.add(callID, rule)
-		}
-		if !json.Valid(input) {
-			input = nil
-		}
-		b.g.emit(b.ex, []event.Event{{Kind: event.ToolRefused, ToolID: callID, ToolName: name,
-			ToolInput: input, Rule: rule, Text: refusalText(rule)}})
-		return
 	}
+	// Collect every ask entry that matches, across every command of the call,
+	// so a person moving them to allow removes exactly the entries that refused
+	// (not the raw command), and nothing stays in ask to refuse the continuation
+	// again. Each ask rule is checked alone, so a chained command that matches
+	// two entries collects both.
+	var askCmds []string
+	firstRule := ""
+	for _, c := range cmds {
+		hit := false
+		for _, rule := range b.ask {
+			if _, ok := forbidden([]string{rule}, c); ok {
+				hit = true
+				b.asked = append(b.asked, heldCall{key: key, callID: callID, name: name, command: c, rule: rule})
+				if firstRule == "" {
+					firstRule = rule
+				}
+			}
+		}
+		if hit {
+			askCmds = append(askCmds, c)
+		}
+	}
+	if len(askCmds) > 0 {
+		b.refuse(key, callID, name, input, firstRule, askRefusal(strings.Join(askCmds, "; ")))
+	}
+}
+
+// refuse renames a call so the agent cannot run it and tells the model text in
+// place of its output. rule names the matched entry (for the event); text is
+// what the agent is told, kept so fixHistory and a local_shell_call's rewrite
+// both use the right wording (forbid or ask).
+func (b *guardBody) refuse(key, callID, name string, input json.RawMessage, rule, text string) {
+	b.refused[key] = text
+	if callID != "" {
+		b.g.refused.add(callID, text)
+	}
+	in := input
+	if !json.Valid(in) {
+		in = nil
+	}
+	b.g.emit(b.ex, []event.Event{{Kind: event.ToolRefused, ToolID: callID, ToolName: name,
+		ToolInput: in, Rule: rule, Text: text}})
 }
 
 // flush hands on every held frame, renamed where refused.
@@ -564,7 +677,7 @@ func (b *guardBody) rename(f []byte) []byte {
 // refuseItem makes a refused call one the agent cannot run as written, and
 // says whether it changed it. A named call is renamed. A local_shell_call has
 // no name, so its command becomes one that prints the refusal and fails.
-func refuseItem(it map[string]any, rule string) bool {
+func refuseItem(it map[string]any, text string) bool {
 	if name, ok := it["name"].(string); ok {
 		if strings.HasPrefix(name, RefusedPrefix) {
 			return false
@@ -573,7 +686,9 @@ func refuseItem(it map[string]any, rule string) bool {
 		return true
 	}
 	if a, ok := it["action"].(map[string]any); ok && it["type"] == "local_shell_call" {
-		a["command"] = []any{"sh", "-c", `printf '%s\n' "$1" >&2; exit 1`, "sh", refusalText(rule)}
+		// A local_shell_call has no name, so it becomes a command that prints the
+		// refusal (forbid or ask, whichever matched) and fails.
+		a["command"] = []any{"sh", "-c", `printf '%s\n' "$1" >&2; exit 1`, "sh", text}
 		return true
 	}
 	return false
@@ -581,17 +696,16 @@ func refuseItem(it map[string]any, rule string) bool {
 
 // rewriteJSON renames each refused call of an unstreamed reply: Anthropic's
 // content, OpenAI's output.
-func (b *guardBody) rewriteJSON(all []byte) []byte {
-	var m map[string]any
+// jsonCalls returns the vendor's reply items that are tool calls, by vendor.
+func (b *guardBody) jsonCalls(all []byte) (m map[string]any, items []map[string]any, ids []string) {
 	if decodeJSON(all, &m) != nil {
-		return all
+		return nil, nil, nil
 	}
 	key := "output"
 	if b.vendor == "anthropic" {
 		key = "content"
 	}
 	list, _ := m[key].([]any)
-	changed := false
 	for _, v := range list {
 		it, ok := v.(map[string]any)
 		if !ok {
@@ -606,6 +720,21 @@ func (b *guardBody) rewriteJSON(all []byte) []byte {
 		default:
 			continue
 		}
+		items = append(items, it)
+		ids = append(ids, callID)
+	}
+	return m, items, ids
+}
+
+// rewriteJSON decides each call of an unstreamed reply (forbid and ask refuse
+// alike), then returns the reply with every refused call renamed so the agent
+// gets the guard's refusal in its place. Unchanged when nothing is refused.
+func (b *guardBody) rewriteJSON(all []byte) []byte {
+	m, items, ids := b.jsonCalls(all)
+	if m == nil {
+		return all
+	}
+	for i, it := range items {
 		name, _ := it["name"].(string)
 		var input json.RawMessage
 		if b.vendor == "anthropic" {
@@ -613,9 +742,11 @@ func (b *guardBody) rewriteJSON(all []byte) []byte {
 		} else {
 			input = inputOf(it)
 		}
-		k := callID
-		b.decide(k, callID, name, input, it)
-		if rule, ok := b.refused[k]; ok && refuseItem(it, rule) {
+		b.decide(ids[i], ids[i], name, input, it)
+	}
+	changed := false
+	for i, it := range items {
+		if rule, ok := b.refused[ids[i]]; ok && refuseItem(it, rule) {
 			changed = true
 		}
 	}

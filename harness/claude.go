@@ -259,6 +259,9 @@ func (claude) Args(t Turn) []string {
 		if len(t.Allow) > 0 {
 			allowed = append(allowed, bashRules(t.Allow))
 		}
+		// ask is NOT pre-authorised here: the gateway refuses an ask command and
+		// records it for a person, so the asking turn never runs it. An allow
+		// moves the entry to allow for the next turn, where t.Allow carries it.
 		allowed = append(allowed, claudeTools(t.Tools)...)
 		// The person's own MCP servers load (no --strict-mcp-config), and
 		// a -p turn has nobody to approve a call: mcp__<server> lets every

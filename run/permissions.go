@@ -9,6 +9,7 @@ package run
 //
 //	read_folders      claude: --allowedTools Read(//<folder>/**),Grep(…),Glob(…); codex: nothing (its sandbox reads every folder)
 //	allow             claude: --allowedTools Bash(<cmd>:*); codex: nothing yet
+//	ask               both: the gateway holds the call for a person (approvals.go); claude also --allowedTools Bash(<cmd>:*) so it does not refuse after an allow; agy refuses the turn
 //	forbid            both: the gateway's guard; claude also --disallowedTools Bash(<cmd>:*)
 //	edit = "session"  claude: --allowedTools Edit(//<folder>/**), and a deny Edit(//<file>) on each data folder file;
 //	                  codex: --sandbox workspace-write -c sandbox_workspace_write.network_access=true

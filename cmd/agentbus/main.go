@@ -612,10 +612,11 @@ func start(c config) (*service, error) {
 			return nil, err
 		}
 	}
+	approvals := &gatewayApprovals{}
 	acfg := api.Config{Store: st, Token: token, TurnsToken: turnsToken, Port: port, AnyHost: !loopback,
 		BaseURL: baseURL, Origin: c.origin, Hosts: c.hosts, Environ: c.environ, Folders: issuer, Build: build(debug.ReadBuildInfo()),
 		Queue: q, Jobs: runnerJobs, Engine: eng, TurnWait: c.turnWait, Agents: saved, Settings: cfgStore, Subscriptions: logins,
-		Logf: svcLog.Printf}
+		Approvals: approvals, Logf: svcLog.Printf}
 	if q != nil {
 		acfg.Models = modelSources(c, subs)
 		if runnerJobs != nil {
@@ -724,11 +725,14 @@ func start(c config) (*service, error) {
 		if c.mode == modeUp && c.noSecrets() && runnerJobs != nil {
 			g.SetCredential(runnerJobs.Local(relayOf[g]))
 		}
-		// forbid in permissions.toml, applied to each run turn's replies.
+		// forbid and ask in permissions.toml, applied to each run turn's
+		// replies (refuse, or hold for a person).
 		if eng != nil {
 			g.SetGuard(eng)
 		}
 	}
+	// The API lists and answers the ask calls these gateways hold.
+	approvals.use(gws)
 	if claudeReplay != nil {
 		anth.SetRewriter(claudeReplay)
 		orAnth.SetRewriter(claudeReplay)

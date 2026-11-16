@@ -32,6 +32,7 @@ func defaultPolicy() Policy {
 	return Policy{
 		ReadFolders:   []string{},
 		Allow:         []string{},
+		Ask:           []string{},
 		Forbid:        []string{},
 		Edit:          EditSession,
 		Isolation:     IsolationAuto,

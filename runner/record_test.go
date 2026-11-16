@@ -254,3 +254,11 @@ func TestForwardLeavesRelayedCallsToControl(t *testing.T) {
 		}
 	}
 }
+
+// approval.requested carries an exchange, so it is forwarded to control even in
+// no-secrets mode (else a remote runner's ask never reaches control).
+func TestRelayOnlyHasApprovalRequested(t *testing.T) {
+	if !relayOnly[event.ApprovalRequested] {
+		t.Fatal("approval.requested is not forwarded to control")
+	}
+}
