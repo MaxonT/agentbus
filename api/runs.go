@@ -63,7 +63,7 @@ type Started struct {
 	Session string `json:"session" doc:"The turn's session: a new one, or the session sent. A review's is a session of its own."`
 	Turn    string `json:"turn" doc:"The turn's id. Every event of the turn carries it in turn; GET /api/v0/turns/{id} follows it from now on."`
 	State   string `json:"state" doc:"running: a runner started it. queued: it waits behind the session's earlier turns (ahead says how many), or for a runner. It runs next, in order."`
-	BaseURL string `json:"base_url,omitempty" doc:"The address the agent uses, <service>/s/<session>/t/<turn>. Absent while queued."`
+	BaseURL string `json:"base_url,omitempty" doc:"The address the agent uses, <service>/s/<session>/t/<turn>. Present only when this service runs the turn itself (agentbus up). Absent while queued, and on a server, where the turn runs on another machine's runner and that runner serves its gateway."`
 	// Existing marks the answer to a retry: the idempotency key had already
 	// made this turn.
 	Existing bool `json:"existing,omitempty" doc:"True when idempotency_key had already made this turn, so nothing new was made."`
@@ -345,8 +345,16 @@ func (a *API) awaitTurn(w http.ResponseWriter, ctx context.Context, job queue.Jo
 			return
 		}
 		if turn := startedTurn(j); turn != "" {
-			writeJSON(w, http.StatusAccepted, Started{BaseURL: a.cfg.BaseURL + "/s/" + j.Session + "/t/" + turn, Session: j.Session, Turn: turn,
-				State: queue.TurnRunning, Existing: existing})
+			st := Started{Session: j.Session, Turn: turn, State: queue.TurnRunning, Existing: existing}
+			// BaseURL is the turn's gateway, which only this service serves,
+			// and only when it runs turns itself (agentbus up). A server runs
+			// no turns of its own: the turn's gateway is on the runner that ran
+			// it, on another machine this service does not serve, so BaseURL is
+			// left out rather than pointing at control.
+			if a.cfg.Engine != nil {
+				st.BaseURL = a.cfg.BaseURL + "/s/" + j.Session + "/t/" + turn
+			}
+			writeJSON(w, http.StatusAccepted, st)
 			return
 		}
 		if j.Ended != nil {
