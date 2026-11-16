@@ -42,10 +42,13 @@ func callSize(sc jobs.SentCall) int {
 const callBudget = jobs.MaxBody - 128<<10
 
 // relayOnly are the kinds of a call's events (those with an exchange) that
-// the runner's gateway makes and control's relay cannot: own replay's refusal
-// and the guard's. Every other event of a relayed call control records
-// itself.
-var relayOnly = map[event.Kind]bool{event.ReplayFailed: true, event.ToolRefused: true, event.ApprovalRequested: true}
+// the runner's gateway makes and control's relay cannot: own replay's refusal,
+// the guard's, and a call the runner's gateway refused on its own, before it
+// reached control's relay (refuseCall, for an unrecorded path or a bad header:
+// no credential is added and the call is sent nowhere, so the relay never sees
+// it). Every other event of a relayed call control records itself.
+var relayOnly = map[event.Kind]bool{event.ReplayFailed: true, event.ToolRefused: true,
+	event.ApprovalRequested: true, event.CallRefused: true}
 
 // LiveEvery is how often a running turn's new record goes to control, at
 // most.

@@ -217,6 +217,9 @@ func TestForwardLeavesRelayedCallsToControl(t *testing.T) {
 			// record it, and it reached no vendor. It stays here.
 			{ID: "un-req", Kind: event.ModelRequested, Exchange: "x-run-2"},
 			{ID: "un-resp", Kind: event.ModelResponded, Exchange: "x-run-2", Status: 502, Error: "the vendor could not be reached (dial)"},
+			// A call the runner's gateway refused on its own, before the relay:
+			// no credential, sent nowhere, so control never saw it (relayOnly).
+			{ID: "gw-callrefused", Kind: event.CallRefused, Exchange: "x-run-2"},
 			{ID: "own-closed", Kind: event.SessionClosed},
 		}
 		for _, e := range evs {
@@ -237,7 +240,7 @@ func TestForwardLeavesRelayedCallsToControl(t *testing.T) {
 		for id := range fc.events {
 			sent = append(sent, id)
 		}
-		want := map[string]bool{"own-start": true, "gw-refused": true, "gw-replay": true, "own-closed": true}
+		want := map[string]bool{"own-start": true, "gw-refused": true, "gw-replay": true, "gw-callrefused": true, "own-closed": true}
 		if noSecrets {
 			if len(fc.events) != len(want) || len(fc.calls) != 0 || len(fc.replies) != 0 {
 				t.Fatalf("no secrets: sent events %v, %d calls, %d replies", sent, len(fc.calls), len(fc.replies))
@@ -260,5 +263,14 @@ func TestForwardLeavesRelayedCallsToControl(t *testing.T) {
 func TestRelayOnlyHasApprovalRequested(t *testing.T) {
 	if !relayOnly[event.ApprovalRequested] {
 		t.Fatal("approval.requested is not forwarded to control")
+	}
+}
+
+// call.refused carries an exchange, so a runner's gateway that refuses a call
+// on its own (no credential, sent nowhere) must forward it even in no-secrets
+// mode, else that refusal is missing from control's record.
+func TestRelayOnlyHasCallRefused(t *testing.T) {
+	if !relayOnly[event.CallRefused] {
+		t.Fatal("call.refused is not forwarded to control")
 	}
 }

@@ -399,8 +399,15 @@ func (a *API) askChecks(w http.ResponseWriter, g run.Grant, perm settings.Policy
 	if ref == "" {
 		return refuse(turnFolderRefused)
 	}
+	// local is true when the session's folder is on this control plane's own
+	// machine (agentbus up). Only then can control answer whether a path or a
+	// folder child is inside the session's folder: it needs the folder here.
+	// A remote runner holds the folder, and control holds no path of a remote
+	// session (jobs/record.go drops it), so a request that needs a path check
+	// is left to that machine, never answered from here.
+	local := a.cfg.Folders != nil && a.cfg.Folders.Connector() == connector
 	switch {
-	case body.Folder == "" && body.FolderRef == "" && repo && a.cfg.Folders != nil && a.cfg.Folders.Connector() == connector:
+	case body.Folder == "" && body.FolderRef == "" && repo && local:
 		// A worktree's session: the new session works on the worktree as
 		// this one left it, its base and edits, in a copy of its own.
 		c, err := a.cfg.Store.Continuation(g.Session)
@@ -417,17 +424,25 @@ func (a *API) askChecks(w http.ResponseWriter, g run.Grant, perm settings.Policy
 		// its own beside this one, not inside it.
 		body.FolderRef, body.Connector = ref, connector
 	case body.FolderRef != "":
-		if body.Connector == "" && a.cfg.Folders != nil {
-			body.Connector = a.cfg.Folders.Connector()
+		// A folder named by reference. It must be on the session's machine
+		// (connector), whichever machine that is. The same reference as the
+		// session's own folder is in scope with no path check, so it is
+		// allowed on a remote runner too. A different reference is inside the
+		// session's folder only if the folder's machine says so, which control
+		// can ask only when that machine is its own.
+		if body.Connector == "" {
+			body.Connector = connector
 		}
-		if body.Connector != connector || (body.FolderRef != ref && (a.cfg.Folders == nil ||
-			a.cfg.Folders.Connector() != connector || !a.cfg.Folders.WithinRef(body.FolderRef, ref))) {
+		if body.Connector != connector {
+			return refuse(turnFolderRefused)
+		}
+		if body.FolderRef != ref && (!local || !a.cfg.Folders.WithinRef(body.FolderRef, ref)) {
 			return refuse(turnFolderRefused)
 		}
 	default:
 		// The session's own folder or one inside it, or the folder its turns
 		// run in (its copy, as the record names it), or one inside that.
-		if a.cfg.Folders == nil || a.cfg.Folders.Connector() != connector {
+		if !local {
 			return refuse(turnFolderRefused)
 		}
 		if !a.cfg.Folders.Within(body.Folder, ref) {
