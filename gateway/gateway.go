@@ -60,11 +60,8 @@ type Gateway struct {
 	rewrite Rewriter   // nil unless SetRewriter was called
 	guard   Guard      // nil unless SetGuard was called
 	refused refusals   // the refusal text of each refused call (guard.go)
-	// approvals are the ask commands refused and recorded, waiting for a person
-	// to answer through the API (approvals.go).
-	approvals approvalRegistry
-	plans     planSeen // the plan usage last stored (plan.go)
-	prefix    string   // cut from the vendor path before anything reads it (SetPrefix)
+	plans   planSeen   // the plan usage last stored (plan.go)
+	prefix  string     // cut from the vendor path before anything reads it (SetPrefix)
 	// sendExchange: each call's exchange goes upstream in ExchangeHeader
 	// (SendExchange).
 	sendExchange bool

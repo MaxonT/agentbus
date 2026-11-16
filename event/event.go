@@ -51,11 +51,15 @@ const (
 
 	// ApprovalRequested: the gateway refused a tool call of a run's turn because
 	// its command matched an ask entry of permissions.toml, and recorded it for
-	// a person to allow or refuse. The turn ends; nothing is held. Rule names
-	// the ask entry; Text lists the commands, for a person to read.
+	// a person to allow or refuse. The turn ends; nothing is held. Approval is
+	// its id, Commands the ask commands, Rules the entries they matched; Rule is
+	// the first entry and Text the commands one per line. Control lists the
+	// pending ones from the record (a requested with no approval.decided), so a
+	// refusal on a separate runner is still answered on control.
 	ApprovalRequested Kind = "approval.requested"
-	// ApprovalDecided: a recorded ask command was allowed or refused. ToolID ties it to
-	// its approval.requested. Text says how it ended and who answered.
+	// ApprovalDecided: a recorded ask command was allowed or refused, written by
+	// control when a person answers. Approval ties it to its approval.requested.
+	// Text says how it ended and who answered.
 	ApprovalDecided Kind = "approval.decided"
 
 	// SessionRenamed: the person, or a turn of the session's request tree,
@@ -152,8 +156,8 @@ var Kinds = []KindInfo{
 	{SchemaUnexpected, "The vendor sent a shape the adapter does not know: unexpected, as names only. Show it as a quiet warning.", []string{"unexpected"}},
 	{ReplayFailed, "A model request of a replayed turn (a turn.started with replay_from) could not be given the earlier turn's history: error says why, such as the harness's request layout not being one the gateway knows. The gateway refused that request with 400 and did not send it to the vendor, so the turn fails rather than continue without its history. Show it as an error.", []string{"error"}},
 	{ToolRefused, "The gateway refused a tool call before the agent could run it, because its command matched a forbid entry of permissions.toml: tool_id, tool_name, tool_input, rule (the entry), and text (what the model is told in place of the output). The call's tool.requested is still stored, and its tool.completed carries that text. Show it as a warning.", []string{"tool_id", "rule"}},
-	{ApprovalRequested, "The gateway refused a tool call because its command matched an ask entry of permissions.toml, and recorded it for a person: tool_id, tool_name, tool_input, rule (the ask entry) and text (the commands, one per line). The turn ends with the call refused; nothing is held. GET /api/v0/approvals lists it and POST /api/v0/approvals/{id} answers it: allow moves the entry from ask to allow and continues the session so the agent can run it; refuse records the decision. The call's tool.requested is still stored, and its tool.completed carries the refusal. Show it as a prompt to allow or refuse.", []string{"tool_id", "rule"}},
-	{ApprovalDecided, "A recorded ask command was answered: tool_id ties it to its approval.requested, rule is the ask entry, and text says how it ended (allowed or refused) and who answered. Show it beside the request.", []string{"tool_id"}},
+	{ApprovalRequested, "The gateway refused a tool call because its command matched an ask entry of permissions.toml, and recorded it for a person: approval (its id), tool_id, tool_name, rule (the first ask entry), commands (every ask command in the reply) and rules (the ask entries they matched); text lists the commands one per line. The turn ends with the call refused; nothing is held. Control derives the pending list from the record, a requested with no approval.decided for the same approval id, so it works when the gateway that refused runs on a separate runner. GET /api/v0/approvals lists it and POST /api/v0/approvals/{id} answers it: allow moves the entries from ask to allow and continues the session so the agent can run them; refuse records the decision. The call's tool.requested is still stored, and its tool.completed carries the refusal. Show it as a prompt to allow or refuse.", []string{"approval", "tool_id", "commands", "rules"}},
+	{ApprovalDecided, "A recorded ask command was answered, written by control when a person answers: approval ties it to its approval.requested, rule is the first ask entry, and text says how it ended (allowed or refused) and who answered. Show it beside the request.", []string{"approval"}},
 	{ToolsListed, "Control served the turn's tool list: its agent's tool server (POST /api/v0/mcp, [agent_api] tools in permissions.toml) answered tools/list for the turn's token. Stored once per turn, at the first tools/list, however often the agent asks. server is the tool server's name, as tool names carry it (claude calls a tool mcp__agentbus__<name>); tools are the names it served, which the turn's token may call; tools_hidden are the harness's own tools the turn does not get, each with why. A turn with no tools.listed got no tool server, or its agent never asked for the list. Names only: never an input, a value or a token.", []string{"server"}},
 	{ContextAdded, "What AgentBus gave the turn besides the person's words, the same for every harness: added, each piece with its kind, bytes and text. Kinds: agents_md (the folder's AGENTS.md, when the harness does not read it by itself), instructions (instructions.md, filled in), asked_by (who asked an asked agent for the work), mcp_instructions (the tool server's own instructions, when the turn has it) and, in records from before 0.5, commands (the shell commands the person ran in the session since its previous turn, with their output). Stored once per turn, after its turn.started, just before its agent starts. Absent when nothing was added. Each text is as the agent got it: AGENTS.md is bounded at 32 KiB and instructions.md at 64 KiB.", []string{"added"}},
 	{NetworkRefused, "A turn's agent runs closed off from the network ([network] of permissions.toml), and asked its runner's proxy for a host the policy does not allow: host (host:port as asked) and error (why). The connection was refused. Each refusal is its own event. Show it as a warning.", []string{"host"}},
@@ -274,6 +278,15 @@ type Event struct {
 	ToolOutput string          `json:"tool_output,omitempty"`
 	// Rule, only on tool.refused: the forbid entry that matched.
 	Rule string `json:"rule,omitempty" doc:"On tool.refused: the forbid entry of permissions.toml that matched, such as git push."`
+	// Approval, Commands and Rules, on approval.requested and approval.decided:
+	// the held reply a person answers. Approval is its id, the same on the
+	// request and its decision, and the id in POST /api/v0/approvals/{id};
+	// control derives the pending list from the record (a requested with no
+	// decided), so it needs no per-gateway memory. Commands and Rules are on
+	// the request only.
+	Approval string   `json:"approval,omitempty" doc:"On approval.requested and approval.decided: the held reply's id, the same on both, and the id in POST /api/v0/approvals/{id}."`
+	Commands []string `json:"commands,omitempty" doc:"On approval.requested: every ask command in the reply, in order, deduplicated. A cockpit shows one card with a row per command; an allow or a refusal covers them all."`
+	Rules    []string `json:"rules,omitempty" doc:"On approval.requested: the ask entries of permissions.toml the commands matched, deduplicated. An allow moves each from the ask list to the allow list."`
 	// Server, Tools and ToolsHidden, only on tools.listed: the tool
 	// server's name, the tools it served the turn, and the harness's own
 	// tools hidden from the turn.

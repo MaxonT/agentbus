@@ -30,6 +30,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/staysup/agentbus/jobs"
@@ -85,12 +86,6 @@ type Config struct {
 	// Engine is this process's own turn engine, when it runs turns: its live
 	// turns' own tokens are accepted here. Nil accepts none.
 	Engine *run.Engine
-
-	// Approvals is where GET /api/v0/approvals and POST /api/v0/approvals/{id}
-	// read and answer the calls the gateway holds for a person (ask in
-	// permissions.toml). Nil means none are held: the list is empty and an
-	// answer is 404.
-	Approvals ApprovalSource
 
 	// Environ is this service's environment: GET /api/v0/harnesses says
 	// whether an agent's key variable is set in it, never its value.
@@ -160,6 +155,13 @@ type API struct {
 
 	// signin holds the one-time sign-in codes (signin.go).
 	signin signIns
+
+	// deciding holds the ids of approvals an answer is in flight for, so two
+	// at once (two tabs, a retry) do not both move the settings or start two
+	// continuations. approval.decided in the record is the durable "answered"
+	// mark; this serialises only within this process (approvals.go).
+	decidingMu sync.Mutex
+	deciding   map[string]bool
 }
 
 // New returns the API.
