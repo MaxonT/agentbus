@@ -19,8 +19,14 @@ import (
 
 type guardFunc func(session, turn string) []string
 
-func (f guardFunc) Forbid(session, turn string) []string { return f(session, turn) }
-func (f guardFunc) Ask(session, turn string) []string    { return nil }
+func (f guardFunc) Forbid(session, turn string) []string    { return f(session, turn) }
+func (f guardFunc) Ask(session, turn string) []string       { return nil }
+func (f guardFunc) Allow(session, turn string) []string     { return nil }
+func (f guardFunc) AllowOnce(session, turn string) []string { return nil }
+
+// Unlisted is Allow for the fake, so a test with only a forbid list keeps its
+// meaning: a command on no list runs. The real guard returns Ask or Refuse.
+func (f guardFunc) Unlisted(session, turn string) Decision { return Allow }
 
 // guardGateway is a gateway with forbid = ["git push"] on turn s1/t_1, in
 // front of a vendor that answers every model call with reply.
@@ -261,7 +267,7 @@ func TestGuardRefusesCodexStream(t *testing.T) {
 func TestGuardHoldsTheCallUntilItEnds(t *testing.T) {
 	pr, pw := io.Pipe()
 	g := New(&url.URL{}, openai.Adapter{}, &event.Memory{})
-	b := g.guardReply(&exchange{}, []string{"git push"}, nil, pr, func() {})
+	b := g.guardReply(&exchange{}, Rules{Forbid: []string{"git push"}}, nil, pr, func() {})
 	frames := strings.SplitAfter(codexStream, "\n\n")
 	got := make(chan string, 16)
 	go func() {

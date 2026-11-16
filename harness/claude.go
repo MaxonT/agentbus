@@ -253,15 +253,16 @@ func (claude) Args(t Turn) []string {
 		// edits files. Without it a -p turn cannot edit at all: nobody
 		// is there to approve.
 		allowed = append(allowed, editRules(t.Writes.Edit)...)
-		// allow: each command runs without asking, as Bash(<cmd>:*)
-		// (Claude Code 2.1.319, 2026-11-07, checked live with a rule
-		// that has a space in it).
-		if len(t.Allow) > 0 {
-			allowed = append(allowed, bashRules(t.Allow))
-		}
-		// ask is NOT pre-authorised here: the gateway refuses an ask command and
-		// records it for a person, so the asking turn never runs it. An allow
-		// moves the entry to allow for the next turn, where t.Allow carries it.
+		// The AgentBus gateway decides every shell command of the turn — allow,
+		// ask, forbid, and a command on no list — acting on the model's reply
+		// before the agent runs the call (gateway/guard.go). So the whole Bash
+		// tool is allowed here and the gateway is the gate: Claude Code's own
+		// literal Bash check must not refuse a command first. That check split
+		// a chain at ";" and did not match an env prefix, so it refused an
+		// allowed command with nowhere to approve it (his finding, turn
+		// t_f088dacca881acf7, 2026-11-16). The person's config is never edited;
+		// this is a per-turn flag. File edit rules above are unchanged.
+		allowed = append(allowed, "Bash")
 		allowed = append(allowed, claudeTools(t.Tools)...)
 		// The person's own MCP servers load (no --strict-mcp-config), and
 		// a -p turn has nobody to approve a call: mcp__<server> lets every
@@ -297,16 +298,14 @@ func (claude) Args(t Turn) []string {
 	// research/2026-11-14-use-my-own-tools-design.md), and it cannot work
 	// with a sign-in AgentBus holds. Off on every turn.
 	a = append(a, "--no-chrome")
-	// forbid: never run, even when allow or the person's settings
-	// approve it; a deny wins over an allow (checked live, 2026-11-07).
-	// The gateway's guard refuses them too, in the shapes this rule
-	// misses, such as git -C repo push (gateway/guard.go). The data
-	// folder's own files are never edited: a deny on each, which wins
-	// over the edit rule and the person's settings alike.
+	// forbid is the gateway's: it renames a forbidden call in the reply before
+	// the agent runs it, for claude and codex alike, in the shapes a
+	// Bash(<cmd>:*) rule misses — git -C repo push, env prefixes, chains
+	// (gateway/guard.go). No Bash deny here: with the whole Bash tool allowed
+	// above, the agent decides nothing about shell; the one gate does. The data
+	// folder's own files are still never edited: a deny on each, which wins over
+	// the edit rule and the person's settings alike.
 	var denied []string
-	if len(t.Forbid) > 0 {
-		denied = append(denied, bashRules(t.Forbid))
-	}
 	if !readOnly {
 		denied = append(denied, protectRules(t.Writes.Protect)...)
 		// No edit rule: a deny on every tool that edits files, so the
@@ -380,16 +379,6 @@ func readRules(folders []string) []string {
 		rules = append(rules, "Read("+p+")", "Grep("+p+")", "Glob("+p+")")
 	}
 	return rules
-}
-
-// bashRules is Claude Code's rule for each command: Bash(<command>:*), the
-// command with any arguments after it, comma-joined into one value.
-func bashRules(cmds []string) string {
-	rules := make([]string, len(cmds))
-	for i, c := range cmds {
-		rules[i] = "Bash(" + c + ":*)"
-	}
-	return strings.Join(rules, ",")
 }
 
 // ruleSafe says p can go inside a Claude Code rule as it is: a comma or a

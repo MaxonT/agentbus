@@ -179,7 +179,7 @@ func TestFilesInit(t *testing.T) {
 	if err := f.Init(); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ file, text string }{{PolicyFile, PolicyStarter}, {InstructionsFile, DefaultInstructions}} {
+	for _, tc := range []struct{ file, text string }{{PolicyFile, string(FormatPolicy(FirstInstallPolicy()))}, {InstructionsFile, DefaultInstructions}} {
 		path := filepath.Join(dir, tc.file)
 		info, err := os.Stat(path)
 		if err != nil || info.Mode().Perm() != 0o600 {

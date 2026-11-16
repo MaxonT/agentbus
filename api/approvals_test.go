@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -73,7 +74,7 @@ func TestApprovalsListFromRecord(t *testing.T) {
 	if _, out := send(t, e, "GET", "/api/v0/approvals", "", ""); strings.Contains(out, "ap-REMOTE-1") {
 		t.Fatalf("the answered approval is still listed:\n%s", out)
 	}
-	if txt, ok := decidedText(t, e, "ap-REMOTE-1"); !ok || !strings.Contains(txt, "allowed by a person") {
+	if txt, ok := decidedText(t, e, "ap-REMOTE-1"); !ok || !strings.Contains(txt, "allowed from now on by a person") {
 		t.Fatalf("approval.decided was not recorded: %q ok=%v", txt, ok)
 	}
 }
@@ -106,14 +107,14 @@ func TestApprovalsListShowsHarnessNotTool(t *testing.T) {
 func TestDecideApprovalAllowMovesAskToAllow(t *testing.T) {
 	e := askStack(t)
 	seedApproval(t, e, "ap1", "s1", "t_gone", []string{"git push"}, []string{"git push"})
-	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"allow"}`); resp.StatusCode != 204 {
-		t.Fatalf("allow: %d %s", resp.StatusCode, out)
+	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"always"}`); resp.StatusCode != 204 {
+		t.Fatalf("always: %d %s", resp.StatusCode, out)
 	}
 	_, out := send(t, e, "GET", "/api/v0/settings/permissions", "", "")
 	if !strings.Contains(out, `"allow":["git push"]`) || !strings.Contains(out, `"ask":[]`) {
 		t.Fatalf("the command was not moved from ask to allow:\n%s", out)
 	}
-	if txt, ok := decidedText(t, e, "ap1"); !ok || txt != "allowed by a person" {
+	if txt, ok := decidedText(t, e, "ap1"); !ok || txt != "allowed from now on by a person" {
 		t.Fatalf("the answer was not recorded: %q ok=%v", txt, ok)
 	}
 }
@@ -175,6 +176,34 @@ func TestDecideApprovalAllowStartsContinuation(t *testing.T) {
 	}
 	if _, out := send(t, e, "GET", "/api/v0/settings/permissions", "", ""); !strings.Contains(out, `"allow":["git push"]`) {
 		t.Fatalf("the command was not moved to allow:\n%s", out)
+	}
+}
+
+// Allow once starts a continuation turn that may run exactly the approved
+// commands, this turn only, and writes nothing to the settings: the commands
+// are carried on the continuation job (Spec.AllowOnce), not moved to allow.
+func TestDecideApprovalOnce(t *testing.T) {
+	e := askStack(t)
+	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
+		queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "do a thing"},
+		queue.Links{}, queue.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedApproval(t, e, "ap1", "s1", orig.Turn, []string{"make deploy"}, []string{"make deploy"})
+	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"once"}`); resp.StatusCode != 204 {
+		t.Fatalf("once: %d %s", resp.StatusCode, out)
+	}
+	c := findContinuation(t, e)
+	if !slices.Equal(c.Spec.AllowOnce, []string{"make deploy"}) {
+		t.Fatalf("the continuation did not carry the once-allowed command: %+v", c.Spec.AllowOnce)
+	}
+	// Nothing written to the settings: the command is not on allow.
+	if _, out := send(t, e, "GET", "/api/v0/settings/permissions", "", ""); strings.Contains(out, `"allow":["make deploy"]`) {
+		t.Fatalf("allow once wrote to the settings:\n%s", out)
+	}
+	if txt, ok := decidedText(t, e, "ap1"); !ok || txt != "allowed once by a person" {
+		t.Fatalf("the answer was not recorded: %q ok=%v", txt, ok)
 	}
 }
 

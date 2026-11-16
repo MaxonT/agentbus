@@ -27,12 +27,15 @@ func TestTurnArgsPermissions(t *testing.T) {
 		Allow: []string{"go test", "make test"}, Forbid: []string{"git push", "git checkout"}}
 	const reads = "Read(//home/me/.agents/**),Grep(//home/me/.agents/**),Glob(//home/me/.agents/**)," +
 		"Read(//home/me/notes/**),Grep(//home/me/notes/**),Glob(//home/me/notes/**)"
-	allow := []string{"--allowedTools", reads + ",Bash(go test:*),Bash(make test:*)"}
-	forbid := []string{"--disallowedTools", "Bash(git push:*),Bash(git checkout:*)"}
+	// The whole Bash tool is allowed on an edit turn, so the gateway decides
+	// every shell command (allow, ask, forbid, unlisted); the per-command
+	// Bash(<cmd>:*) rules are gone, and so is the Bash forbid deny.
+	allow := []string{"--allowedTools", reads + ",Bash"}
+	bash := []string{"--allowedTools", "Bash"}
 	// No edit rule: every tool that edits files is denied, whatever the
 	// person's own settings allow.
-	noEdit := []string{"--disallowedTools", "Bash(git push:*),Bash(git checkout:*),Edit,Write,NotebookEdit"}
-	noEditOnly := []string{"--disallowedTools", "Edit,Write,NotebookEdit"}
+	noEdit := []string{"--disallowedTools", "Edit,Write,NotebookEdit"}
+	noEditOnly := noEdit
 	readOnly := []string{"--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob," + reads, "--strict-mcp-config", "--no-chrome"}
 	// An edit turn loads the person's own MCP servers (no
 	// --strict-mcp-config); Claude in Chrome is off on every turn.
@@ -47,30 +50,30 @@ func TestTurnArgsPermissions(t *testing.T) {
 		perm                       settings.Policy
 		want                       []string
 	}{
-		{"claude, no policy, no edits", "claude", "", "", Writes{}, settings.Policy{}, cat(head, noChrome, noEditOnly, []string{"--", "hi"})},
+		{"claude, no policy, no edits", "claude", "", "", Writes{}, settings.Policy{}, cat(head, bash, noChrome, noEditOnly, []string{"--", "hi"})},
 		{"claude", "claude", "", "", Writes{}, perm, cat(head, allow, noChrome, noEdit, []string{"--", "hi"})},
 		// The edit rule: Edit and Write in the session's folder, and a deny
 		// on each protected file, which wins over it and over forbid's
 		// neighbours in the same list.
 		{"claude edits its folder", "claude", "", "", edit, perm, cat(head,
-			[]string{"--allowedTools", reads + ",Edit(//w/repo/**),Bash(go test:*),Bash(make test:*)", "--no-chrome",
-				"--disallowedTools", "Bash(git push:*),Bash(git checkout:*),Edit(//data/permissions.toml),Edit(//data/token)", "--", "hi"})},
+			[]string{"--allowedTools", reads + ",Edit(//w/repo/**),Bash", "--no-chrome",
+				"--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token)", "--", "hi"})},
 		{"claude edits, no other policy", "claude", "", "", edit, settings.Policy{}, cat(head,
-			[]string{"--allowedTools", "Edit(//w/repo/**)", "--no-chrome", "--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token)", "--", "hi"})},
+			[]string{"--allowedTools", "Edit(//w/repo/**),Bash", "--no-chrome", "--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token)", "--", "hi"})},
 		// read_folders never becomes --add-dir: that would let a turn write
 		// there under the person's acceptEdits mode.
 		{"claude, folders only", "claude", "", "", Writes{}, settings.Policy{ReadFolders: []string{"/x"}},
-			cat(head, []string{"--allowedTools", "Read(//x/**),Grep(//x/**),Glob(//x/**)"}, noChrome, noEditOnly, []string{"--", "hi"})},
+			cat(head, []string{"--allowedTools", "Read(//x/**),Grep(//x/**),Glob(//x/**),Bash"}, noChrome, noEditOnly, []string{"--", "hi"})},
 		{"claude read-only, no policy", "claude", "", "", ro, settings.Policy{},
 			cat(head, []string{"--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config", "--no-chrome", "--", "hi"})},
 		{"claude, allow only", "claude", "", "", Writes{}, settings.Policy{Allow: []string{"go test"}},
-			cat(head, []string{"--allowedTools", "Bash(go test:*)"}, noChrome, noEditOnly, []string{"--", "hi"})},
+			cat(head, bash, noChrome, noEditOnly, []string{"--", "hi"})},
 		// allow never widens a read-only turn; folders and forbid still apply.
-		{"claude read-only", "claude", "", "", ro, perm, cat(head, readOnly, forbid, []string{"--", "hi"})},
+		{"claude read-only", "claude", "", "", ro, perm, cat(head, readOnly, []string{"--", "hi"})},
 		{"claude resume and model", "claude", "r-1", "opus", Writes{}, perm,
 			cat(head, []string{"--resume", "r-1"}, allow, noChrome, noEdit, []string{"--model", "opus", "--", "hi"})},
 		{"claude read-only, resume and model", "claude", "r-1", "opus", ro, perm,
-			cat(head, []string{"--resume", "r-1"}, readOnly, forbid, []string{"--model", "opus", "--", "hi"})},
+			cat(head, []string{"--resume", "r-1"}, readOnly, []string{"--model", "opus", "--", "hi"})},
 		// codex writes, with network, only with the edit rule.
 		{"codex edits", "codex", "", "", edit, perm, []string{"exec", "--skip-git-repo-check", "--json", "--sandbox", "workspace-write",
 			"-c", "sandbox_workspace_write.network_access=true", "--disable", "apps", "--disable", "plugins", "--", "hi"}},

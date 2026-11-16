@@ -128,7 +128,7 @@ var tags = []struct {
 	{name: "Sessions", doc: "A session is a conversation: its turns, in order. Read its history, search it, name it or close it."},
 	{name: "Agents", doc: "Saved agents: a harness, how it reaches its model, the model and a name. A turn names one. And the harnesses, runners and folders a turn can use."},
 	{name: "Settings", doc: "The policy and the instructions every turn gets, and the subscriptions control holds for runners. The main token only."},
-	{name: "Approvals", doc: "The commands held for a person to allow or refuse (ask in permissions.toml): list them and answer one. The main token only."},
+	{name: "Approvals", doc: "The commands the gateway held for a person (an ask entry, or a command on none of the lists under the ask default): list them and answer one, once, always or refuse. The main token only."},
 	{name: "Events", doc: "The record as a live stream, for a cockpit, an export or a program, and a program's own events. The main token only."},
 	{name: "Service", doc: "Which build this is, and this description."},
 	{name: "Runners", doc: "Register a runner, and take work.", runner: true},
@@ -514,8 +514,8 @@ var routes = slices.Concat([]route{
 	{method: "GET", path: "/api/v0/approvals", op: "listApprovals",
 		tag:     "Approvals",
 		summary: "List commands to approve",
-		doc: "The commands a person must answer: each one's id, its session and turn, the agent's shell tool, the commands and the ask entry of permissions.toml they matched, and when they were recorded. " +
-			"The gateway refuses a call whose command matches ask and records it here; the turn ends, nothing is held. GET it here, then POST your answer. " +
+		doc: "The commands a person must answer: each one's id, its session and turn, the agent's shell tool, the commands, the entry of permissions.toml they matched (an ask entry, or one suggested from a command on no list), and when they were recorded. " +
+			"The gateway holds a call whose command matches ask, or is on none of the lists under the ask default, and records it here; the turn ends, nothing is held. GET it here, then POST your answer. " +
 			"Once answered a command leaves this list; its approval.decided event says how it ended. No token or header value is in the answer. Takes the main token only. No body is read.",
 		query:   []param{{name: "state", doc: `Only "pending" is kept here; decided commands are in the events. Absent or "pending" lists them.`}},
 		replies: []reply{ok(200, HeldCalls{}, "The commands to approve, oldest first."), badRequest},
@@ -524,7 +524,7 @@ var routes = slices.Concat([]route{
 		idDoc:   "A command's id, from GET /api/v0/approvals. Another shape gets 404.",
 		tag:     "Approvals",
 		summary: "Answer a command",
-		doc: "Allow or refuse a recorded ask command. allow means allow from now on: each matched ask entry moves to allow in the settings, and a turn continues the session on the asking turn's agent so it can run the command (the runner reads settings fresh per turn). refuse records the decision only. " +
+		doc: "Answer a held command, once, always or refuse. once runs a continuation turn that may run exactly these commands, this turn only, and writes nothing to the settings. always moves each matched entry to allow in the settings and continues the session on the asking turn's agent (the runner reads settings fresh per turn). refuse records the decision only. (allow is the old name for always.) " +
 			"An approval.decided event records the answer. Takes the main token only.",
 		body: Decision{},
 		replies: []reply{{status: 204, doc: "Answered.", empty: true}, badRequest, fail(404, "No command by that id, or it was answered already."),

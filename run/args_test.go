@@ -216,14 +216,20 @@ func TestAskedLine(t *testing.T) {
 	}
 }
 
-// A turn that may write may run "<path> api" without asking; a read-only one
-// gets nothing new, and the person's own lists are not changed.
+// A turn that may write gets the API client on its allow list, so the gateway
+// runs the agent's own API calls without asking; a read-only one gets nothing
+// new, and the person's own lists are not changed. The whole Bash tool is
+// allowed on an edit turn, so the gateway is the one gate for shell.
 func TestWithAPI(t *testing.T) {
 	own := settings.Policy{Allow: []string{"go test"}, Forbid: []string{"git push"}}
 	p := withAPI(own, true, false)
+	if !slices.Contains(p.Allow, APIClient) {
+		t.Errorf("the API client is not on the allow list: %v", p.Allow)
+	}
 	a := turnArgs(hn("claude"), "", "", "", Writes{}, p, "hi")
-	if got := strings.Join(a, " "); !strings.Contains(got, "Bash(go test:*),Bash(agentbus-api:*)") || !strings.Contains(got, "--disallowedTools Bash(git push:*)") {
-		t.Errorf("args: %s", got)
+	got := strings.Join(a, " ")
+	if !strings.Contains(got, "Bash") || strings.Contains(got, "Bash(") {
+		t.Errorf("want the whole Bash tool allowed and no per-command Bash rule: %s", got)
 	}
 	if len(own.Allow) != 1 {
 		t.Errorf("the person's allow list changed: %v", own.Allow)

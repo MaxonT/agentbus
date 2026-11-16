@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/staysup/agentbus/event"
+	"github.com/staysup/agentbus/gateway"
 	"github.com/staysup/agentbus/netjail"
 )
 
@@ -270,25 +271,37 @@ type turnRules struct {
 	m  map[turnKey]turnRule
 }
 
-// turnRule is one turn's command rules: forbid (refused) and ask (held for a
-// person).
+// turnRule is one live turn's command rules, for the gateway to decide every
+// shell command: allow (run), ask (held), forbid (refused), allowOnce (command
+// lines allowed once for this turn, from an earlier card), and refuseUnlisted
+// (a command on no list is refused, not held — the unlisted default is ask
+// unless the person set refuse). live marks the entry as a running turn, so the
+// gateway asks for a command on no list; a turn not in the map is not guarded.
 type turnRule struct {
-	forbid []string
-	ask    []string
+	allow          []string
+	ask            []string
+	forbid         []string
+	allowOnce      []string
+	refuseUnlisted bool
+	live           bool
 }
 
-func (t *turnRules) set(session, turn string, forbid, ask []string) {
-	if len(forbid) == 0 && len(ask) == 0 {
-		return
-	}
+// set records a live turn's rules. Every live turn gets an entry, even with
+// empty lists, so the gateway knows the turn is guarded and asks for a command
+// on no list.
+func (t *turnRules) set(session, turn string, allow, ask, forbid, allowOnce []string, refuseUnlisted bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.m == nil {
 		t.m = map[turnKey]turnRule{}
 	}
 	t.m[turnKey{session, turn}] = turnRule{
-		forbid: append([]string(nil), forbid...),
-		ask:    append([]string(nil), ask...),
+		allow:          append([]string(nil), allow...),
+		ask:            append([]string(nil), ask...),
+		forbid:         append([]string(nil), forbid...),
+		allowOnce:      append([]string(nil), allowOnce...),
+		refuseUnlisted: refuseUnlisted,
+		live:           true,
 	}
 }
 
@@ -298,18 +311,45 @@ func (t *turnRules) clear(session, turn string) {
 	delete(t.m, turnKey{session, turn})
 }
 
+func (t *turnRules) get(session, turn string) turnRule {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.m[turnKey{session, turn}]
+}
+
 // Forbid is the forbid list of a live turn, for the gateway's guard
 // (gateway.Guard). A turn that is not live, or has none, gets nil.
 func (e *Engine) Forbid(session, turn string) []string {
-	e.turnRules.mu.Lock()
-	defer e.turnRules.mu.Unlock()
-	return e.turnRules.m[turnKey{session, turn}].forbid
+	return e.turnRules.get(session, turn).forbid
 }
 
 // Ask is the ask list of a live turn, for the gateway's guard: commands it
 // holds until a person answers. A turn that is not live, or has none, gets nil.
 func (e *Engine) Ask(session, turn string) []string {
-	e.turnRules.mu.Lock()
-	defer e.turnRules.mu.Unlock()
-	return e.turnRules.m[turnKey{session, turn}].ask
+	return e.turnRules.get(session, turn).ask
+}
+
+// Allow is the allow list of a live turn: commands that run without asking.
+func (e *Engine) Allow(session, turn string) []string {
+	return e.turnRules.get(session, turn).allow
+}
+
+// AllowOnce are the command lines a person allowed once for a live turn, from
+// an earlier card. They run this turn only and are written to no settings.
+func (e *Engine) AllowOnce(session, turn string) []string {
+	return e.turnRules.get(session, turn).allowOnce
+}
+
+// Unlisted is the gateway's decision for a command of a live turn on none of
+// its lists: Ask (the default) or Refuse (when the person set it). A turn that
+// is not live is not guarded, so a command on no list runs (Allow).
+func (e *Engine) Unlisted(session, turn string) gateway.Decision {
+	r := e.turnRules.get(session, turn)
+	if !r.live {
+		return gateway.Allow
+	}
+	if r.refuseUnlisted {
+		return gateway.Refuse
+	}
+	return gateway.Ask
 }

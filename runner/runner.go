@@ -771,7 +771,7 @@ func (r *Runner) work(ctx context.Context, job queue.Job, a queue.Attempt) {
 func (r *Runner) request(at *attempt) run.Request {
 	sp := at.job.Spec
 	req := run.Request{Turn: at.job.Turn, Prompt: sp.Prompt, Model: sp.Model, ReadOnly: sp.ReadOnly,
-		IdempotencyKey: at.job.IdempotencyKey}
+		IdempotencyKey: at.job.IdempotencyKey, AllowOnce: sp.AllowOnce}
 	// The agent's token is control's: a runner of a server's always, and
 	// in up the one its calls carry as their placeholder.
 	if (r.cfg.Forward || r.cfg.NoSecrets) && at.token != "" {

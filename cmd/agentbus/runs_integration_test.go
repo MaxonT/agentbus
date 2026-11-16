@@ -216,7 +216,7 @@ func TestRunSetsBaseURLInChildOnlyAndClosesWithExitCode(t *testing.T) {
 		t.Fatalf("the service's own ANTHROPIC_BASE_URL changed to %q", got)
 	}
 	// The prompt comes last, after --, so a prompt shaped like a flag stays a prompt.
-	want := "-p --output-format json --append-system-prompt HINT --allowedTools EDIT --no-chrome --disallowedTools PROTECT --model haiku -- --dangerously-skip-permissions hello"
+	want := "-p --output-format json --append-system-prompt HINT --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT --model haiku -- --dangerously-skip-permissions hello"
 	if got := argsOf(t, r.Args, id); got != want {
 		t.Fatalf("child args %q, want %q", got, want)
 	}
@@ -350,9 +350,9 @@ func TestRunReadOnlyFlags(t *testing.T) {
 		readOnly any
 		want     string // with BASE for the session's base URL
 	}{
-		{"claude", false, "-p --output-format json --append-system-prompt HINT --allowedTools EDIT --no-chrome --disallowedTools PROTECT -- hi"},
+		{"claude", false, "-p --output-format json --append-system-prompt HINT --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT -- hi"},
 		{"claude", true, "-p --output-format json --append-system-prompt HINT --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config --no-chrome -- hi"},
-		{"claude", nil, "-p --output-format json --append-system-prompt HINT --allowedTools EDIT --no-chrome --disallowedTools PROTECT -- hi"},
+		{"claude", nil, "-p --output-format json --append-system-prompt HINT --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT -- hi"},
 		{"codex", nil, codexRelayArgs + ` exec --skip-git-repo-check --json --sandbox workspace-write -c developer_instructions=HINT -c sandbox_workspace_write.network_access=true --disable apps --disable plugins -- hi`},
 		{"codex", true, codexRelayArgs + ` exec --skip-git-repo-check --json --sandbox read-only -c developer_instructions=HINT --disable apps --disable plugins -- hi`},
 		// False names workspace-write with network on: codex exec's own

@@ -36,11 +36,18 @@ import (
 	"github.com/staysup/agentbus/event"
 )
 
-// Guard gives a run's turn's command rules: forbid entries it may never run,
-// and ask entries held until a person answers.
+// Guard gives a run's turn's command rules, for the gateway to decide every
+// shell command the turn runs: forbid entries it may never run, ask entries
+// held until a person answers, allow entries that run without asking, the
+// command lines allowed once for this turn (an "allow once" on an earlier
+// card), and whether a command on none of the lists is refused rather than
+// held (the unlisted default: ask unless the person set refuse).
 type Guard interface {
 	Forbid(session, turn string) []string
 	Ask(session, turn string) []string
+	Allow(session, turn string) []string
+	AllowOnce(session, turn string) []string
+	Unlisted(session, turn string) Decision
 }
 
 // SetGuard sets the Guard. Call it before serving.
@@ -52,7 +59,9 @@ const RefusedPrefix = "AgentBusRefused_"
 // refusalText is what the model reads in place of a refused call's output.
 func refusalText(rule string) string {
 	if rule == "" {
-		return "Refused by the AgentBus gateway: a Forbid rule in Settings matched this command. The command did not run."
+		// A command on none of the lists under unlisted = refuse, or a call the
+		// gateway no longer remembers (after a restart).
+		return "Refused by the AgentBus gateway: this command is not on the allow list and Settings refuse anything else. The command did not run."
 	}
 	return "Refused by the AgentBus gateway: the Forbid rule " + strconv.Quote(rule) +
 		" in Settings matched this command. The command did not run."
@@ -279,15 +288,15 @@ func shellQuote(s string) string {
 
 // guardBody is a reply as the agent gets it: every refused call renamed.
 type guardBody struct {
-	g      *Gateway
-	ex     *exchange
-	vendor string
-	forbid []string
-	ask    []string
-	src    io.ReadCloser
-	br     *bufio.Reader
-	end    func()
-	ended  sync.Once
+	g         *Gateway
+	ex        *exchange
+	vendor    string
+	rules     Rules    // allow, ask, forbid and the unlisted default
+	allowOnce []string // command lines allowed once for this turn
+	src       io.ReadCloser
+	br        *bufio.Reader
+	end       func()
+	ended     sync.Once
 
 	sniffed bool
 	out     bytes.Buffer
@@ -323,8 +332,8 @@ type openCall struct {
 
 // guardReply wraps src. end runs once, when the guard has read the whole
 // reply or the reply is closed: every tool.refused is emitted by then.
-func (g *Gateway) guardReply(ex *exchange, forbid, ask []string, src io.ReadCloser, end func()) io.ReadCloser {
-	return &guardBody{g: g, ex: ex, vendor: g.adapter.Vendor(), forbid: forbid, ask: ask, src: src, end: end,
+func (g *Gateway) guardReply(ex *exchange, rules Rules, allowOnce []string, src io.ReadCloser, end func()) io.ReadCloser {
+	return &guardBody{g: g, ex: ex, vendor: g.adapter.Vendor(), rules: rules, allowOnce: allowOnce, src: src, end: end,
 		br: bufio.NewReaderSize(src, 64<<10), open: map[string]*openCall{}, refused: map[string]string{}}
 }
 
@@ -414,7 +423,10 @@ func (b *guardBody) registerApproval() {
 			seenCmd[c] = true
 			commands = append(commands, c)
 		}
-		if r := b.asked[i].rule; !seenRule[r] {
+		// An empty rule (a held command with no clean entry to suggest) is not
+		// recorded: "always allow" would try to add it and the settings reject
+		// an empty command.
+		if r := b.asked[i].rule; r != "" && !seenRule[r] {
 			seenRule[r] = true
 			rules = append(rules, r)
 		}
@@ -562,37 +574,114 @@ func jsonText(v any) []byte {
 // the reply's one approval (registerApproval).
 func (b *guardBody) decide(key, callID, name string, input json.RawMessage, item map[string]any) {
 	cmds := commandsOf(b.vendor, item)
-	for _, c := range cmds {
-		if rule, ok := forbidden(b.forbid, c); ok {
+	decs := make([]Decision, len(cmds))
+	for i, c := range cmds {
+		decs[i], _ = b.decideLine(c)
+	}
+	// Forbid wins over the whole call: any command refused refuses it, before
+	// any ask of the same call is recorded.
+	for i, c := range cmds {
+		if decs[i] == Refuse {
+			_, rule := b.decideLine(c)
 			b.refuse(key, callID, name, input, rule, refusalText(rule))
 			return
 		}
 	}
-	// Collect every ask entry that matches, across every command of the call,
-	// so a person moving them to allow removes exactly the entries that refused
-	// (not the raw command), and nothing stays in ask to refuse the continuation
-	// again. Each ask rule is checked alone, so a chained command that matches
-	// two entries collects both.
+	// Then hold every command on ask, or unlisted under the ask default. The
+	// entries an "always allow" moves to allow are the ask entries the command
+	// matched (each checked alone, so a chain matching two collects both); for
+	// the parts held only because they are unlisted, an entry is suggested from
+	// that part itself (suggestRules), so "always allow" adds the command that
+	// was held, not an earlier allowed part or a wrapper. A held command with no
+	// clean rule (a run-time command) is still shown on the card with no rule;
+	// "always allow" then adds nothing for it.
 	var askCmds []string
 	firstRule := ""
-	for _, c := range cmds {
-		hit := false
-		for _, rule := range b.ask {
-			if _, ok := forbidden([]string{rule}, c); ok {
-				hit = true
-				b.asked = append(b.asked, heldCall{key: key, callID: callID, name: name, command: c, rule: rule})
-				if firstRule == "" {
-					firstRule = rule
-				}
-			}
+	for i, c := range cmds {
+		if decs[i] != Ask {
+			continue
 		}
-		if hit {
-			askCmds = append(askCmds, c)
+		askCmds = append(askCmds, c)
+		rules := append(b.matchedAsk(c), b.suggestRules(c)...)
+		if len(rules) == 0 {
+			b.asked = append(b.asked, heldCall{key: key, callID: callID, name: name, command: c, rule: ""})
+			continue
+		}
+		for _, rule := range rules {
+			b.asked = append(b.asked, heldCall{key: key, callID: callID, name: name, command: c, rule: rule})
+			if firstRule == "" && rule != "" {
+				firstRule = rule
+			}
 		}
 	}
 	if len(askCmds) > 0 {
 		b.refuse(key, callID, name, input, firstRule, askRefusal(strings.Join(askCmds, "; ")))
 	}
+}
+
+// suggestRules proposes an allow entry for each part of line that is held only
+// because it is on no list (an unlisted final command): its program and, when
+// it has one, its subcommand. A wrapper (sudo, env), an allowed or asked part,
+// and a part with no clean rule are skipped, so an "always allow" adds the
+// command that was actually held — not an earlier allowed part or the wrapper.
+func (b *guardBody) suggestRules(line string) []string {
+	var out []string
+	eachCommand(line, 0, func(words []string, soft bool) bool {
+		if soft {
+			return true // a wrapper; its inner command governs
+		}
+		if _, ok := matchAny(b.rules.Allow, words); ok {
+			return true
+		}
+		if _, ok := matchAny(b.rules.Ask, words); ok {
+			return true // an ask entry, collected by matchedAsk
+		}
+		if r := suggestWords(words); r != "" && !containsRule(out, r) {
+			out = append(out, r)
+		}
+		return true
+	})
+	return out
+}
+
+// decideLine decides one command line. The turn's rules decide it; then, if it
+// would be held and it exactly matches a command allowed once for this turn, it
+// runs instead. Allow once softens a hold, never a refusal: a forbidden command
+// is refused even if it was allowed once, so the hard boundary always wins.
+func (b *guardBody) decideLine(line string) (Decision, string) {
+	dec, rule := classify(b.rules, line)
+	if dec == Ask {
+		for _, a := range b.allowOnce {
+			if a == line {
+				return Allow, ""
+			}
+		}
+	}
+	return dec, rule
+}
+
+// matchedAsk is every ask entry a simple command of line matches, in order,
+// without repeats: the entries an "always allow" moves from ask to allow.
+func (b *guardBody) matchedAsk(line string) []string {
+	var out []string
+	eachCommand(line, 0, func(words []string, _ bool) bool {
+		for _, r := range b.rules.Ask {
+			if _, ok := matchAny([]string{r}, words); ok && !containsRule(out, r) {
+				out = append(out, r)
+			}
+		}
+		return true
+	})
+	return out
+}
+
+func containsRule(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // refuse renames a call so the agent cannot run it and tells the model text in

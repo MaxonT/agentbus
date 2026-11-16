@@ -23,7 +23,7 @@ func TestDecideForbidWinsInMultiCommandExec(t *testing.T) {
 	} {
 		g := New(&url.URL{}, openai.Adapter{}, &event.Memory{})
 		b := g.guardReply(&exchange{id: "x1", session: "s1", turn: "t_1"},
-			[]string{"git push"}, []string{"git status"},
+			Rules{Forbid: []string{"git push"}, Ask: []string{"git status"}}, nil,
 			io.NopCloser(strings.NewReader("")), func() {}).(*guardBody)
 		item := map[string]any{"type": "custom_tool_call", "name": "exec", "input": script}
 		b.decide("c1", "c1", "exec", json.RawMessage(`"exec"`), item)
