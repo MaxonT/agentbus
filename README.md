@@ -15,7 +15,7 @@
 
 </div>
 
-[![AgentBus 0.5.9: Codex reviews Claude Code's change and finds a P1; every model call with its cost. Click to watch the 2-minute demo.](docs/assets/cockpit-059.png)](https://github.com/user-attachments/assets/674686dc-394d-4431-9e0b-a48ef3d8ef9d)
+[![AgentBus 0.5.9: Codex reviews Claude Code's change and finds a P1; every model call with its cost. Click to watch the 2-minute demo.](docs/assets/cockpit-059.png)](https://github.com/StaysUp/agentbus/releases/tag/v0.5.9)
 
 AgentBus sits between your coding agents and every model vendor. It runs the agents you already
 have (Claude Code, Codex, Antigravity or any OpenRouter model) and tracks every step.
