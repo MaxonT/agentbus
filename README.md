@@ -11,11 +11,11 @@
 [![Latest release](https://img.shields.io/github/v/release/staysup/agentbus)](https://github.com/staysup/agentbus/releases)
 [![CI](https://github.com/StaysUp/agentbus/actions/workflows/ci.yml/badge.svg)](https://github.com/StaysUp/agentbus/actions/workflows/ci.yml)
 
-[Quickstart](#quickstart) &nbsp;&bull;&nbsp; [Demo](https://youtu.be/lv0YMQ5t0k0) &nbsp;&bull;&nbsp; [Docs](#docs) &nbsp;&bull;&nbsp; [Releases](https://github.com/staysup/agentbus/releases)
+[Quickstart](#quickstart) &nbsp;&bull;&nbsp; [Demo](https://github.com/user-attachments/assets/674686dc-394d-4431-9e0b-a48ef3d8ef9d) &nbsp;&bull;&nbsp; [Docs](#docs) &nbsp;&bull;&nbsp; [Releases](https://github.com/staysup/agentbus/releases)
 
 </div>
 
-[![AgentBus demo](https://img.youtube.com/vi/lv0YMQ5t0k0/maxresdefault.jpg)](https://youtu.be/lv0YMQ5t0k0)
+https://github.com/user-attachments/assets/674686dc-394d-4431-9e0b-a48ef3d8ef9d
 
 AgentBus sits between your coding agents and every model vendor. It runs the agents you already
 have (Claude Code, Codex, Antigravity or any OpenRouter model) and tracks every step.
