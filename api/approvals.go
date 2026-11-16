@@ -30,7 +30,7 @@ type HeldCall struct {
 	Agent     string    `json:"agent,omitempty" doc:"The session's agent (harness) that asked, such as claude; a cockpit shows its product name. Absent for a session no run started."`
 	ToolID    string    `json:"tool_id,omitempty" doc:"The model's id for the tool call."`
 	ToolName  string    `json:"tool_name,omitempty" doc:"The shell tool's name, such as Bash."`
-	Command   string    `json:"command" doc:"Every ask command in the reply, one per line, for a person to read at a glance."`
+	Command   string    `json:"command" doc:"Every held command in the reply, one per line, for a person to read at a glance."`
 	Commands  []string  `json:"commands" doc:"Every held command in the reply, in order: a cockpit shows one card with a row per command. One answer (once, always or refuse) covers them all."`
 	Rule      string    `json:"rule" doc:"An entry an \"always\" would add to the allow list: the ask entry the first command matched, or one suggested from a command on no list (such as git push). Empty when nothing clean can be suggested (a run-time command)."`
 	Requested time.Time `json:"requested" doc:"When the command was refused and recorded."`
@@ -296,10 +296,12 @@ func (a *API) allowCommands(rules []string) error {
 // continueAfterApproval starts a turn in the approval's session, on the agent
 // of the turn the ask came from, so the agent can run the now-allowed commands.
 // Like every other continuation path, it names only the session (not a folder),
-// so the runner resumes the session's own workspace. allowOnce, for an "allow
-// once" decision, are the command lines the continuation turn's gateway lets
-// run this turn only (queue.Spec.AllowOnce); nil for "always", where the
-// commands are already on the allow list.
+// so the runner resumes the session's own workspace. allowOnce are the command
+// lines the continuation turn's gateway lets run this turn only
+// (queue.Spec.AllowOnce). Both "once" and "always" pass the commands, so the
+// turn runs even one "always" could not add to the allow list (a command built
+// at run time); "always" has also moved the matched entries to allow, for the
+// turns after this one.
 func (a *API) continueAfterApproval(h heldReply, allowOnce []string) error {
 	if a.cfg.Queue == nil || h.session == "" || h.turn == "" {
 		return nil
