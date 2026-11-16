@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/staysup/agentbus/event"
+	"github.com/staysup/agentbus/folders"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/store"
@@ -31,8 +32,23 @@ type env struct {
 	// With a stack (stackEnv): the queue and the engine behind the API.
 	q   *queue.Queue
 	eng *run.Engine
+	// fr is this machine's folder registry (newJobsEnv, stackEnv): a test
+	// pre-registers a folder in it and sends the turn by folder_ref, so a
+	// queued turn waits for a runner, not for a folder job no one takes.
+	fr *folders.Registry
 	// workdir is the runner's folder for copies.
 	workdir string
+}
+
+// folderRef registers path in the env's folder registry and answers its
+// reference and the machine's connector, for a turn sent by folder_ref.
+func (e *env) folderRef(t *testing.T, path string) (ref, connector string) {
+	t.Helper()
+	ref, err := e.fr.Register(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ref, e.fr.Connector()
 }
 
 func newEnvAt(t *testing.T, dbPath string) *env {

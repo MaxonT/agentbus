@@ -118,5 +118,5 @@ func stackEnv(t *testing.T, s stack) *env {
 		q.Close()
 		st.Close()
 	})
-	return &env{srv: srv, api: a, store: st, port: port, q: q, eng: eng, workdir: filepath.Join(dir, "sessions")}
+	return &env{srv: srv, api: a, store: st, port: port, q: q, eng: eng, fr: fr, workdir: filepath.Join(dir, "sessions")}
 }

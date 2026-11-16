@@ -167,7 +167,9 @@ func TestTurnRefusalsComeFromTheJob(t *testing.T) {
 	if resp.StatusCode != 404 || !strings.Contains(out, "no such session") {
 		t.Fatalf("unknown session: %d %s", resp.StatusCode, out)
 	}
-	jobs, _ := e.q.List(queue.DefaultTeam, queue.Filter{}, 10)
+	// Two turn jobs, each failed at setup. A valid typed folder also queues a
+	// KindFolder job its runner takes (audit #10), so count turn jobs alone.
+	jobs, _ := e.q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindTurn}, 10)
 	if len(jobs) != 2 || jobs[0].Reason != queue.ReasonSetup {
 		t.Fatalf("jobs %+v", jobs)
 	}
@@ -177,7 +179,7 @@ func TestTurnRefusalsComeFromTheJob(t *testing.T) {
 			t.Errorf("%s: %d %s, want 400", b, resp.StatusCode, out)
 		}
 	}
-	if jobs, _ := e.q.List(queue.DefaultTeam, queue.Filter{}, 10); len(jobs) != 2 {
-		t.Errorf("%d jobs after requests refused before the queue, want 2", len(jobs))
+	if jobs, _ := e.q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindTurn}, 10); len(jobs) != 2 {
+		t.Errorf("%d turn jobs after requests refused before the queue, want 2", len(jobs))
 	}
 }

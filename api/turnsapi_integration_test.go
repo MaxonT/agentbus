@@ -155,8 +155,11 @@ func TestIdempotencyKey(t *testing.T) {
 			t.Errorf("key %s: %d %s, want 400", k, resp.StatusCode, out)
 		}
 	}
-	if jobs, _ := e.q.List(queue.DefaultTeam, queue.Filter{}, 10); len(jobs) != 1 {
-		t.Errorf("%d jobs, want the one", len(jobs))
+	// One turn job: the idempotent request is answered from the first. The
+	// first's valid typed folder also queued a KindFolder job its runner took
+	// (audit #10), so count turn jobs alone.
+	if jobs, _ := e.q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindTurn}, 10); len(jobs) != 1 {
+		t.Errorf("%d turn jobs, want the one", len(jobs))
 	}
 }
 

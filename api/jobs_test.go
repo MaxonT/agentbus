@@ -59,7 +59,7 @@ func newJobsEnvAt(t *testing.T, now func() time.Time) *env {
 	srv.Config.Handler = a
 	srv.Start()
 	t.Cleanup(func() { srv.Close(); q.Close(); st.Close() })
-	return &env{srv: srv, api: a, store: st, port: port, q: q}
+	return &env{srv: srv, api: a, store: st, port: port, q: q, fr: fr}
 }
 
 // The runner protocol is on the one address, under /api/v0/runner/. It takes
@@ -68,7 +68,8 @@ func newJobsEnvAt(t *testing.T, now func() time.Time) *env {
 // with the same turn id. The jobs API is gone.
 func TestRunnerProtocolOnTheOneAPI(t *testing.T) {
 	e := newJobsEnv(t)
-	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder":"/tmp","prompt":"hi"}`)))
+	ref, conn := e.folderRef(t, "/tmp")
+	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder_ref":"`+ref+`","connector":"`+conn+`","prompt":"hi"}`)))
 	var st Started
 	if resp.StatusCode != http.StatusAccepted || json.Unmarshal([]byte(raw), &st) != nil || st.State != "queued" || st.Turn == "" {
 		t.Fatalf("POST /api/v0/turns with no runner: %d %s, want queued with its turn", resp.StatusCode, raw)

@@ -302,10 +302,10 @@ var SnapshotShape = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // the folder is. agentbus server has none, and takes references only.
 type FolderIssuer interface {
 	Connector() string
+	// Register keeps a path and answers its reference, by shape alone: a
+	// folder a person typed is checked for existence only on its own machine,
+	// through the folder job, so the control plane never reads a folder.
 	Register(path string) (ref string, err error)
-	// Add is Register for a folder a person typed: it must be an existing
-	// directory they can read, and its error says why not in one sentence.
-	Add(path string) (ref string, err error)
 	Path(ref string) (string, bool)
 	// Within says the folder at path is the folder ref or inside it, and
 	// WithinRef the same of the folder child: on the folders' machine, once
