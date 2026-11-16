@@ -143,7 +143,7 @@ func (u Upgrade) Run() (*DB, Report, error) {
 	if !fresh {
 		starters = nil
 	}
-	if rep.Imported, rep.Done, err = db.importFiles(u.Dir, u.Agents, starters); err != nil {
+	if rep.Imported, rep.Done, err = db.importFiles(u.Dir, u.Agents, starters, fresh); err != nil {
 		db.Close()
 		return nil, rep, err
 	}
@@ -391,7 +391,7 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 
 // importFiles imports dir's settings files, once. done is false when the
 // import was done before.
-func (d *DB) importFiles(dir string, readAgents func([]byte) ([]AgentRow, error), starters func() []AgentRow) (files []string, done bool, err error) {
+func (d *DB) importFiles(dir string, readAgents func([]byte) ([]AgentRow, error), starters func() []AgentRow, fresh bool) (files []string, done bool, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if t, err := meta(d.db, "imported"); err != nil {
@@ -434,6 +434,17 @@ func (d *DB) importFiles(dir string, readAgents func([]byte) ([]AgentRow, error)
 		}
 		files = append(files, PolicyFile)
 		cs = append(cs, Change{Setting: SettingPermissions, Keys: changedKeys(defaultPolicy(), p), File: PolicyFile})
+	} else if fresh {
+		// A fresh install with no permissions.toml: seed the small read-only
+		// starter allow list, so a first session is not a card for every
+		// command (FirstInstallPolicy). The stored overlay holds only the allow
+		// list; every other key stays at its default. Upgrade steps are already
+		// marked done for a fresh database (openDB in Run).
+		first := FirstInstallPolicy()
+		if err := putSetting(tx, SettingPermissions, overlayOf(defaultPolicy(), first), now); err != nil {
+			return nil, false, err
+		}
+		cs = append(cs, Change{Setting: SettingPermissions, Keys: changedKeys(defaultPolicy(), first), File: ""})
 	}
 	if exists(filepath.Join(dir, InstructionsFile)) {
 		text, _, err := old.Instructions()

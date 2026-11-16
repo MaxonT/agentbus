@@ -298,6 +298,11 @@ type Spec struct {
 	// its turn without its folder being checked again.
 	Typed          string `json:"-"`
 	TypedConnector string `json:"-"`
+	// AllowOnce are command lines a person allowed once on an earlier card
+	// (api/approvals.go, decision "once"): the continuation turn's gateway
+	// lets exactly these run, this turn only, and nothing is written to the
+	// settings. Carried on the job so control's record is the only source.
+	AllowOnce []string `json:"allow_once,omitempty"`
 }
 
 // asked is spec as the request named it, for the idempotency hash: the

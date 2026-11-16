@@ -34,6 +34,7 @@ func defaultPolicy() Policy {
 		Allow:         []string{},
 		Ask:           []string{},
 		Forbid:        []string{},
+		Unlisted:      UnlistedAsk,
 		Edit:          EditSession,
 		Isolation:     IsolationAuto,
 		ShareReadOnly: []string{},

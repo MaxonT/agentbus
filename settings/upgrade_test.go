@@ -94,11 +94,15 @@ func TestUpgradeNewFolder(t *testing.T) {
 		}
 	}
 	in, err := d.Info()
-	if err != nil || in.Imported.IsZero() || len(in.Files) != 0 || in.Version != 0 {
+	if err != nil || in.Imported.IsZero() || len(in.Files) != 0 || in.Version != 1 {
 		t.Fatalf("info %+v %v", in, err)
 	}
+	// A fresh install seeds the read-only starter allow list, so a first
+	// session is not a card for every command.
 	if p, _, err := d.Policy(); err != nil || *p.Limits.MaxDepth != DefaultMaxDepth {
 		t.Fatalf("policy %+v %v", p, err)
+	} else if !slices.Equal(p.Allow, StarterAllow) {
+		t.Fatalf("fresh install did not seed the starter allow list: %v", p.Allow)
 	}
 }
 
@@ -141,8 +145,8 @@ func TestUpgradeStarters(t *testing.T) {
 		if got := ids(d); got != "codex,agy" {
 			t.Fatalf("stopped %v: agents %q", stopped, got)
 		}
-		if in, _ := d.Info(); in.Version != 0 {
-			t.Fatalf("stopped %v: version %d, want 0", stopped, in.Version)
+		if in, _ := d.Info(); in.Version != 1 {
+			t.Fatalf("stopped %v: version %d, want 1 (the seeded starter allow list)", stopped, in.Version)
 		}
 		d.Close()
 		u.Starters = func() []AgentRow { t.Fatal("asked again"); return nil }

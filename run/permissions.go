@@ -8,9 +8,14 @@ package run
 // What each list becomes, per harness (the flags are built in harness/):
 //
 //	read_folders      claude: --allowedTools Read(//<folder>/**),Grep(…),Glob(…); codex: nothing (its sandbox reads every folder)
-//	allow             claude: --allowedTools Bash(<cmd>:*); codex: nothing yet
-//	ask               both: the gateway holds the call for a person (approvals.go); claude also --allowedTools Bash(<cmd>:*) so it does not refuse after an allow; agy refuses the turn
-//	forbid            both: the gateway's guard; claude also --disallowedTools Bash(<cmd>:*)
+//	allow/ask/forbid/unlisted  the gateway decides every shell command of the
+//	                  turn from these lists, for claude and codex alike
+//	                  (gateway/guard.go): forbid refused, ask held, allow run, a
+//	                  command on no list held (or refused when unlisted = refuse).
+//	                  claude's own Bash check must not refuse one first, so an
+//	                  edit turn is given the whole Bash tool (--allowedTools Bash)
+//	                  and the gateway is the gate; agy, whose format the guard
+//	                  cannot read, refuses a turn that has forbid or ask.
 //	edit = "session"  claude: --allowedTools Edit(//<folder>/**), and a deny Edit(//<file>) on each data folder file;
 //	                  codex: --sandbox workspace-write -c sandbox_workspace_write.network_access=true
 //	edit = "none"     claude: --disallowedTools Edit,Write,NotebookEdit; codex: --sandbox read-only (no network)

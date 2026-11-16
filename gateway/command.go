@@ -19,13 +19,97 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
+// Decision is the gateway's verdict on a command line, or on one simple
+// command within it. A stricter decision has the higher value, so a whole line
+// takes the maximum over its parts: one refused part refuses the line, one
+// asked (or unlisted-under-ask) part holds it, and a line runs only when every
+// part is allowed.
+type Decision int
+
+const (
+	Allow  Decision = iota // on the allow list, or allowed once for this turn
+	Ask                    // held for a person
+	Refuse                 // never run
+)
+
+// Rules are a turn's three command lists and the decision for a command on
+// none of them (Unlisted, Ask or Refuse: never Allow — an unlisted command is
+// never let through silently).
+type Rules struct {
+	Allow, Ask, Forbid []string
+	Unlisted           Decision
+}
+
+// guards says whether these rules can refuse or hold any command: an unlisted
+// default other than Allow, or a forbid or ask entry. When they cannot, and no
+// command is allowed once, the reply need not be read.
+func (r Rules) guards() bool {
+	return r.Unlisted != Allow || len(r.Forbid) > 0 || len(r.Ask) > 0
+}
+
+// classify decides a whole command line. It walks every simple command in the
+// line — through chains (; && || & | and newlines), subshells, sh -c, eval,
+// sudo, and the transparent env and VAR= prefixes — and takes the strictest
+// decision. rule is the ask or forbid entry that drove an Ask or a Refuse, ""
+// when the unlisted default drove it (a command on no list).
+func classify(r Rules, line string) (Decision, string) {
+	dec, rule := Allow, ""
+	eachCommand(line, 0, func(words []string, soft bool) bool {
+		d, ru := decideWords(r, words, soft)
+		if d > dec {
+			dec, rule = d, ru
+		}
+		return dec < Refuse // once refused, nothing stricter can follow
+	})
+	return dec, rule
+}
+
+// decideWords decides one simple command by its words: forbid wins, then ask,
+// then allow. A command on no list takes the unlisted default, unless soft — a
+// wrapper (env, sudo, sh -c) whose inner command is decided on its own and
+// governs — in which case it is let through so an allowed inner keeps its
+// decision (env FOO=1 git fetch runs when git fetch is allowed).
+func decideWords(r Rules, words []string, soft bool) (Decision, string) {
+	if rule, ok := matchAny(r.Forbid, words); ok {
+		return Refuse, rule
+	}
+	if rule, ok := matchAny(r.Ask, words); ok {
+		return Ask, rule
+	}
+	if _, ok := matchAny(r.Allow, words); ok {
+		return Allow, ""
+	}
+	if soft {
+		return Allow, ""
+	}
+	return r.Unlisted, ""
+}
+
+// matchAny returns the first rule whose words the command's words start with.
+func matchAny(rules, words []string) (string, bool) {
+	for _, r := range rules {
+		if matchWords(strings.Fields(r), words) {
+			return r, true
+		}
+	}
+	return "", false
+}
+
 // forbidden returns the first entry of rules that one of line's simple
 // commands matches, and whether one did.
 func forbidden(rules []string, line string) (string, bool) {
 	if len(rules) == 0 {
 		return "", false
 	}
-	return matchLine(rules, line, 0)
+	rule, found := "", false
+	eachCommand(line, 0, func(words []string, _ bool) bool {
+		if r, ok := matchAny(rules, words); ok {
+			rule, found = r, true
+			return false
+		}
+		return true
+	})
+	return rule, found
 }
 
 // maxNesting bounds sh -c inside sh -c.
@@ -39,20 +123,29 @@ func parse(line string) (*syntax.File, error) {
 	return syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(line), "")
 }
 
-func matchLine(rules []string, line string, depth int) (string, bool) {
+// eachCommand calls fn for every decidable simple command in line: the command
+// itself, the inner command of each wrapper (sudo, env, nohup, …), and the
+// commands of every sh -c / eval script. soft marks a wrapper stage whose inner
+// command follows and governs: its own unlisted default is let through so that
+// env FOO=1 git fetch keeps git fetch's decision, while the wrapper is still
+// checked against forbid and ask (so "env" or "sudo" can be forbidden). A VAR=
+// assignment is stripped, never decided. fn returns false to stop the walk.
+// depth bounds sh -c inside sh -c.
+func eachCommand(line string, depth int, fn func(words []string, soft bool) bool) {
 	if depth > maxNesting {
-		return "", false
+		return
 	}
 	f, err := parse(line)
 	if err != nil {
-		// A line the parser cannot read: the shell may still run part of
-		// it, so err toward refusing. Any run of words that reads as a
-		// rule matches.
-		return matchTokens(rules, line)
+		// A line the parser cannot read: the shell may still run part of it,
+		// so err toward refusing. Every run of words is decided (soft false),
+		// so an unlisted word anywhere holds or refuses the line.
+		eachToken(line, func(w []string) bool { return fn(w, false) })
+		return
 	}
-	rule, found := "", false
+	stop := false
 	syntax.Walk(f, func(n syntax.Node) bool {
-		if found {
+		if stop {
 			return false
 		}
 		st, ok := n.(*syntax.Stmt)
@@ -63,43 +156,89 @@ func matchLine(rules []string, line string, depth int) (string, bool) {
 		if !ok {
 			return true
 		}
-		rule, found = matchCall(rules, st, call, depth)
-		return !found
+		if !eachCall(st, call, depth, fn) {
+			stop = true
+		}
+		return !stop
 	})
-	return rule, found
 }
 
-// matchCall matches one simple command, and the scripts it hands to a shell.
-func matchCall(rules []string, st *syntax.Stmt, call *syntax.CallExpr, depth int) (string, bool) {
+// eachCall decides one simple command and the scripts it hands to a shell.
+// Returns false when fn asked to stop.
+func eachCall(st *syntax.Stmt, call *syntax.CallExpr, depth int, fn func(words []string, soft bool) bool) bool {
 	words := make([]string, 0, len(call.Args))
 	for _, w := range call.Args {
 		words = append(words, wordText(w))
 	}
-	for len(words) > 0 {
-		// Each stage is matched, so a rule may name a wrapper such as
-		// sudo, and the command it runs is matched too.
-		for _, r := range rules {
-			if matchWords(strings.Fields(r), words) {
-				return r, true
-			}
+	// A simple command reads as: leading VAR= assignments, then wrapper commands
+	// (sudo, env, nohup, …) each running the next, then one final command with
+	// its arguments. The one rule that governs the decision: a wrapper is soft —
+	// transparent to the unlisted default, with the command it runs governing —
+	// ONLY when a real command actually follows it; a wrapper with nothing but
+	// assignments after it (env FOO=1, sudo on its own) runs as itself and takes
+	// the full decision (soft false). So an unlisted command can never slip
+	// through as a bare wrapper. forbid and ask still match any wrapper. A VAR=
+	// assignment runs no program and is never decided. maxPrefixes bounds a
+	// pathological wrapper stack; past it the remainder is decided, never dropped.
+	for len(words) > 0 && isAssignment(words[0]) {
+		words = words[1:]
+	}
+	for i := 0; len(words) > 0 && i < maxPrefixes; i++ {
+		if _, isPrefix := prefixCommands[path.Base(words[0])]; !isPrefix {
+			break // words[0] is the final command
 		}
 		next, ok := skipPrefix(words)
-		if !ok {
-			break
+		for ok && len(next) > 0 && isAssignment(next[0]) {
+			next = next[1:] // assignments the wrapper sets for its inner command
+		}
+		if !ok || len(next) == 0 {
+			// No command follows the wrapper: it runs as itself, decided in full.
+			return fn(words, false)
+		}
+		if !fn(words, true) {
+			return false
 		}
 		words = next
 	}
 	if len(words) == 0 {
-		return "", false
+		return true // only assignments: no program runs
 	}
+	// The final command: a plain command, or a shell or eval that runs a script.
+	// Decide its scripts' commands first; the stage is soft (its own unlisted
+	// default waived) only when a script contributed a command that governs —
+	// never for a plain command, or a shell whose script is built at run time
+	// and reads as nothing.
+	emitted := 0
+	for _, s := range innerScripts(st, words) {
+		stop := false
+		eachCommand(s, depth+1, func(w []string, soft bool) bool {
+			emitted++
+			if !fn(w, soft) {
+				stop = true
+			}
+			return !stop
+		})
+		if stop {
+			return false
+		}
+	}
+	return fn(words, emitted > 0)
+}
+
+// maxPrefixes bounds how many wrappers (sudo, env, VAR=) are stripped from the
+// front of one command before its final command is decided as it stands.
+const maxPrefixes = 256
+
+// innerScripts are the readable scripts a shell or eval command runs: sh -c's
+// script, a shell's here-document or here-string, or eval's arguments. Empty
+// for a plain command, or a shell with no script to read.
+func innerScripts(st *syntax.Stmt, words []string) []string {
 	var scripts []string
 	switch {
 	case isShell(words[0]):
 		if script, ok := shellScript(words); ok {
 			scripts = append(scripts, script)
 		} else {
-			// A shell reading its script from a here-document or a
-			// here-string.
 			for _, rd := range st.Redirs {
 				switch {
 				case (rd.Op == syntax.Hdoc || rd.Op == syntax.DashHdoc) && rd.Hdoc != nil:
@@ -110,14 +249,11 @@ func matchCall(rules []string, st *syntax.Stmt, call *syntax.CallExpr, depth int
 			}
 		}
 	case path.Base(words[0]) == "eval":
-		scripts = append(scripts, strings.Join(words[1:], " "))
-	}
-	for _, s := range scripts {
-		if r, ok := matchLine(rules, s, depth+1); ok {
-			return r, true
+		if s := strings.Join(words[1:], " "); strings.TrimSpace(s) != "" {
+			scripts = append(scripts, s)
 		}
 	}
-	return "", false
+	return scripts
 }
 
 // wordText is a word's value when it is literal. A part known only at run
@@ -180,21 +316,18 @@ func decodeEscapes(s string) string {
 	return v
 }
 
-// matchTokens is the fallback for a line that does not parse: the line cut
-// at white space, quotes and shell operators, and every run of words checked
-// against every rule.
-func matchTokens(rules []string, line string) (string, bool) {
+// eachToken is the fallback for a line that does not parse: the line cut at
+// white space, quotes and shell operators, and every run of words handed to
+// fn, so any run that reads as a command is decided.
+func eachToken(line string, fn func(words []string) bool) {
 	toks := strings.FieldsFunc(line, func(r rune) bool {
 		return strings.ContainsRune(" \t\r\n;&|()<>`\"'$\\{}", r)
 	})
 	for i := range toks {
-		for _, r := range rules {
-			if matchWords(strings.Fields(r), toks[i:]) {
-				return r, true
-			}
+		if !fn(toks[i:]) {
+			return
 		}
 	}
-	return "", false
 }
 
 // splitWords is a command line's first simple command as words.
@@ -581,4 +714,55 @@ func hexN(s string) (rune, bool) {
 		}
 	}
 	return r, true
+}
+
+// suggestWords is an allow entry proposed for one simple command a person chose
+// to always allow that no ask entry matched: the program, and when its next word
+// reads like a subcommand (git fetch, npm run), that word too. It is empty when
+// nothing clean can be formed (a run-time command). The entry passes the
+// permissions shape (settings.checkCommand): no comma, parenthesis, star, double
+// space or control character, and no leading -.
+func suggestWords(words []string) string {
+	if len(words) == 0 || words[0] == "" {
+		return ""
+	}
+	prog := path.Base(words[0])
+	if prog == "." || prog == ".." || prog == "/" {
+		return ""
+	}
+	rule := prog
+	if len(words) > 1 && isSubcommand(words[1]) {
+		rule = prog + " " + words[1]
+	}
+	if ruleShape(rule) {
+		return rule
+	}
+	if ruleShape(prog) {
+		return prog
+	}
+	return ""
+}
+
+// isSubcommand says whether w reads as a subcommand (git fetch) rather than a
+// flag, a path, an assignment or a value known only at run time (nonLiteral).
+func isSubcommand(w string) bool {
+	if w == "" || strings.ContainsAny(w, "/=") || strings.HasPrefix(w, "-") {
+		return false
+	}
+	for _, r := range w {
+		if !(r == '_' || r == '-' || r == '.' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// ruleShape says whether s can be a permissions command entry.
+func ruleShape(s string) bool {
+	// The same shape settings.checkCommand accepts: not empty, no leading or
+	// trailing space, no double space, no leading -.
+	if s == "" || s != strings.TrimSpace(s) || strings.Contains(s, "  ") || strings.HasPrefix(s, "-") {
+		return false
+	}
+	return !strings.ContainsAny(s, ",()*?[]{}") && !strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
 }

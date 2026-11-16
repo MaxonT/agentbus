@@ -238,10 +238,12 @@ type exchange struct {
 	// probe: the adapter marked the request as the harness's own check, so
 	// every event of the exchange carries Probe.
 	probe bool
-	// forbid: the run turn's forbid entries, which the guard applies to the
-	// reply (guard.go). ask: its ask entries, held for a person (approvals.go).
-	forbid []string
-	ask    []string
+	// rules: the run turn's command lists (allow, ask, forbid) and the unlisted
+	// default, which the guard applies to every shell command in the reply
+	// (guard.go). allowOnce: command lines allowed once for this turn, from an
+	// earlier card (approvals.go).
+	rules     Rules
+	allowOnce []string
 	// relayed: control's relay took the call for a runner's turn
 	// (ServeRelayed).
 	relayed bool
@@ -575,8 +577,13 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, session, runTurn
 			r.Header.Del("Content-Encoding")
 		}
 		if g.guard != nil && runTurn != "" && rl == nil {
-			ex.forbid = g.guard.Forbid(session, runTurn)
-			ex.ask = g.guard.Ask(session, runTurn)
+			ex.rules = Rules{
+				Allow:    g.guard.Allow(session, runTurn),
+				Ask:      g.guard.Ask(session, runTurn),
+				Forbid:   g.guard.Forbid(session, runTurn),
+				Unlisted: g.guard.Unlisted(session, runTurn),
+			}
+			ex.allowOnce = g.guard.AllowOnce(session, runTurn)
 		}
 		var replayed int
 		if g.rewrite != nil && runTurn != "" && rl == nil {
@@ -668,7 +675,7 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	// for no encoding (Accept-Encoding is dropped); a reply compressed anyway
 	// is not guarded.
 	guarded := false
-	if (len(ex.forbid) > 0 || len(ex.ask) > 0) && !ex.probe && status == http.StatusOK {
+	if (ex.rules.guards() || len(ex.allowOnce) > 0) && !ex.probe && status == http.StatusOK {
 		switch strings.ToLower(strings.TrimSpace(header.Get("Content-Encoding"))) {
 		case "", "identity":
 			guarded = true
@@ -722,7 +729,7 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	if guarded {
 		// The agent gets the reply with each refused call renamed; the
 		// adapter reads the tee, so it sees the calls as the model wrote them.
-		resp.Body = g.guardReply(ex, ex.forbid, ex.ask, resp.Body, guardEnd)
+		resp.Body = g.guardReply(ex, ex.rules, ex.allowOnce, resp.Body, guardEnd)
 		resp.Header.Del("Content-Length")
 		resp.ContentLength = -1
 	}

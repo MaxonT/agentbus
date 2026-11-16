@@ -323,6 +323,10 @@ type Request struct {
 	// Settings": the turn is refused with it, after a missing program and
 	// before anything is stored.
 	Signin string
+	// AllowOnce are command lines a person allowed once on an earlier card,
+	// for this continuation turn only (api/approvals.go, decision "once").
+	// The gateway lets exactly these run; nothing is written to the settings.
+	AllowOnce []string
 }
 
 // Turn is a turn that started.
@@ -421,7 +425,7 @@ func (e *Engine) Start(req Request) (*Turn, error) {
 	return e.start(turn{harness: req.Harness, folder: req.Folder, folderRef: req.FolderRef, session: id, id: req.Turn,
 		model: req.Model, readOnly: req.ReadOnly, prompt: req.Prompt, key: req.IdempotencyKey,
 		agentID: req.AgentID, access: req.Access, keyEnv: req.KeyEnv, origin: req.Origin, root: req.Root, depth: req.Depth,
-		token: req.Token, apiURL: req.APIURL, placeholder: req.Placeholder, signin: req.Signin})
+		token: req.Token, apiURL: req.APIURL, placeholder: req.Placeholder, signin: req.Signin, allowOnce: req.AllowOnce})
 }
 
 // next starts the next turn of req.Session, in its own agent and folder.
@@ -553,7 +557,7 @@ func (e *Engine) next(req Request) (*Turn, error) {
 		recoveredFrom: recovered, recoveredWhy: recoveredWhy, continuity: continuity, model: model,
 		readOnly: req.ReadOnly, prompt: req.Prompt, context: context, key: req.IdempotencyKey,
 		agentID: agentID, access: access, keyEnv: keyEnv, origin: req.Origin, root: req.Root, depth: req.Depth,
-		token: req.Token, apiURL: req.APIURL, placeholder: req.Placeholder, signin: req.Signin}
+		token: req.Token, apiURL: req.APIURL, placeholder: req.Placeholder, signin: req.Signin, allowOnce: req.AllowOnce}
 	if from != "" || continuity == ByTranscript {
 		// A fresh child: the history comes from the gateway, or from the
 		// transcript in its prompt.
@@ -628,9 +632,10 @@ type turn struct {
 	origin                   *event.Origin
 	root                     string // the request tree's root session; "" for this one
 	depth                    int
-	token, apiURL            string // control's token for the turn and its API (Request.Token)
-	placeholder              bool   // the token is the child's model credential
-	signin                   string // why control has no credential for the agent now
+	token, apiURL            string   // control's token for the turn and its API (Request.Token)
+	placeholder              bool     // the token is the child's model credential
+	signin                   string   // why control has no credential for the agent now
+	allowOnce                []string // command lines allowed once for this turn, from an earlier card
 }
 
 // start stores session.opened and turn.started, starts t's child in a slot
@@ -667,11 +672,6 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	}
 	perm := snap.Policy
 	hint := e.fillInstructions(snap.Instructions, t.session)
-	// The gateway refuses a command of this turn that forbid names, and holds
-	// one that ask names until a person answers, for claude and codex alike
-	// (gateway/guard.go, gateway/approvals.go). A harness whose format the
-	// guard does not read refuses a turn with forbid or ask (Harness.Refuse).
-	e.turnRules.set(t.session, t.id, perm.Forbid, perm.Ask)
 	baseURL := e.cfg.BaseURL + "/s/" + t.session + "/t/" + t.id
 	if e.cfg.Wire == nil {
 		return nil, refuse(http.StatusNotFound, "this service starts no turns")
@@ -770,6 +770,14 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	added := addedContext(doc, hint, askText)
 	hint = joinText(doc, hint, askText)
 	perm = withAPI(perm, e.cfg.APIDir != "", t.readOnly)
+	// The gateway decides every shell command of this turn: forbid refused,
+	// ask held for a person, allow run, a command on no list held (or refused
+	// when the person set the unlisted default to refuse), and a command
+	// allowed once on an earlier card run this turn only. For claude and codex
+	// alike (gateway/guard.go, gateway/approvals.go); a harness whose format
+	// the guard does not read refuses a turn with forbid or ask
+	// (Harness.Refuse). Set after withAPI, so allow carries the API client.
+	e.turnRules.set(t.session, t.id, perm.Allow, perm.Ask, perm.Forbid, t.allowOnce, perm.Unlisted == settings.UnlistedRefuse)
 	if hint != "" {
 		if why := h.OwnInstructions(cmd.Env, t.folder); why != "" {
 			hint, added = "", nil
@@ -1246,11 +1254,11 @@ func turnSpec(hint, resumeID, model string, w Writes, perm settings.Policy, prom
 		NoSubagents: perm.Subagents != nil && !*perm.Subagents, Walled: perm.Sandbox.Mode == settings.SandboxOn, Prompt: prompt}
 }
 
-// withAPI is perm with the agent's way to the API allowed without asking,
-// for a turn that may write: Claude Code refuses a command with a variable in
-// it unless the person approves it, which a turn cannot (Claude Code
-// 2.1.319, 2026-11-09). What the call may do is the turn token's to say
-// (api/tokens.go). forbid still wins over it.
+// withAPI is perm with the agent's way to the API on the allow list, for a
+// turn that may write, so the gateway runs the agent's own API calls without
+// holding each for a person (a command on no list is held under the ask
+// default). What the call may do is the turn token's to say (api/tokens.go).
+// forbid still wins over it.
 func withAPI(perm settings.Policy, api, readOnly bool) settings.Policy {
 	if !api || readOnly {
 		return perm

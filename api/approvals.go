@@ -31,8 +31,8 @@ type HeldCall struct {
 	ToolID    string    `json:"tool_id,omitempty" doc:"The model's id for the tool call."`
 	ToolName  string    `json:"tool_name,omitempty" doc:"The shell tool's name, such as Bash."`
 	Command   string    `json:"command" doc:"Every ask command in the reply, one per line, for a person to read at a glance."`
-	Commands  []string  `json:"commands" doc:"Every ask command in the reply, in order: a cockpit shows one card with a row per command. Allow or refuse covers them all."`
-	Rule      string    `json:"rule" doc:"The ask entry of permissions.toml the first command matched, such as git push."`
+	Commands  []string  `json:"commands" doc:"Every held command in the reply, in order: a cockpit shows one card with a row per command. One answer (once, always or refuse) covers them all."`
+	Rule      string    `json:"rule" doc:"An entry an \"always\" would add to the allow list: the ask entry the first command matched, or one suggested from a command on no list (such as git push). Empty when nothing clean can be suggested (a run-time command)."`
 	Requested time.Time `json:"requested" doc:"When the command was refused and recorded."`
 }
 
@@ -43,7 +43,7 @@ type HeldCalls struct {
 
 // Decision is the body of POST /api/v0/approvals/{id}.
 type Decision struct {
-	Decision string `json:"decision" doc:"allow moves each command from ask to allow in the settings and runs a continuation turn in the session; refuse records the decision only."`
+	Decision string `json:"decision" doc:"once runs a continuation turn that may run exactly these commands, this turn only, and writes nothing to the settings; always moves each matched command from ask to allow in the settings and runs a continuation turn; refuse records the decision only and leaves the settings unchanged. (allow is the old name for always.)"`
 }
 
 // heldReply is what control reads back from an approval.requested event to list
@@ -138,17 +138,22 @@ func (a *API) listApprovals(w http.ResponseWriter, r *http.Request) {
 func (a *API) decideApproval(w http.ResponseWriter, r *http.Request, id string) {
 	var body Decision
 	if !decodeObject(r, &body) {
-		writeError(w, http.StatusBadRequest, `the body must be one JSON object with decision, "allow" or "refuse"`)
+		writeError(w, http.StatusBadRequest, `the body must be one JSON object with decision: "once", "always" or "refuse"`)
 		return
 	}
-	var allow bool
-	switch body.Decision {
-	case "allow":
-		allow = true
+	// once: run the commands this continuation turn only, settings unchanged.
+	// always: move the matched entries to allow (from now on) and continue.
+	// refuse: record only. ("allow" is the old name for "always".)
+	var once, always bool
+	decision := body.Decision
+	switch decision {
+	case "once":
+		once = true
+	case "always", "allow":
+		always, decision = true, "always"
 	case "refuse":
-		allow = false
 	default:
-		writeError(w, http.StatusBadRequest, `decision must be "allow" or "refuse"`)
+		writeError(w, http.StatusBadRequest, `decision must be "once", "always" or "refuse"`)
 		return
 	}
 	// Claim it first, so two answers at once (two tabs, a retry) do not both
@@ -174,19 +179,27 @@ func (a *API) decideApproval(w http.ResponseWriter, r *http.Request, id string) 
 		writeError(w, http.StatusNotFound, "no command by that id, or it was answered already")
 		return
 	}
-	// Allow from now on: do the work before recording the answer, so a failure
-	// leaves it pending to try again rather than losing it.
-	if allow {
+	// Do the work before recording the answer, so a failure leaves it pending
+	// to try again rather than losing it. always moves the matched entries to
+	// allow; once leaves the settings untouched and lets the continuation turn
+	// alone run the commands.
+	if always {
 		if err := a.allowCommands(h.rules); err != nil {
 			writeError(w, http.StatusInternalServerError, "the approval could not be written to the settings")
 			return
 		}
-		if err := a.continueAfterApproval(h); err != nil {
+	}
+	if once || always {
+		// Both carry the commands as allowed once, so the continuation turn runs
+		// them even for a command "always" could not add to the allow list (one
+		// built at run time, with no clean rule). "always" additionally moved the
+		// matched entries to allow above, for the turns after this one.
+		if err := a.continueAfterApproval(h, h.commands); err != nil {
 			writeError(w, http.StatusInternalServerError, "the continuation turn could not be started")
 			return
 		}
 	}
-	if err := a.recordDecision(h, allow, "a person"); err != nil {
+	if err := a.recordDecision(h, decision, "a person"); err != nil {
 		a.internal(w)
 		return
 	}
@@ -218,8 +231,9 @@ func (a *API) approvalByID(id string) (h heldReply, exists, decided bool, err er
 }
 
 // recordDecision writes approval.decided for a held reply: Approval ties it to
-// its request, and the text says how it ended and who answered.
-func (a *API) recordDecision(h heldReply, allow bool, by string) error {
+// its request, and the text says how it ended (once, always or refuse) and who
+// answered.
+func (a *API) recordDecision(h heldReply, decision, by string) error {
 	e := event.Event{
 		Kind:     event.ApprovalDecided,
 		Session:  h.session,
@@ -227,7 +241,7 @@ func (a *API) recordDecision(h heldReply, allow bool, by string) error {
 		Approval: h.id,
 		ToolID:   h.toolID,
 		Rule:     firstOf(h.rules),
-		Text:     decisionText(allow, by),
+		Text:     decisionText(decision, by),
 	}
 	e.ID, e.Time = newEventID(), a.cfg.Now().UTC()
 	_, _, err := a.cfg.Store.Append(e)
@@ -282,8 +296,11 @@ func (a *API) allowCommands(rules []string) error {
 // continueAfterApproval starts a turn in the approval's session, on the agent
 // of the turn the ask came from, so the agent can run the now-allowed commands.
 // Like every other continuation path, it names only the session (not a folder),
-// so the runner resumes the session's own workspace.
-func (a *API) continueAfterApproval(h heldReply) error {
+// so the runner resumes the session's own workspace. allowOnce, for an "allow
+// once" decision, are the command lines the continuation turn's gateway lets
+// run this turn only (queue.Spec.AllowOnce); nil for "always", where the
+// commands are already on the allow list.
+func (a *API) continueAfterApproval(h heldReply, allowOnce []string) error {
 	if a.cfg.Queue == nil || h.session == "" || h.turn == "" {
 		return nil
 	}
@@ -300,7 +317,7 @@ func (a *API) continueAfterApproval(h heldReply) error {
 	spec := queue.Spec{
 		Harness: src.Harness, AgentID: src.AgentID, Access: src.Access, KeyEnv: src.KeyEnv,
 		Session: h.session, Model: src.Model, ModelFromAgent: src.ModelFromAgent,
-		AgentModel: src.AgentModel, ReadOnly: src.ReadOnly,
+		AgentModel: src.AgentModel, ReadOnly: src.ReadOnly, AllowOnce: allowOnce,
 		Prompt: "A person approved: you may now run " + strings.Join(h.commands, ", ") + ". Run them and continue.",
 	}
 	links := queue.Links{ContinuesTurn: h.turn, Chain: j.Links.Chain}
@@ -315,17 +332,20 @@ func (a *API) continueAfterApproval(h heldReply) error {
 	return err
 }
 
-func decisionText(allow bool, by string) string {
-	switch {
-	case allow && by != "":
-		return "allowed by " + by
-	case allow:
-		return "allowed"
-	case by != "":
-		return "refused by " + by
-	default:
-		return "refused"
+// decisionText says how an approval ended, for approval.decided: allowed once,
+// allowed from now on, or refused, and by whom.
+func decisionText(decision, by string) string {
+	verb := "refused"
+	switch decision {
+	case "once":
+		verb = "allowed once"
+	case "always":
+		verb = "allowed from now on"
 	}
+	if by != "" {
+		return verb + " by " + by
+	}
+	return verb
 }
 
 func firstOf(s []string) string {
