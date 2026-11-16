@@ -724,8 +724,9 @@ func start(c config) (*service, error) {
 		if c.mode == modeUp && c.noSecrets() && runnerJobs != nil {
 			g.SetCredential(runnerJobs.Local(relayOf[g]))
 		}
-		// forbid and ask in permissions.toml, applied to each run turn's
-		// replies (refuse, or hold for a person).
+		// The command rules of permissions.toml (allow, ask, forbid and the
+		// unlisted default), applied to each run turn's replies: refuse, hold
+		// for a person, or run.
 		if eng != nil {
 			g.SetGuard(eng)
 		}

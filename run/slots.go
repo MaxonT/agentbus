@@ -264,8 +264,9 @@ func turnEnv(env, parent []string, base, tok, apiDir string, asked *event.Origin
 
 type turnKey struct{ session, turn string }
 
-// turnRules are the live turns' forbid and ask entries from permissions.toml,
-// for the gateway's guard.
+// turnRules are the live turns' command rules from permissions.toml — allow,
+// ask, forbid, the unlisted default and any allow-once — for the gateway's
+// guard to decide every shell command.
 type turnRules struct {
 	mu sync.Mutex
 	m  map[turnKey]turnRule
