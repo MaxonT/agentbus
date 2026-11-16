@@ -492,6 +492,23 @@ func (s *Store) Continuation(id string) (Continuation, error) {
 	return c, nil
 }
 
+// SessionHarness returns the harness of the session's latest run turn, such as
+// claude, read from the record. It is "" when no run started the session (one
+// pointed at the gateway by hand). Control shows it as the agent that asked for
+// an approval, in place of the shell tool the command came from.
+func (s *Store) SessionHarness(session string) (string, error) {
+	var agent sql.NullString
+	err := s.r.QueryRow(`SELECT json_extract(data, '$.agent') FROM events
+		WHERE session = ?1 AND `+agentFrom+` ORDER BY seq DESC LIMIT 1`, session).Scan(&agent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: session harness: %w", err)
+	}
+	return agent.String, nil
+}
+
 // KeyedTurn is the turn an idempotency key started.
 type KeyedTurn struct {
 	Session, Turn string

@@ -27,7 +27,7 @@ type HeldCall struct {
 	ID        string    `json:"id" doc:"Answer it with POST /api/v0/approvals/{id}."`
 	Session   string    `json:"session" doc:"The session whose turn asked."`
 	Turn      string    `json:"turn,omitempty" doc:"The turn the ask came from; an allow continues this session on that turn's agent."`
-	Agent     string    `json:"agent,omitempty" doc:"The agent's shell tool the command came from, such as Bash."`
+	Agent     string    `json:"agent,omitempty" doc:"The session's agent (harness) that asked, such as claude; a cockpit shows its product name. Absent for a session no run started."`
 	ToolID    string    `json:"tool_id,omitempty" doc:"The model's id for the tool call."`
 	ToolName  string    `json:"tool_name,omitempty" doc:"The shell tool's name, such as Bash."`
 	Command   string    `json:"command" doc:"Every ask command in the reply, one per line, for a person to read at a glance."`
@@ -66,13 +66,16 @@ func heldReplyOf(e event.Event) heldReply {
 	}
 }
 
-func (h heldReply) heldCall() HeldCall {
+// heldCall builds the listed approval. agent is the session's harness (such as
+// claude), which the person sees as the agent that asked; it is not the shell
+// tool the command came from (that stays in ToolName).
+func (h heldReply) heldCall(agent string) HeldCall {
 	rule := ""
 	if len(h.rules) > 0 {
 		rule = h.rules[0]
 	}
 	return HeldCall{
-		ID: h.id, Session: h.session, Turn: h.turn, Agent: h.toolName,
+		ID: h.id, Session: h.session, Turn: h.turn, Agent: agent,
 		ToolID: h.toolID, ToolName: h.toolName, Command: strings.Join(h.commands, "\n"),
 		Commands: h.commands, Rule: rule, Requested: h.requested.UTC(),
 	}
@@ -115,8 +118,18 @@ func (a *API) listApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := []HeldCall{}
+	harnessOf := map[string]string{} // one lookup per session, not per command
 	for _, h := range replies {
-		out = append(out, h.heldCall())
+		agent, ok := harnessOf[h.session]
+		if !ok {
+			agent, err = a.cfg.Store.SessionHarness(h.session)
+			if err != nil {
+				a.internal(w)
+				return
+			}
+			harnessOf[h.session] = agent
+		}
+		out = append(out, h.heldCall(agent))
 	}
 	writeJSON(w, http.StatusOK, HeldCalls{Approvals: out})
 }
