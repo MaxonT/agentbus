@@ -2,11 +2,14 @@ package api
 
 // GET /api/v0/approvals and POST /api/v0/approvals/{id}: the commands a person
 // must answer. The gateway refuses a tool call whose command matches an ask
-// entry of permissions.toml (gateway/approvals.go) and records it here; the
-// turn ends. Allow means "allow from now on": the command moves from ask to
-// allow in the settings, and a continuation turn runs in the same session so
-// the agent can carry on. Refuse records the decision only. No token or header
-// value is in the answer.
+// entry of permissions.toml (gateway/approvals.go) and records it as an
+// approval.requested event; the turn ends. Control derives the pending list
+// from the record — a requested with no approval.decided for the same id — so
+// the gateway that refused may run on a separate runner, as long as its event
+// reached control's store. Allow means "allow from now on": the matched ask
+// entries move to allow in the settings, control writes approval.decided, and a
+// continuation turn runs in the same session so the agent can carry on. Refuse
+// writes approval.decided only. No token or header value is in the answer.
 
 import (
 	"errors"
@@ -14,23 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/staysup/agentbus/gateway"
+	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/settings"
 )
-
-// ApprovalSource is where the API reads and answers held replies: the gateway.
-// Decide records the answer and returns the reply's info, so an allow can start
-// the continuation.
-type ApprovalSource interface {
-	Approvals() []gateway.ApprovalInfo
-	// Claim marks a reply as being answered (so two concurrent answers do not
-	// both act): info, whether this caller claimed it, and whether it exists.
-	Claim(id string) (info gateway.ApprovalInfo, claimed, exists bool)
-	// Release returns a claimed reply to pending after the answer's work failed.
-	Release(id string)
-	Decide(id string, allow bool, by string) (gateway.ApprovalInfo, bool)
-}
 
 // HeldCall is one held reply in GET /api/v0/approvals.
 type HeldCall struct {
@@ -56,6 +46,60 @@ type Decision struct {
 	Decision string `json:"decision" doc:"allow moves each command from ask to allow in the settings and runs a continuation turn in the session; refuse records the decision only."`
 }
 
+// heldReply is what control reads back from an approval.requested event to list
+// and to answer it.
+type heldReply struct {
+	id        string
+	session   string
+	turn      string
+	toolID    string
+	toolName  string
+	commands  []string
+	rules     []string
+	requested time.Time
+}
+
+func heldReplyOf(e event.Event) heldReply {
+	return heldReply{
+		id: e.Approval, session: e.Session, turn: e.Turn, toolID: e.ToolID,
+		toolName: e.ToolName, commands: e.Commands, rules: e.Rules, requested: e.Time,
+	}
+}
+
+func (h heldReply) heldCall() HeldCall {
+	rule := ""
+	if len(h.rules) > 0 {
+		rule = h.rules[0]
+	}
+	return HeldCall{
+		ID: h.id, Session: h.session, Turn: h.turn, Agent: h.toolName,
+		ToolID: h.toolID, ToolName: h.toolName, Command: strings.Join(h.commands, "\n"),
+		Commands: h.commands, Rule: rule, Requested: h.requested.UTC(),
+	}
+}
+
+// pending reads the record and returns the approvals not yet decided, oldest
+// first. decided holds the ids already answered, for the existence check.
+func (a *API) pendingApprovals() (replies []heldReply, decided map[string]bool, err error) {
+	evs, err := a.cfg.Store.ApprovalEvents()
+	if err != nil {
+		return nil, nil, err
+	}
+	decided = map[string]bool{}
+	for _, e := range evs {
+		if e.Kind == event.ApprovalDecided {
+			decided[e.Approval] = true
+		}
+	}
+	for _, e := range evs {
+		if e.Kind != event.ApprovalRequested || e.Approval == "" || decided[e.Approval] {
+			continue
+		}
+		replies = append(replies, heldReplyOf(e))
+	}
+	return replies, decided, nil
+}
+
 // GET /api/v0/approvals
 func (a *API) listApprovals(w http.ResponseWriter, r *http.Request) {
 	if !noBody(w, r) {
@@ -65,13 +109,14 @@ func (a *API) listApprovals(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, `state must be "pending" or left out; decided commands are in the events`)
 		return
 	}
+	replies, _, err := a.pendingApprovals()
+	if err != nil {
+		a.internal(w)
+		return
+	}
 	out := []HeldCall{}
-	if a.cfg.Approvals != nil {
-		for _, ap := range a.cfg.Approvals.Approvals() {
-			out = append(out, HeldCall{ID: ap.ID, Session: ap.Session, Turn: ap.Turn, Agent: ap.Agent,
-				ToolID: ap.ToolID, ToolName: ap.ToolName, Command: ap.Command, Commands: ap.Commands,
-				Rule: ap.Rule, Requested: ap.Requested.UTC()})
-		}
+	for _, h := range replies {
+		out = append(out, h.heldCall())
 	}
 	writeJSON(w, http.StatusOK, HeldCalls{Approvals: out})
 }
@@ -93,37 +138,108 @@ func (a *API) decideApproval(w http.ResponseWriter, r *http.Request, id string) 
 		writeError(w, http.StatusBadRequest, `decision must be "allow" or "refuse"`)
 		return
 	}
-	if a.cfg.Approvals == nil {
-		writeError(w, http.StatusNotFound, "no command by that id, or it was answered already")
-		return
-	}
 	// Claim it first, so two answers at once (two tabs, a retry) do not both
-	// move the settings or start two continuations.
-	info, claimed, exists := a.cfg.Approvals.Claim(id)
-	if !exists {
-		writeError(w, http.StatusNotFound, "no command by that id, or it was answered already")
-		return
-	}
-	if !claimed {
+	// move the settings or start two continuations. The claim is in-process;
+	// approval.decided in the record is the durable "answered" mark.
+	if !a.claimApproval(id) {
 		writeError(w, http.StatusConflict, "that command is already being answered")
 		return
 	}
+	done := false
+	defer func() {
+		if !done {
+			a.releaseApproval(id)
+		}
+	}()
+	// Read the held reply from the record, and whether it was answered already.
+	h, exists, decided, err := a.approvalByID(id)
+	if err != nil {
+		a.internal(w)
+		return
+	}
+	if !exists || decided {
+		writeError(w, http.StatusNotFound, "no command by that id, or it was answered already")
+		return
+	}
 	// Allow from now on: do the work before recording the answer, so a failure
-	// returns it to pending to try again rather than losing it.
+	// leaves it pending to try again rather than losing it.
 	if allow {
-		if err := a.allowCommands(info.Rules); err != nil {
-			a.cfg.Approvals.Release(id)
+		if err := a.allowCommands(h.rules); err != nil {
 			writeError(w, http.StatusInternalServerError, "the approval could not be written to the settings")
 			return
 		}
-		if err := a.continueAfterApproval(info); err != nil {
-			a.cfg.Approvals.Release(id)
+		if err := a.continueAfterApproval(h); err != nil {
 			writeError(w, http.StatusInternalServerError, "the continuation turn could not be started")
 			return
 		}
 	}
-	a.cfg.Approvals.Decide(id, allow, "a person")
+	if err := a.recordDecision(h, allow, "a person"); err != nil {
+		a.internal(w)
+		return
+	}
+	done = true
+	a.releaseApproval(id)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// approvalByID reads one held reply from the record by its id, and whether a
+// decision for it was recorded already.
+func (a *API) approvalByID(id string) (h heldReply, exists, decided bool, err error) {
+	evs, err := a.cfg.Store.ApprovalEvents()
+	if err != nil {
+		return heldReply{}, false, false, err
+	}
+	for _, e := range evs {
+		if e.Approval != id {
+			continue
+		}
+		switch e.Kind {
+		case event.ApprovalRequested:
+			exists = true
+			h = heldReplyOf(e)
+		case event.ApprovalDecided:
+			decided = true
+		}
+	}
+	return h, exists, decided, nil
+}
+
+// recordDecision writes approval.decided for a held reply: Approval ties it to
+// its request, and the text says how it ended and who answered.
+func (a *API) recordDecision(h heldReply, allow bool, by string) error {
+	e := event.Event{
+		Kind:     event.ApprovalDecided,
+		Session:  h.session,
+		Turn:     h.turn,
+		Approval: h.id,
+		ToolID:   h.toolID,
+		Rule:     firstOf(h.rules),
+		Text:     decisionText(allow, by),
+	}
+	e.ID, e.Time = newEventID(), a.cfg.Now().UTC()
+	_, _, err := a.cfg.Store.Append(e)
+	return err
+}
+
+// claimApproval reserves an id for one in-flight answer; false means another
+// answer holds it (a 409). releaseApproval frees it.
+func (a *API) claimApproval(id string) bool {
+	a.decidingMu.Lock()
+	defer a.decidingMu.Unlock()
+	if a.deciding[id] {
+		return false
+	}
+	if a.deciding == nil {
+		a.deciding = map[string]bool{}
+	}
+	a.deciding[id] = true
+	return true
+}
+
+func (a *API) releaseApproval(id string) {
+	a.decidingMu.Lock()
+	delete(a.deciding, id)
+	a.decidingMu.Unlock()
 }
 
 // allowCommands moves each matched ask entry (the rule, a valid permissions
@@ -154,11 +270,11 @@ func (a *API) allowCommands(rules []string) error {
 // of the turn the ask came from, so the agent can run the now-allowed commands.
 // Like every other continuation path, it names only the session (not a folder),
 // so the runner resumes the session's own workspace.
-func (a *API) continueAfterApproval(info gateway.ApprovalInfo) error {
-	if a.cfg.Queue == nil || info.Session == "" || info.Turn == "" {
+func (a *API) continueAfterApproval(h heldReply) error {
+	if a.cfg.Queue == nil || h.session == "" || h.turn == "" {
 		return nil
 	}
-	j, err := a.cfg.Queue.JobByTurn(queue.DefaultTeam, info.Turn)
+	j, err := a.cfg.Queue.JobByTurn(queue.DefaultTeam, h.turn)
 	if errors.Is(err, queue.ErrNotFound) {
 		// The turn that asked is gone (an old approval, another runner). The
 		// commands are allowed from now on; there is just no turn to continue.
@@ -170,19 +286,40 @@ func (a *API) continueAfterApproval(info gateway.ApprovalInfo) error {
 	src := j.Spec
 	spec := queue.Spec{
 		Harness: src.Harness, AgentID: src.AgentID, Access: src.Access, KeyEnv: src.KeyEnv,
-		Session: info.Session, Model: src.Model, ModelFromAgent: src.ModelFromAgent,
+		Session: h.session, Model: src.Model, ModelFromAgent: src.ModelFromAgent,
 		AgentModel: src.AgentModel, ReadOnly: src.ReadOnly,
-		Prompt: "A person approved: you may now run " + strings.Join(info.Commands, ", ") + ". Run them and continue.",
+		Prompt: "A person approved: you may now run " + strings.Join(h.commands, ", ") + ". Run them and continue.",
 	}
-	links := queue.Links{ContinuesTurn: info.Turn, Chain: j.Links.Chain}
+	links := queue.Links{ContinuesTurn: h.turn, Chain: j.Links.Chain}
 	_, _, err = a.cfg.Queue.CreateTurnLinked(queue.DefaultTeam, "", spec, links, queue.Limits{})
 	var removed *queue.RunnerRemovedError
-	if errors.Is(err, queue.ErrSessionClosed) || errors.As(err, &removed) {
-		// The session cannot take another turn (closed, or its machine removed).
-		// The commands are allowed from now on; there is just no turn to run.
+	if errors.Is(err, queue.ErrSessionClosed) || errors.Is(err, queue.ErrSessionEnded) || errors.As(err, &removed) {
+		// The session cannot take another turn (closed, ended, or its machine
+		// removed). The commands are allowed from now on; there is just no turn
+		// to run.
 		return nil
 	}
 	return err
+}
+
+func decisionText(allow bool, by string) string {
+	switch {
+	case allow && by != "":
+		return "allowed by " + by
+	case allow:
+		return "allowed"
+	case by != "":
+		return "refused by " + by
+	default:
+		return "refused"
+	}
+}
+
+func firstOf(s []string) string {
+	if len(s) > 0 {
+		return s[0]
+	}
+	return ""
 }
 
 // without is list with every entry in drop removed.

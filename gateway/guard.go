@@ -398,8 +398,10 @@ func (b *guardBody) step() {
 	}
 }
 
-// registerApproval records the reply's ask commands as one approval and emits
-// approval.requested, once. The person answers later through the API.
+// registerApproval records the reply's ask commands as one approval.requested
+// event, once. It carries the approval's id, every ask command and the entries
+// they matched, so control can list and answer it from the record alone; the
+// gateway keeps no state. The person answers later through control's API.
 func (b *guardBody) registerApproval() {
 	if b.registered || len(b.asked) == 0 {
 		return
@@ -418,9 +420,10 @@ func (b *guardBody) registerApproval() {
 		}
 	}
 	primary := b.asked[0]
-	b.g.recordApproval(b.ex.session, b.ex.turn, primary.callID, primary.name, commands, rules)
-	b.g.emit(b.ex, []event.Event{{Kind: event.ApprovalRequested, ToolID: primary.callID,
-		ToolName: primary.name, Rule: primary.rule, Text: strings.Join(commands, "\n")}})
+	id := "ap-" + b.g.run + "-" + strconv.FormatUint(b.g.seq.Add(1), 10)
+	b.g.emit(b.ex, []event.Event{{Kind: event.ApprovalRequested, Approval: id, ToolID: primary.callID,
+		ToolName: primary.name, Rule: primary.rule, Text: strings.Join(commands, "\n"),
+		Commands: commands, Rules: rules}})
 }
 
 // firstByte is the reply's first byte that is not white space, or 0.

@@ -6,87 +6,84 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
-	"github.com/staysup/agentbus/gateway"
+	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/queue"
 )
 
-// fakeApprovals is a held-reply source for the handler test: one approval, and
-// a record of the answer it was given.
-type fakeApprovals struct {
-	mu       sync.Mutex
-	aps      map[string]gateway.ApprovalInfo
-	deciding map[string]bool
-	decided  []string // "<id>:<allow|refuse>:<by>"
+// seedApproval writes an approval.requested event to control's record, as the
+// gateway that refused the command would — including a gateway on a separate
+// runner, whose only trace on control is the relayed event. Control holds no
+// in-memory state for it; the list and the answer come from the record alone.
+func seedApproval(t *testing.T, e *env, id, session, turn string, commands, rules []string) {
+	t.Helper()
+	_, _, err := e.store.Append(event.Event{
+		ID: "evt-" + id, Kind: event.ApprovalRequested, Session: session, Turn: turn,
+		Approval: id, ToolID: "toolu_" + id, ToolName: "Bash", Rule: firstOf(rules),
+		Commands: commands, Rules: rules, Time: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
-func (f *fakeApprovals) Approvals() []gateway.ApprovalInfo {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := []gateway.ApprovalInfo{}
-	for _, ap := range f.aps {
-		out = append(out, ap)
+// decidedText returns the text of the approval.decided event for id, if one was
+// written.
+func decidedText(t *testing.T, e *env, id string) (string, bool) {
+	t.Helper()
+	evs, err := e.store.ApprovalEvents()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return out
+	for _, ev := range evs {
+		if ev.Kind == event.ApprovalDecided && ev.Approval == id {
+			return ev.Text, true
+		}
+	}
+	return "", false
 }
 
-func (f *fakeApprovals) Claim(id string) (gateway.ApprovalInfo, bool, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	ap, ok := f.aps[id]
-	if !ok {
-		return gateway.ApprovalInfo{}, false, false
-	}
-	if f.deciding[id] {
-		return ap, false, true
-	}
-	if f.deciding == nil {
-		f.deciding = map[string]bool{}
-	}
-	f.deciding[id] = true
-	return ap, true, true
-}
-
-func (f *fakeApprovals) Release(id string) {
-	f.mu.Lock()
-	delete(f.deciding, id)
-	f.mu.Unlock()
-}
-
-func (f *fakeApprovals) Decide(id string, allow bool, by string) (gateway.ApprovalInfo, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	ap, ok := f.aps[id]
-	if !ok {
-		return gateway.ApprovalInfo{}, false
-	}
-	delete(f.aps, id)
-	delete(f.deciding, id)
-	verb := "refuse"
-	if allow {
-		verb = "allow"
-	}
-	f.decided = append(f.decided, id+":"+verb+":"+by)
-	return ap, true
-}
-
-func askStack(t *testing.T, fa *fakeApprovals) *env {
+func askStack(t *testing.T) *env {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "permissions.toml"), []byte("ask = [\"git push\"]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return stackEnv(t, stack{permissions: filepath.Join(dir, "permissions.toml"), approvals: fa})
+	return stackEnv(t, stack{permissions: filepath.Join(dir, "permissions.toml")})
+}
+
+// The bug this fixes: an ask command refused by a gateway on a separate runner
+// reaches control only as a record event, with no in-memory registry on
+// control. GET /api/v0/approvals must still list it, and an answer must still
+// work, because control derives both from the record. The id carries a foreign
+// run (ap-REMOTE-1), so nothing in this process holds it.
+func TestApprovalsListFromRecord(t *testing.T) {
+	e := askStack(t)
+	seedApproval(t, e, "ap-REMOTE-1", "s1", "t_gone", []string{"git push"}, []string{"git push"})
+
+	_, out := send(t, e, "GET", "/api/v0/approvals", "", "")
+	if !strings.Contains(out, "ap-REMOTE-1") || !strings.Contains(out, "git push") {
+		t.Fatalf("the remote runner's approval was not listed from the record:\n%s", out)
+	}
+
+	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap-REMOTE-1", "", `{"decision":"allow"}`); resp.StatusCode != 204 {
+		t.Fatalf("allow: %d %s", resp.StatusCode, out)
+	}
+	if _, out := send(t, e, "GET", "/api/v0/approvals", "", ""); strings.Contains(out, "ap-REMOTE-1") {
+		t.Fatalf("the answered approval is still listed:\n%s", out)
+	}
+	if txt, ok := decidedText(t, e, "ap-REMOTE-1"); !ok || !strings.Contains(txt, "allowed by a person") {
+		t.Fatalf("approval.decided was not recorded: %q ok=%v", txt, ok)
+	}
 }
 
 // Allow moves each approved command from ask to allow in the settings (so the
-// runner allows it from the next turn), records the answer, and forgets it. The
-// continuation turn is skipped here because the turn that asked is gone.
+// runner allows it from the next turn) and records the answer. The continuation
+// turn is skipped here because the turn that asked is gone.
 func TestDecideApprovalAllowMovesAskToAllow(t *testing.T) {
-	fa := &fakeApprovals{aps: map[string]gateway.ApprovalInfo{
-		"ap1": {ID: "ap1", Session: "s1", Turn: "t_gone", Commands: []string{"git push"}, Rule: "git push", Rules: []string{"git push"}},
-	}}
-	e := askStack(t, fa)
+	e := askStack(t)
+	seedApproval(t, e, "ap1", "s1", "t_gone", []string{"git push"}, []string{"git push"})
 	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"allow"}`); resp.StatusCode != 204 {
 		t.Fatalf("allow: %d %s", resp.StatusCode, out)
 	}
@@ -94,17 +91,15 @@ func TestDecideApprovalAllowMovesAskToAllow(t *testing.T) {
 	if !strings.Contains(out, `"allow":["git push"]`) || !strings.Contains(out, `"ask":[]`) {
 		t.Fatalf("the command was not moved from ask to allow:\n%s", out)
 	}
-	if len(fa.decided) != 1 || fa.decided[0] != "ap1:allow:a person" {
-		t.Fatalf("the answer was not recorded: %v", fa.decided)
+	if txt, ok := decidedText(t, e, "ap1"); !ok || txt != "allowed by a person" {
+		t.Fatalf("the answer was not recorded: %q ok=%v", txt, ok)
 	}
 }
 
 // Refuse records the answer and changes no settings.
 func TestDecideApprovalRefuseRecordsOnly(t *testing.T) {
-	fa := &fakeApprovals{aps: map[string]gateway.ApprovalInfo{
-		"ap1": {ID: "ap1", Session: "s1", Turn: "t_gone", Commands: []string{"git push"}, Rule: "git push", Rules: []string{"git push"}},
-	}}
-	e := askStack(t, fa)
+	e := askStack(t)
+	seedApproval(t, e, "ap1", "s1", "t_gone", []string{"git push"}, []string{"git push"})
 	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"refuse"}`); resp.StatusCode != 204 {
 		t.Fatalf("refuse: %d %s", resp.StatusCode, out)
 	}
@@ -112,8 +107,8 @@ func TestDecideApprovalRefuseRecordsOnly(t *testing.T) {
 	if !strings.Contains(out, `"ask":["git push"]`) || strings.Contains(out, `"allow":["git push"]`) {
 		t.Fatalf("refuse changed the settings:\n%s", out)
 	}
-	if len(fa.decided) != 1 || fa.decided[0] != "ap1:refuse:a person" {
-		t.Fatalf("the answer was not recorded: %v", fa.decided)
+	if txt, ok := decidedText(t, e, "ap1"); !ok || txt != "refused by a person" {
+		t.Fatalf("the answer was not recorded: %q ok=%v", txt, ok)
 	}
 }
 
@@ -137,8 +132,7 @@ func findContinuation(t *testing.T, e *env) queue.Job {
 // Allow starts a continuation turn in the same session, on the agent of the turn
 // that asked, with the approval prompt naming the commands.
 func TestDecideApprovalAllowStartsContinuation(t *testing.T) {
-	fa := &fakeApprovals{aps: map[string]gateway.ApprovalInfo{}}
-	e := askStack(t, fa)
+	e := askStack(t)
 	// The turn that asked, so there is an agent to continue on.
 	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
 		queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "do a thing"},
@@ -146,7 +140,7 @@ func TestDecideApprovalAllowStartsContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fa.aps["ap1"] = gateway.ApprovalInfo{ID: "ap1", Session: "s1", Turn: orig.Turn, Commands: []string{"git push"}, Rule: "git push", Rules: []string{"git push"}}
+	seedApproval(t, e, "ap1", "s1", orig.Turn, []string{"git push"}, []string{"git push"})
 	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"allow"}`); resp.StatusCode != 204 {
 		t.Fatalf("allow: %d %s", resp.StatusCode, out)
 	}
@@ -157,7 +151,6 @@ func TestDecideApprovalAllowStartsContinuation(t *testing.T) {
 	if !strings.Contains(c.Spec.Prompt, "git push") {
 		t.Fatalf("the continuation prompt did not name the commands: %q", c.Spec.Prompt)
 	}
-	// The moved command is in the policy the runner will read for that turn.
 	if _, out := send(t, e, "GET", "/api/v0/settings/permissions", "", ""); !strings.Contains(out, `"allow":["git push"]`) {
 		t.Fatalf("the command was not moved to allow:\n%s", out)
 	}
@@ -166,15 +159,14 @@ func TestDecideApprovalAllowStartsContinuation(t *testing.T) {
 // Two Allows at once (two tabs, a retry) start exactly one continuation: one
 // wins (204), the other is refused (409).
 func TestDecideApprovalConcurrentAllow(t *testing.T) {
-	fa := &fakeApprovals{aps: map[string]gateway.ApprovalInfo{}}
-	e := askStack(t, fa)
+	e := askStack(t)
 	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
 		queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "x"},
 		queue.Links{}, queue.Limits{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fa.aps["ap1"] = gateway.ApprovalInfo{ID: "ap1", Session: "s1", Turn: orig.Turn, Commands: []string{"git push"}, Rules: []string{"git push"}}
+	seedApproval(t, e, "ap1", "s1", orig.Turn, []string{"git push"}, []string{"git push"})
 	var wg sync.WaitGroup
 	codes := make([]int, 2)
 	for i := 0; i < 2; i++ {
@@ -212,11 +204,9 @@ func TestDecideApprovalConcurrentDifferentCommands(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "permissions.toml"), []byte("ask = [\"git push\", \"npm publish\"]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fa := &fakeApprovals{aps: map[string]gateway.ApprovalInfo{
-		"ap1": {ID: "ap1", Session: "s1", Turn: "t_gone", Commands: []string{"git push"}, Rules: []string{"git push"}},
-		"ap2": {ID: "ap2", Session: "s1", Turn: "t_gone", Commands: []string{"npm publish"}, Rules: []string{"npm publish"}},
-	}}
-	e := stackEnv(t, stack{permissions: filepath.Join(dir, "permissions.toml"), approvals: fa})
+	e := stackEnv(t, stack{permissions: filepath.Join(dir, "permissions.toml")})
+	seedApproval(t, e, "ap1", "s1", "t_gone", []string{"git push"}, []string{"git push"})
+	seedApproval(t, e, "ap2", "s1", "t_gone", []string{"npm publish"}, []string{"npm publish"})
 	var wg sync.WaitGroup
 	codes := map[string]int{}
 	var mu sync.Mutex
@@ -243,10 +233,8 @@ func TestDecideApprovalConcurrentDifferentCommands(t *testing.T) {
 // When the turn that asked is gone, allow still moves the command to allow and
 // starts no continuation.
 func TestDecideApprovalAllowAskingTurnGone(t *testing.T) {
-	fa := &fakeApprovals{aps: map[string]gateway.ApprovalInfo{
-		"ap1": {ID: "ap1", Session: "s1", Turn: "t_gone", Commands: []string{"git push"}, Rule: "git push", Rules: []string{"git push"}},
-	}}
-	e := askStack(t, fa)
+	e := askStack(t)
+	seedApproval(t, e, "ap1", "s1", "t_gone", []string{"git push"}, []string{"git push"})
 	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"allow"}`); resp.StatusCode != 204 {
 		t.Fatalf("allow: %d %s", resp.StatusCode, out)
 	}
@@ -262,11 +250,17 @@ func TestDecideApprovalAllowAskingTurnGone(t *testing.T) {
 	}
 }
 
-// An unknown id, or one already answered, is 404.
-func TestDecideApprovalUnknown(t *testing.T) {
-	fa := &fakeApprovals{aps: map[string]gateway.ApprovalInfo{}}
-	e := askStack(t, fa)
+// An unknown id is 404, and an id already answered is 404 the second time.
+func TestDecideApprovalUnknownAndAnswered(t *testing.T) {
+	e := askStack(t)
 	if resp, _ := send(t, e, "POST", "/api/v0/approvals/nope", "", `{"decision":"allow"}`); resp.StatusCode != 404 {
 		t.Fatalf("unknown id: %d", resp.StatusCode)
+	}
+	seedApproval(t, e, "ap1", "s1", "t_gone", []string{"git push"}, []string{"git push"})
+	if resp, _ := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"refuse"}`); resp.StatusCode != 204 {
+		t.Fatalf("first answer: %d", resp.StatusCode)
+	}
+	if resp, _ := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"refuse"}`); resp.StatusCode != 404 {
+		t.Fatalf("an already-answered id was not 404: %d", resp.StatusCode)
 	}
 }

@@ -339,6 +339,33 @@ func (s *Store) After(after int64, f Filter, limit int) ([]Record, error) {
 	return recs, err
 }
 
+// ApprovalEvents returns every approval.requested and approval.decided event in
+// the store, oldest first, decoded. Control derives the pending approvals from
+// them (a requested with no decided for the same approval id), from whichever
+// runner's gateway refused the command. Approvals are low-volume, like
+// plan.usage, so a scan by kind is enough.
+func (s *Store) ApprovalEvents() ([]event.Event, error) {
+	rows, err := s.r.Query(`SELECT data FROM events WHERE kind IN (?, ?) ORDER BY seq`,
+		string(event.ApprovalRequested), string(event.ApprovalDecided))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []event.Event
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var e event.Event
+		if err := json.Unmarshal(data, &e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // Page returns events with seq greater than after, oldest first: at most
 // limit of them, and no more event JSON than maxBytes unless the first event
 // alone is larger. more says whether further events match, so the next page

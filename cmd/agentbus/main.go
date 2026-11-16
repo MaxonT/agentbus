@@ -612,11 +612,10 @@ func start(c config) (*service, error) {
 			return nil, err
 		}
 	}
-	approvals := &gatewayApprovals{}
 	acfg := api.Config{Store: st, Token: token, TurnsToken: turnsToken, Port: port, AnyHost: !loopback,
 		BaseURL: baseURL, Origin: c.origin, Hosts: c.hosts, Environ: c.environ, Folders: issuer, Build: build(debug.ReadBuildInfo()),
 		Queue: q, Jobs: runnerJobs, Engine: eng, TurnWait: c.turnWait, Agents: saved, Settings: cfgStore, Subscriptions: logins,
-		Approvals: approvals, Logf: svcLog.Printf}
+		Logf: svcLog.Printf}
 	if q != nil {
 		acfg.Models = modelSources(c, subs)
 		if runnerJobs != nil {
@@ -731,8 +730,6 @@ func start(c config) (*service, error) {
 			g.SetGuard(eng)
 		}
 	}
-	// The API lists and answers the ask calls these gateways hold.
-	approvals.use(gws)
 	if claudeReplay != nil {
 		anth.SetRewriter(claudeReplay)
 		orAnth.SetRewriter(claudeReplay)
