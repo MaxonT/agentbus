@@ -78,6 +78,28 @@ func TestApprovalsListFromRecord(t *testing.T) {
 	}
 }
 
+// The listed approval names the session's AGENT (harness), not the shell tool:
+// the person sees "claude" (a cockpit shows its product name), not the "Bash"
+// the command ran under. The harness comes from the session's turn.started.
+func TestApprovalsListShowsHarnessNotTool(t *testing.T) {
+	e := askStack(t)
+	if _, _, err := e.store.Append(event.Event{ID: "ts-1", Kind: event.TurnStarted,
+		Session: "s1", Turn: "t_1", Harness: "claude", Time: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	seedApproval(t, e, "ap1", "s1", "t_1", []string{"git push"}, []string{"git push"})
+	resp, out := send(t, e, "GET", "/api/v0/approvals", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("list: %d", resp.StatusCode)
+	}
+	if !strings.Contains(out, `"agent":"claude"`) {
+		t.Fatalf("the approval did not name the session's harness as the agent:\n%s", out)
+	}
+	if strings.Contains(out, `"agent":"Bash"`) {
+		t.Fatalf("the approval named the shell tool as the agent:\n%s", out)
+	}
+}
+
 // Allow moves each approved command from ask to allow in the settings (so the
 // runner allows it from the next turn) and records the answer. The continuation
 // turn is skipped here because the turn that asked is gone.
