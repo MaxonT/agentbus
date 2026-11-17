@@ -56,10 +56,10 @@ func runWire(getenv func(string) string, environ func() []string, lookPath func(
 		case acc.Kind == harness.API:
 			// The vendor's API key is only ever control's, set in Settings:
 			// the child gets the placeholder, and control's relay adds the
-			// key. With no placeholder (-gateway local) there is no key to
-			// give, and none of this machine's is read.
+			// key. With no placeholder there is no key to give, and none of
+			// this machine's is read.
 			if acc.Placeholder == "" || h.Info().APIKey == nil {
-				return engine.Launch{}, engine.Refused(http.StatusBadRequest, "an agent on an API key runs only where control adds its key; run it on agentbus up or a runner, without -gateway local")
+				return engine.Launch{}, engine.Refused(http.StatusBadRequest, "an agent on an API key runs only where control adds its key; run it on agentbus up or a runner")
 			}
 			env, pre = h.WireAPI(harness.APIWire{Base: baseURL + apiKeyPrefix(agent), Placeholder: acc.Placeholder, Model: acc.Model})
 		case acc.Kind == "" || acc.Kind == harness.Subscription:

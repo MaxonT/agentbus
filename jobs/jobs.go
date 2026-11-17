@@ -550,8 +550,7 @@ type AttemptStarted struct {
 	// control now, such as "connect your claude subscription in Settings"
 	// (signin). A runner whose agents' credentials come from control
 	// refuses the turn with it before the agent starts, so the person reads
-	// it rather than a vendor's error. A runner with its own sign-in
-	// (-gateway local) does not use it.
+	// it rather than a vendor's error.
 	Signin string `json:"signin,omitempty"`
 }
 

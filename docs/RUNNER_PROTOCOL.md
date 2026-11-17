@@ -14,7 +14,7 @@ works no more; `agentbus login` on that machine starts a new sign-in. The cockpi
 All of it is under `/api/v0/runner/`. A running service describes it at
 `/api/v0/runner/openapi.json`, without the token, and shows it at `/docs/runner`. It is apart from
 the client API on purpose: **it is our binaries' own protocol and not a public promise.** It may
-change in any release until third parties write runners. This is protocol version 4: the routes
+change in any release until third parties write runners. This is protocol version 5: the routes
 moved under `/api/v0/runner/` in 0.4 (2), in 0.5 the relay records every model call it carries
 (3), and one runner per machine holds its folders and is the only runner of a job that names that
 machine, with `agentbus connector` retired (4). Register and every take carry `protocol`; a runner of another version is refused (400) at
@@ -32,7 +32,7 @@ the turn a client asked for keeps its id. The client API never shows jobs or att
 | `POST /api/v0/runner/register` | Register with name, labels, capacity, protocol 5 and `capabilities` (its machine as `connector`, its `folders`), with the enrollment token. Only the built-in runner of `agentbus up` holds that token. Returns the runner and its token, once. A `capabilities.role` is refused (400): `agentbus connector` was retired. |
 | `POST /api/v0/runner/login` | `agentbus login`: the same body as register, with no token. Returns a sign-in id, a code for the machine to show, and the runner token, once. The token works only for `GET /api/v0/runner/login` until the person types the code on the Runners page. Waits 15 minutes; at most 20 wait at once (429). |
 | `GET /api/v0/runner/login` | With that token: `state` pending, approved (with `runner`, `heartbeat_ms`, `lease_ms`), refused, expired, or removed. |
-| `POST /api/v0/runner/take` | `{"wait_ms": n, "protocol": 4, "folders": false}`. Long poll, up to 30 s: a job with its new attempt and lease, or a cleanup. 204 when there is nothing. With `folders: true`, only a folder job of the runner's own machine (below). |
+| `POST /api/v0/runner/take` | `{"wait_ms": n, "protocol": 5, "folders": false}`. Long poll, up to 30 s: a job with its new attempt and lease, or a cleanup. 204 when there is nothing. With `folders: true`, only a folder job of the runner's own machine (below). |
 | `POST /api/v0/runner/heartbeat` | Idle heartbeat with `capacity`. A restarted runner sends it to check the identity it saved. |
 | `POST /api/v0/runner/removed` | Report a closed session's copy removed, or `error`. |
 | `GET /api/v0/runner/settings` | The policy and the instructions, read fresh, for the turn it is about to start. |

@@ -256,14 +256,14 @@ type AgentAPI struct {
 // Network says what a turn's agent may reach ([network]). Read by the
 // runner that starts the agent (netjail).
 type Network struct {
-	Contain string   `toml:"contain" json:"contain,omitempty" doc:"Whether each agent runs closed off from the network: off (the default; agents reach any host) or on. On, it reaches only its runner's gateway, the server's API and the hosts in allow; anything else is refused and recorded as network.refused. Linux closes an agent off in a network namespace; on macOS the runner builds the session's sandbox for it, even with [sandbox] off, so a turn there needs a home of its own (not -gateway local). A runner that can do neither refuses the turn with why. Host names are checked, not addresses. Absent in a PUT: off."`
+	Contain string   `toml:"contain" json:"contain,omitempty" doc:"Whether each agent runs closed off from the network: off (the default; agents reach any host) or on. On, it reaches only its runner's gateway, the server's API and the hosts in allow; anything else is refused and recorded as network.refused. Linux closes an agent off in a network namespace; on macOS the runner builds the session's sandbox for it, even with [sandbox] off, so a turn there needs a home of its own. A runner that can do neither refuses the turn with why. Host names are checked, not addresses. Absent in a PUT: off."`
 	Allow   []string `toml:"allow" json:"allow" doc:"Host names a closed-off agent may reach, on any port, such as github.com. *.example.com also allows every name under example.com. Absent in a PUT: none."`
 }
 
 // Sandbox says whether each session runs inside a wall ([sandbox]). Read by
 // the runner that starts the agent (package sandbox).
 type Sandbox struct {
-	Mode string `toml:"mode" json:"mode,omitempty" doc:"off (the default) or on. On, a session's agent reads and writes only the session's folder and home (home_files included), read the system folders and the agent's program, and reach the network only through the runner's proxy. A runner that cannot build it refuses the turn. On macOS, [network] contain on builds it even with mode off. macOS uses sandbox-exec and Linux bwrap. A runner with -gateway local cannot build it (a session has no home of its own there). The copy's .git stays writable. Absent in a PUT: off."`
+	Mode string `toml:"mode" json:"mode,omitempty" doc:"off (the default) or on. On, a session's agent reads and writes only the session's folder and home (home_files included), read the system folders and the agent's program, and reach the network only through the runner's proxy. A runner that cannot build it refuses the turn. On macOS, [network] contain on builds it even with mode off. macOS uses sandbox-exec and Linux bwrap. The copy's .git stays writable. Absent in a PUT: off."`
 }
 
 // DefaultPolicy is the policy of a missing or empty file.
