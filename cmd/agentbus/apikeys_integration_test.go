@@ -96,12 +96,12 @@ func TestRunnerUsesAPIKeysSetInSettings(t *testing.T) {
 	if !strings.Contains(raw, `"openrouter":{"set":false}`) {
 		t.Fatalf("a vendor key reads as the OpenRouter key: %s", raw)
 	}
-	// Whether a key is set is answered by GET /api/v0/subscriptions (api_keys,
-	// checked above), not the agent. The harnesses/models view still shows a
-	// per-access key_set for the model picker.
+	// Whether a key is set is answered only by GET /api/v0/subscriptions
+	// (api_keys, checked above). The harnesses/models view names each access's
+	// key (key_name) but no longer carries its state.
 	code, raw = getAPI(t, ns.server, ns.tok, "/api/v0/harnesses")
 	keep(raw)
-	if code != 200 || !strings.Contains(raw, `"key_set":true`) {
+	if code != 200 || strings.Contains(raw, `"key_set"`) || !strings.Contains(raw, `"key_name":"anthropic"`) {
 		t.Fatalf("harnesses: %d %s", code, raw)
 	}
 

@@ -88,9 +88,9 @@ type Config struct {
 	Engine *run.Engine
 
 	// Getenv reads this service's environment by name, the same source the
-	// relay resolves an agent's key_env from, so GET /api/v0/subscriptions and
-	// /api/v0/harnesses report whether a key variable is set without ever
-	// reading its value. Nil reads nothing.
+	// relay resolves an agent's key_env from, so GET /api/v0/subscriptions
+	// reports whether a key variable is set (env_keys) without ever reading
+	// its value. Nil reads nothing.
 	Getenv func(string) string
 
 	// Hosts are more names, without a port, that the Host header may name

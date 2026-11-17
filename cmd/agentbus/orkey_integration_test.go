@@ -28,10 +28,14 @@ func TestRunnerUsesKeySetInSettings(t *testing.T) {
 	var replies []string
 	keep := func(s string) { replies = append(replies, s) }
 
-	// Nothing set yet: the list says so.
+	// Nothing set yet: the list says so, and env_keys already reports the
+	// default variable a new openrouter agent reads (OPENROUTER_API_KEY)
+	// though no saved agent names it yet, so the new-agent form can say
+	// whether it is set.
 	code, raw := getAPI(t, ns.server, ns.tok, "/api/v0/subscriptions")
 	keep(raw)
-	if code != 200 || !strings.Contains(raw, `"openrouter":{"set":false}`) {
+	if code != 200 || !strings.Contains(raw, `"openrouter":{"set":false}`) ||
+		!strings.Contains(raw, `"OPENROUTER_API_KEY":`) {
 		t.Fatalf("before: %d %s", code, raw)
 	}
 	// A key that cannot be one is refused, and its words quote nothing.
@@ -61,8 +65,8 @@ func TestRunnerUsesKeySetInSettings(t *testing.T) {
 	}
 	// Whether a key is available is answered on subscriptions, the one place:
 	// the Settings key (api_keys.openrouter) covers this agent, whose key_env
-	// is not set in control's environment (env_keys). The harnesses view still
-	// shows a per-access key_set for the model picker.
+	// is not set in control's environment (env_keys). The harnesses view names
+	// the variable (key_env) but no longer carries its state.
 	code, raw = getAPI(t, ns.server, ns.tok, "/api/v0/subscriptions")
 	keep(raw)
 	if code != 200 || !strings.Contains(raw, `"openrouter":{"set":true,"set_at":`) || !strings.Contains(raw, `"AB_TEST_UNSET_KEY":false`) {
@@ -70,7 +74,7 @@ func TestRunnerUsesKeySetInSettings(t *testing.T) {
 	}
 	code, raw = getAPI(t, ns.server, ns.tok, "/api/v0/harnesses")
 	keep(raw)
-	if code != 200 || !strings.Contains(raw, `"key_set":true`) {
+	if code != 200 || strings.Contains(raw, `"key_set"`) || !strings.Contains(raw, `"key_env"`) {
 		t.Fatalf("harnesses: %d %s", code, raw)
 	}
 	j := queueTurn(t, ns.server, ns.tok, map[string]any{"agent": ag["id"], "folder_ref": ns.ref, "connector": ns.connector, "prompt": "hello"})

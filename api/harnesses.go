@@ -42,9 +42,8 @@ type AccessOption struct {
 	Disabled bool     `json:"disabled,omitempty" doc:"True when an agent cannot use it yet, as openrouter for agy."`
 	Models   []string `json:"models" doc:"Models to offer. A new subscription agent names none, so the harness picks its own; an OpenRouter one starts with the first. An agent may name another one when any_model is true."`
 	AnyModel bool     `json:"any_model,omitempty" doc:"True when any model name is accepted: an OpenRouter model id, or for a subscription any name its account may offer. A model the vendor refuses fails the turn with the vendor's own words."`
-	KeyEnv   string   `json:"key_env,omitempty" doc:"For openrouter: the variable a new agent reads its key from unless it names another."`
-	KeySet   *bool    `json:"key_set,omitempty" doc:"For openrouter: whether a key is there for it: set in Settings, or in key_env in this service's environment. For api: whether the vendor's key (key_name) is set in Settings. Its value is never sent."`
-	KeyName  string   `json:"key_name,omitempty" doc:"For api: the key it uses, as Settings names it (PUT /api/v0/subscriptions/{key_name}/key): anthropic, openai or gemini."`
+	KeyEnv   string   `json:"key_env,omitempty" doc:"For openrouter: the variable a new agent reads its key from unless it names another. GET /api/v0/subscriptions env_keys says whether it is set."`
+	KeyName  string   `json:"key_name,omitempty" doc:"For api: the key it uses, as Settings names it (PUT /api/v0/subscriptions/{key_name}/key): anthropic, openai or gemini. GET /api/v0/subscriptions api_keys says whether it is set."`
 }
 
 // RunnerHarness is one runner's report of one harness.
@@ -86,19 +85,10 @@ func (a *API) listHarnesses(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		// key_set is read on every call: it is cheap, and an answer kept
-		// would hide a variable the person just set. The key is the
-		// control plane's: runners hold no secrets.
-		for j := range ag.Access {
-			switch {
-			case ag.Access[j].Kind == agents.OpenRouter:
-				set := a.keySet(ag.Access[j].KeyEnv)
-				ag.Access[j].KeySet = &set
-			case ag.Access[j].Kind == agents.API && !ag.Access[j].Disabled:
-				set := a.apiKeySet(info.Name)
-				ag.Access[j].KeySet = &set
-			}
-		}
+		// Whether a key is set is answered only by GET /api/v0/subscriptions
+		// (api_keys for a stored key, env_keys for an agent's key_env); this
+		// view names the key (key_name) and the variable (key_env), not its
+		// state.
 		list = append(list, ag)
 	}
 	for _, p := range harness.Planned() {
@@ -159,13 +149,6 @@ func accessOptions(info harness.Info) []AccessOption {
 		}
 	}
 	return out
-}
-
-// keySet says whether an OpenRouter agent reading name has a key: one set
-// in Settings, or name set, and not empty, in the service's environment.
-// Its value is never kept or sent.
-func (a *API) keySet(name string) bool {
-	return a.keptKeySet() || a.envSet(name)
 }
 
 // envSet says whether the environment variable name is set (non-empty) where
