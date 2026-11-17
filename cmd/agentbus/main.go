@@ -61,12 +61,10 @@ import (
 	"github.com/staysup/agentbus/jobs"
 	"github.com/staysup/agentbus/logfile"
 	"github.com/staysup/agentbus/models"
-	"github.com/staysup/agentbus/netjail"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/replay"
 	engine "github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/runner"
-	"github.com/staysup/agentbus/sandbox"
 	"github.com/staysup/agentbus/settings"
 	"github.com/staysup/agentbus/store"
 )
@@ -166,13 +164,14 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		own.Print(err)
 		return 1
 	}
-	if c.mode == modeRunner {
-		own.Printf("runner taking jobs from %s; its agents' gateway on http://%s, data folder %s", c.server, svc.addr, home)
-		own.Print(networkNote())
-	}
-	if svc.loopback {
+	switch {
+	case c.mode == modeRunner:
+		// One line: a runner has nothing for the person to do at start. A
+		// turn it cannot run (no network control here, say) says why itself.
+		own.Printf("runner ready, taking jobs from %s", c.server)
+	case svc.loopback:
 		own.Printf("listening on http://%s, data folder %s", svc.addr, home)
-	} else {
+	default:
 		own.Printf("listening on http://%s, data folder %s; reachable from the network; the token guards the API; no HTTPS", svc.shown, home)
 	}
 	switch {
@@ -1604,20 +1603,6 @@ func checkListen(addr string) (loopback bool, err error) {
 // 127.0.0.1, and the agent's sign-in never crosses a network. Go listens on
 // both IPv4 and IPv6 there, and reports [::] even for 0.0.0.0. On one
 // address it is that address.
-// networkNote is what a runner says at start about its agents' network.
-func networkNote() string {
-	if !netjail.Supported {
-		if sandbox.Supported {
-			return "network control is by the session's sandbox here: a turn under [network] contain = \"on\" runs in it, sandbox on or off"
-		}
-		return "this runner has no network control: agents reach any host, and a turn under [network] contain = \"on\" is refused"
-	}
-	if err := netjail.Check(); err != nil {
-		return err.Error() + "; a turn under [network] contain = \"on\" is refused until that is fixed here"
-	}
-	return "network control is ready: with network.contain = \"on\" in the server's permissions, each agent reaches only this runner's gateway, the server, and the hosts in [network] allow"
-}
-
 func agentAddr(listened net.Addr) string {
 	host, port, _ := net.SplitHostPort(listened.String())
 	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
