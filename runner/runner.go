@@ -1146,13 +1146,11 @@ wait:
 	if list, err := r.cfg.Store.Turns(store.TurnQuery{Session: turn.Session, Turn: turn.ID, Limit: 1}); err == nil && len(list.Turns) > 0 {
 		t := list.Turns[0]
 		cost := t.CostUSD
-		res.State, res.Error, res.Reply, res.ModelCalls, res.CostUSD = t.State, t.Error, t.Reply, t.ModelCalls, &cost
+		res.State, res.Error, res.ModelCalls, res.CostUSD = t.State, t.Error, t.ModelCalls, &cost
 	}
-	// A review's verdict is read from its whole reply; asked work's reply is
-	// delivered to the session that asked (queue.Deliver).
-	if at.job.Kind == queue.KindReview || at.job.Links.Asker != nil {
-		res.ReplyText = r.lastReply(turn.Session, turn.ID)
-	}
+	// The turn's reply is not copied into the result: it lives once in the
+	// record (its model.responded event). Control reads a review's verdict,
+	// and an asked result's reply, from there by the turn (store.TurnText).
 	at.event("turn.ended", map[string]any{"state": res.State, "exit_code": end.ExitCode})
 	f := queue.Finish{Result: mustJSON(res)}
 	switch {
@@ -1166,44 +1164,6 @@ wait:
 		f.Status, f.Reason = queue.Failed, queue.ReasonAgent
 	}
 	at.finish(ctx, f)
-}
-
-// MaxReplyText bounds a review's reply text in its result.
-const MaxReplyText = 256 << 10
-
-// lastReply is the text of the turn's last model reply that has text, read
-// from the record a page at a time. "" when none can be read.
-func (r *Runner) lastReply(session, turnID string) string {
-	f := store.Filter{Turn: turnID, TurnSession: session}
-	var after int64
-	last := ""
-	for range 1000 {
-		recs, more, err := r.cfg.Store.Page(after, f, 1000, store.PageBytes)
-		if err != nil {
-			return last
-		}
-		for _, rec := range recs {
-			after = rec.Seq
-			if rec.Kind != event.ModelResponded {
-				continue
-			}
-			var e struct {
-				Text string `json:"text"`
-			}
-			if json.Unmarshal(rec.Data, &e) == nil && e.Text != "" {
-				last = e.Text
-			}
-		}
-		if !more {
-			break
-		}
-	}
-	if len(last) > MaxReplyText {
-		// The verdict block ends the reply, so the end is what is kept,
-		// cut on a whole character.
-		last = strings.ToValidUTF8(last[len(last)-MaxReplyText:], "")
-	}
-	return last
 }
 
 // finishMargin is room in a finish body for what is set after the changes

@@ -40,7 +40,9 @@ var errOutcome = errors.New("jobs: the job's outcome could not be written")
 
 // keepOutcomes writes what job j did, as finish f says, into the record,
 // and answers the result the job keeps in its place: the same result with
-// each outcome named by its event's id. nil when nothing moved.
+// each outcome named by its event's id (nil when nothing moved), and, for a
+// finished review, the verdict and findings it reads from the reviewer's
+// reply in the record (nil for any other job). End stores the verdict.
 //
 // Only the finisher calls it (finisher.go), from a saved finish, and then
 // ends the job: End's one jobs.db transaction is the commit point, so no
@@ -53,12 +55,24 @@ var errOutcome = errors.New("jobs: the job's outcome could not be written")
 //
 // j is the job before End, still running. j.Ended is not set yet, so the
 // events take control's time now, a moment before End's.
-func keepOutcomes(rec Recorder, j queue.Job, f queue.Finish) (json.RawMessage, error) {
+func keepOutcomes(rec Recorder, j queue.Job, f queue.Finish) (kept json.RawMessage, verdict *string, findings []queue.Finding, err error) {
 	now := time.Now().UTC()
+	// A finished review's verdict is control's, read from the reviewer's reply
+	// in the record (not from a copy in the result): the reply lives once, in
+	// its model.responded event. It is passed to End out of band, so it is not
+	// part of the finish's hash. No readable verdict is unknown, never pass.
+	if j.Kind == queue.KindReview && f.Status == queue.Finished {
+		_, reply, _, err := rec.TurnText(assignedSession(j), j.Turn)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		v, fs := queue.ParseVerdict(reply)
+		verdict, findings = &v, fs
+	}
 	j.State, j.Reason, j.Result, j.Ended = f.Status, f.Reason, f.Result, &now
 	res, err := queue.ReadResult(j.Result)
 	if err != nil {
-		return nil, nil // not ours to read; End takes it as it is
+		return nil, verdict, findings, nil // not ours to read; End takes it as it is
 	}
 	moved := false
 	switch j.Kind {
@@ -73,7 +87,7 @@ func keepOutcomes(rec Recorder, j queue.Job, f queue.Finish) (json.RawMessage, e
 		e := event.Event{ID: changedID(j), Kind: event.TurnChanged, Time: now, Session: session, Turn: j.Turn,
 			Changes: EventChanges(res.Changes)}
 		if _, err := rec.AppendOnce(e); err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 		res.Checkpoint = res.Changes.To
 		res.Changes, res.ChangesEvent, moved = nil, e.ID, true
@@ -84,14 +98,15 @@ func keepOutcomes(rec Recorder, j queue.Job, f queue.Finish) (json.RawMessage, e
 		e := event.Event{ID: appliedID(j), Kind: event.TurnApplied, Time: now, Session: j.Session,
 			Turn: j.Links.AppliesTurn, Applied: AppliedOf(j, res)}
 		if _, err := rec.AppendOnce(e); err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 		res.Apply, res.Refused, res.AppliedEvent, moved = nil, "", e.ID, true
 	}
 	if !moved {
-		return nil, nil
+		return nil, verdict, findings, nil
 	}
-	return json.Marshal(res)
+	kept, err = json.Marshal(res)
+	return kept, verdict, findings, err
 }
 
 func endedAt(j queue.Job) time.Time {

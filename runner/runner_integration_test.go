@@ -102,8 +102,12 @@ type world struct {
 	r      *Runner
 }
 
-func newWorld(t *testing.T, capacity int) *world {
+func newWorld(t *testing.T, capacity int, record ...bool) *world {
 	t.Helper()
+	// With a record, control keeps the turn's events and reads a review's
+	// verdict from there, as agentbus up does; without one, the finish ends
+	// the job directly and outcomes stay in its result.
+	withRecord := len(record) > 0 && record[0]
 	dir := t.TempDir()
 	self, err := os.Executable()
 	if err != nil {
@@ -134,8 +138,12 @@ func newWorld(t *testing.T, capacity int) *world {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := jobs.New(jobs.Config{Queue: q, Token: mainTok, EnrollToken: enrollTok,
-		Lease: 2 * time.Second, Heartbeat: 50 * time.Millisecond, MaxWait: 200 * time.Millisecond, Folders: fr, Blobs: bs})
+	cfg := jobs.Config{Queue: q, Token: mainTok, EnrollToken: enrollTok,
+		Lease: 2 * time.Second, Heartbeat: 50 * time.Millisecond, MaxWait: 200 * time.Millisecond, Folders: fr, Blobs: bs}
+	if withRecord {
+		cfg.Record = st
+	}
+	s, err := jobs.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +168,13 @@ func newWorld(t *testing.T, capacity int) *world {
 		q.Close()
 		st.Close()
 	})
+	if withRecord {
+		// Control's one finisher writes each outcome to the record and ends
+		// the job, as in agentbus up. Stopped before the store is closed.
+		finStop, finDone := make(chan struct{}), make(chan struct{})
+		go func() { s.RunFinisher(finStop); close(finDone) }()
+		t.Cleanup(func() { close(finStop); <-finDone })
+	}
 	return w
 }
 
@@ -442,7 +457,8 @@ func TestReviewRunsInTheAuthorsWorktree(t *testing.T) {
 	write(t, filepath.Join(repo, "app.txt"), "v1\n")
 	mustGit(t, repo, "add", ".")
 	mustGit(t, repo, "commit", "-q", "-m", "one")
-	w := newWorld(t, 2)
+	// A record-backed control, so the review's verdict is read from the record.
+	w := newWorld(t, 2, true)
 	w.release()
 	author := w.create(t, queue.Spec{Harness: "claude", Repo: repo, Base: "main", Prompt: "write app.txt v2"})
 	waitFor(t, "finished", func() bool { return w.job(t, author.ID).Ended != nil })
@@ -470,8 +486,14 @@ func TestReviewRunsInTheAuthorsWorktree(t *testing.T) {
 		t.Fatal("no review turn in the record")
 	}
 	reply := "Checked app.txt.\n```json\n{\"verdict\":\"pass\",\"findings\":[{\"severity\":\"P2\",\"file\":\"app.txt\",\"line\":1,\"summary\":\"no test\"}]}\n```"
+	// The reviewer's reply is the reply to its last model call, so a
+	// model.requested precedes it, as a real review records (store.TurnText).
+	if _, _, err := w.st.Append(event.Event{ID: "evt_q1", Kind: event.ModelRequested, Time: time.Now().UTC(),
+		Session: list.Turns[0].Session, Turn: revTurn, Exchange: "x1", Model: "sonnet"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := w.st.Append(event.Event{ID: "evt_r1", Kind: event.ModelResponded, Time: time.Now().UTC(),
-		Session: list.Turns[0].Session, Turn: revTurn, Text: reply}); err != nil {
+		Session: list.Turns[0].Session, Turn: revTurn, Exchange: "x1", Text: reply}); err != nil {
 		t.Fatal(err)
 	}
 	w.release()

@@ -201,11 +201,17 @@ func TestAskFanOutAndDeliver(t *testing.T) {
 		if !ok {
 			t.Fatalf("no result of %s delivered; got %+v", c.Turn, got)
 		}
+		// The list carries no prompt; the delivered prompt is read from the
+		// single turn (the record).
+		prompt, _, _, err := e.store.TurnText(tn.Session, tn.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
 		// Each copy is named after its session.
 		if tn.Origin.Session != c.Session || tn.Origin.TurnKind != "turn" ||
-			!strings.HasPrefix(tn.Prompt, "[AgentBus]") || !strings.Contains(tn.Prompt, "Turn: "+c.Turn+", finished") ||
-			strings.Contains(tn.Prompt, "sessions/") || !strings.HasSuffix(w, "sessions/"+c.Session) {
-			t.Errorf("result of %s in %s: %+v\n%s", c.Turn, w, tn.Origin, tn.Prompt)
+			!strings.HasPrefix(prompt, "[AgentBus]") || !strings.Contains(prompt, "Turn: "+c.Turn+", finished") ||
+			strings.Contains(prompt, "sessions/") || !strings.HasSuffix(w, "sessions/"+c.Session) {
+			t.Errorf("result of %s in %s: %+v\n%s", c.Turn, w, tn.Origin, prompt)
 		}
 		// On the parent's own agent.
 		if tn.Harness != "claude" {
@@ -242,7 +248,11 @@ func TestAskFanOutAndDeliver(t *testing.T) {
 	review := false
 	for _, tn := range got {
 		if tn.Origin.Turn == rs.Turn {
-			review = tn.Origin.TurnKind == "review" && strings.Contains(tn.Prompt, "the review you asked for") && strings.Contains(tn.Prompt, "Verdict:")
+			prompt, _, _, err := e.store.TurnText(tn.Session, tn.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			review = tn.Origin.TurnKind == "review" && strings.Contains(prompt, "the review you asked for") && strings.Contains(prompt, "Verdict:")
 		}
 	}
 	if !review {

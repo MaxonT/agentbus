@@ -53,6 +53,7 @@ type Recorder interface {
 	CallSession(exchange string) (session string, found bool, err error)
 	OtherTurns(exchange, session, turn string) (bool, error)
 	Continuation(session string) (store.Continuation, error)
+	TurnText(session, turn string) (prompt, reply string, found bool, err error)
 	Finder
 }
 

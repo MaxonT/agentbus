@@ -136,22 +136,26 @@ const VerdictFormat = "```json\n" +
 	`{"verdict":"pass","findings":[{"severity":"P2","file":"path/to/file","line":12,"summary":"what is wrong and why"}]}` +
 	"\n```"
 
+// ReviewReplyPreview bounds the author's reply shown in a review prompt, in
+// characters: enough for context, never the whole reply.
+const ReviewReplyPreview = 500
+
 // ReviewPrompt is the prompt of a review of job j, which changed c. It says
 // what changed and asks for a review in a fixed format. It carries no
-// conclusion of the author's: with includeReply false, the author's reply
-// is left out.
-func ReviewPrompt(j Job, c *workspace.Changes, includeReply bool) (string, error) {
-	r, err := ReadResult(j.Result)
-	if len(j.Result) == 0 || err != nil || c == nil {
+// conclusion of the author's: authorReply is the author's whole reply, read
+// from the record, and empty when the review is to leave it out. Only its
+// first ReviewReplyPreview characters are shown.
+func ReviewPrompt(j Job, c *workspace.Changes, authorReply string) (string, error) {
+	if _, err := ReadResult(j.Result); len(j.Result) == 0 || err != nil || c == nil {
 		return "", fmt.Errorf("queue: the job recorded no changed files")
 	}
 	var b strings.Builder
 	b.WriteString("Review a change another agent made in this folder. You can read every file here; you cannot change any.\n\n")
 	b.WriteString("## The task the author was given\n\n")
 	b.WriteString(quoteBlock(j.Spec.Prompt))
-	if includeReply && r.Reply != "" {
+	if authorReply != "" {
 		b.WriteString("\n## The author's reply (first 500 characters)\n\n")
-		b.WriteString(quoteBlock(r.Reply))
+		b.WriteString(quoteBlock(firstRunes(authorReply, ReviewReplyPreview)))
 	}
 	fmt.Fprintf(&b, "\n## What changed\n\n%d file(s) changed in this folder during the author's job, "+
 		"against the folder's state when the job started.\n", c.Count)

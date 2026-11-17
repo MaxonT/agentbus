@@ -36,8 +36,8 @@ func TestSessionAcrossAgents(t *testing.T) {
 	if err != nil || len(list.Turns) != 2 || list.Turns[0].AgentID != "codex" || list.Turns[1].AgentID != "a_haiku" {
 		t.Fatalf("turns %+v %v", list.Turns, err)
 	}
-	if list.Turns[0].Prompt != "which word?" {
-		t.Errorf("listed prompt %q, want the person's words only", list.Turns[0].Prompt)
+	if p, _, found, err := s.TurnText("s", list.Turns[0].ID); err != nil || !found || p != "which word?" {
+		t.Errorf("turn text prompt %q (found %v), want the person's words only", p, found)
 	}
 	snap, err := s.Snapshot()
 	if err != nil {

@@ -492,6 +492,13 @@ type Finish struct {
 	// named here (the Result.*Event pointers). It is not part of the
 	// finish's hash, so a finish sent again still matches the first.
 	Kept json.RawMessage `json:"-"`
+	// ReviewVerdict and ReviewFindings carry a finished review's verdict,
+	// which control reads from the reviewer's reply in the record (not from a
+	// copy in the result) when it ends the job (jobs.keepOutcomes). Like
+	// Kept, they are set after the runner's finish and are not part of its
+	// hash. Nil for any other job.
+	ReviewVerdict  *string   `json:"-"`
+	ReviewFindings []Finding `json:"-"`
 }
 
 // CheckFinish says whether f can end job j, before anything is written:
@@ -531,6 +538,9 @@ type Queue struct {
 	typed   map[string]string
 	// changes reads a job's changes from the record (ReadChangesWith).
 	changes ChangesReader
+	// reply reads a turn's whole reply from the record (ReadReplyWith), in
+	// place of a copy in the job result.
+	reply ReplyReader
 }
 
 // By says who asked for a job, by the kind of token it came with (the
@@ -548,6 +558,28 @@ type ChangesReader func(j Job) (*workspace.Changes, error)
 // record (Result.ChangesEvent), for the prompts of a review and of asked
 // work's result. Set it before the queue is used.
 func (q *Queue) ReadChangesWith(r ChangesReader) { q.changes = r }
+
+// ReplyReader reads the whole text of a turn's last reply from the record,
+// by its session and turn. "" when there is none.
+type ReplyReader func(session, turn string) (string, error)
+
+// ReadReplyWith sets how the queue reads a turn's reply from the record, for
+// a review prompt's author reply and an asked result's reply, in place of a
+// copy in the job result. Set it before the queue is used.
+func (q *Queue) ReadReplyWith(r ReplyReader) { q.reply = r }
+
+// replyOf is the whole text of job j's turn's last reply, read from the
+// record. "" when no reader is set or the turn has no reply.
+func (q *Queue) replyOf(j Job) (string, error) {
+	if q.reply == nil {
+		return "", nil
+	}
+	session := resultSession(j)
+	if session == "" {
+		return "", nil
+	}
+	return q.reply(session, j.Turn)
+}
 
 // changesOf is what job j changed: from its result for a job from before
 // 0.5, else from the record. nil when it holds none.
@@ -1787,14 +1819,18 @@ func (q *Queue) End(runnerID, attemptID string, number int, f Finish) (Job, erro
 		var verdict, findings any
 		switch {
 		case j.Kind == KindReview && f.Status == Finished:
-			// The control plane reads the verdict; a runner's own is
-			// ignored. No readable verdict is unknown, never pass.
-			rr, _ := ReadResult(f.Result)
-			v, fs := ParseVerdict(rr.ReplyText)
-			verdict = v
-			if fs != nil {
-				b, _ := json.Marshal(fs)
-				findings = string(b)
+			// The control plane reads the verdict from the reviewer's reply in
+			// the record (jobs.keepOutcomes sets it on the finish, out of band);
+			// a runner's own is ignored. No readable verdict is unknown, never
+			// pass.
+			if f.ReviewVerdict != nil {
+				verdict = *f.ReviewVerdict
+				if f.ReviewFindings != nil {
+					b, _ := json.Marshal(f.ReviewFindings)
+					findings = string(b)
+				}
+			} else {
+				verdict = VerdictUnknown
 			}
 		case j.Kind == KindReview:
 			// A review that did not finish has no verdict: execution status
@@ -2103,7 +2139,13 @@ func (q *Queue) review(team, id string, as Spec, key string, includeReply bool, 
 	if err != nil {
 		return Job{}, false, err
 	}
-	prompt, err := ReviewPrompt(j, c, includeReply)
+	authorReply := ""
+	if includeReply {
+		if authorReply, err = q.replyOf(j); err != nil {
+			return Job{}, false, err
+		}
+	}
+	prompt, err := ReviewPrompt(j, c, authorReply)
 	if err != nil {
 		return Job{}, false, ErrNotReviewable
 	}

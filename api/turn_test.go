@@ -173,3 +173,45 @@ func TestSessionEventsTurnQuery(t *testing.T) {
 		t.Errorf("turn=a.b: %d %s, want 400", resp.StatusCode, body)
 	}
 }
+
+// GET /turns carries facts only — no prompt or reply text — while GET
+// /turns/{id} serves the whole prompt and reply, read from the record.
+func TestSingleTurnWholePromptAndReply(t *testing.T) {
+	e := newEnv(t)
+	prompt := strings.Repeat("p", 1200) // longer than any former 500-char preview
+	reply := strings.Repeat("r", 1200)
+	now := time.Now().UTC()
+	for _, ev := range []event.Event{
+		{ID: "evt_a", Kind: event.TurnStarted, Session: "sx", Turn: "t_whole", Time: now, Text: prompt},
+		{ID: "evt_b", Kind: event.ModelRequested, Session: "sx", Turn: "t_whole", Time: now, Exchange: "x1", Model: "m"},
+		{ID: "evt_c", Kind: event.ModelResponded, Session: "sx", Turn: "t_whole", Time: now, Exchange: "x1", Text: reply},
+	} {
+		if _, _, err := e.store.Append(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The list carries facts only: no prompt or reply text, no truncated flags.
+	resp, body := do(t, e.req(t, "GET", "/api/v0/turns?session=sx", nil))
+	if resp.StatusCode != 200 {
+		t.Fatalf("list: %d %s", resp.StatusCode, body)
+	}
+	for _, f := range []string{`"prompt"`, `"reply"`, "prompt_truncated", "reply_truncated"} {
+		if strings.Contains(body, f) {
+			t.Errorf("the turn list carries %s; it should carry facts only:\n%s", f, body)
+		}
+	}
+	var list TurnList
+	if json.Unmarshal([]byte(body), &list) != nil || len(list.Turns) != 1 || list.Turns[0].Model != "m" || list.Turns[0].ModelCalls != 1 {
+		t.Fatalf("list facts: %s", body)
+	}
+	// The single turn serves the whole prompt and reply.
+	var one OneTurn
+	resp, body = do(t, e.req(t, "GET", "/api/v0/turns/t_whole", nil))
+	if resp.StatusCode != 200 || json.Unmarshal([]byte(body), &one) != nil {
+		t.Fatalf("single: %d %s", resp.StatusCode, body)
+	}
+	if one.Turn.Prompt != prompt || one.Turn.Reply != reply {
+		t.Errorf("single turn prompt %d bytes, reply %d bytes; want %d and %d",
+			len(one.Turn.Prompt), len(one.Turn.Reply), len(prompt), len(reply))
+	}
+}

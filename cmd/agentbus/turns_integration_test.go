@@ -142,9 +142,16 @@ func TestRunTurnIDOnEveryEvent(t *testing.T) {
 		t.Fatalf("GET /turns?session: store %q seq %d, %d turns", list.Store, list.Seq, len(list.Turns))
 	}
 	if a, b := list.Turns[0], list.Turns[1]; a.ID != second || b.ID != turn || a.Session != session ||
-		a.Prompt != "second words" || b.Prompt != "first words" || a.Harness != "claude" ||
+		a.Harness != "claude" ||
 		a.State != store.TurnFinished || b.State != store.TurnFinished || a.Ended == nil {
 		t.Fatalf("turns %+v", list.Turns)
+	}
+	// The list carries no prompt; the single turn serves the whole text.
+	if p, _, _, err := svc.store.TurnText(session, second); err != nil || p != "second words" {
+		t.Fatalf("second turn text %q: %v", p, err)
+	}
+	if p, _, _, err := svc.store.TurnText(session, turn); err != nil || p != "first words" {
+		t.Fatalf("first turn text %q: %v", p, err)
 	}
 	// The replies came from an upstream that cannot be reached: no usage, so
 	// the cost is a lower bound.

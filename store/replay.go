@@ -29,6 +29,43 @@ func (s *Store) TurnStart(session, turn string) (prompt, replayFrom string, tran
 	return c.String + p.String, r.String, k.String == "transcript", true, nil
 }
 
+// TurnText reads the whole prompt and whole reply of (session, turn) from the
+// record: the prompt is the person's own words (the turn.started's text,
+// never an earlier turn's transcript), and the reply is the text of the reply
+// to the turn's last model call, paired with that call as in Turns. found is
+// false when the turn has no turn.started in the record (a queued turn, or
+// none). reply is empty while that reply has not come, when it carried no
+// text, or when the turn has no calls. Neither is cut: the single turn
+// (GET /api/v0/turns/{id}) serves the whole text, and the queue reads a
+// review's or asked turn's reply from here in place of a stored copy.
+func (s *Store) TurnText(session, turn string) (prompt, reply string, found bool, err error) {
+	var p, r sql.NullString
+	err = s.r.QueryRow(`WITH t AS (
+			SELECT e.seq, COALESCE(json_extract(e.data, '$.text'), '') AS prompt,
+				(SELECT MAX(c.seq) FROM events c WHERE c.session = e.session AND c.turn = e.turn
+					AND c.kind = 'model.requested') AS last_call
+			FROM events e WHERE e.session = ?1 AND e.turn = ?2 AND e.kind = 'turn.started' ORDER BY e.seq LIMIT 1
+		), u AS (
+			SELECT t.seq, t.prompt,
+				(SELECT p.seq FROM events p
+					WHERE p.session = ?1 AND p.turn = ?2 AND p.kind = 'model.responded'
+					AND CASE WHEN COALESCE(json_extract(q.data, '$.exchange'), '') <> ''
+						THEN json_extract(p.data, '$.exchange') = json_extract(q.data, '$.exchange')
+						ELSE COALESCE(json_extract(p.data, '$.exchange'), '') = '' AND p.seq > q.seq END
+					ORDER BY p.seq LIMIT 1) AS reply
+			FROM t LEFT JOIN events q ON q.seq = t.last_call
+		)
+		SELECT u.prompt, json_extract(r.data, '$.text')
+		FROM u LEFT JOIN events r ON r.seq = u.reply`, session, turn).Scan(&p, &r)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("store: read a turn's text: %w", err)
+	}
+	return p.String, r.String, true, nil
+}
+
 // TranscriptTurn is one turn as plain text: who ran it, the person's words
 // and the text of the reply to its last model call.
 type TranscriptTurn struct {
