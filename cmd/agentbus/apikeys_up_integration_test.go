@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/staysup/agentbus/jobs"
 	"github.com/staysup/agentbus/store"
 )
 
@@ -120,7 +121,7 @@ func TestUpAPIKeyOnlyOnRecordedCalls(t *testing.T) {
 			waitFor(t, "the running turn's report", func() bool { _, err := os.Stat(report); return err == nil })
 			env := envOf(t, report)
 			placeholder := env[tc.placeholder]
-			if !strings.HasPrefix(placeholder, "abr_") {
+			if !strings.HasPrefix(placeholder, jobs.StandInPrefix) {
 				t.Fatalf("the agent's placeholder: %q", placeholder)
 			}
 			base := "http://" + svc.addr + "/s/" + session + "/t/" + turn + "/key/" + tc.harness

@@ -58,7 +58,7 @@ func TestUpUsesTheSubscriptionConnectedOnControl(t *testing.T) {
 		t.Fatalf("the vendor saw %v", got)
 	}
 	env := envOf(t, report)
-	if !strings.HasPrefix(env["CLAUDE_CODE_OAUTH_TOKEN"], jobs.TokenPrefix) {
+	if !strings.HasPrefix(env["CLAUDE_CODE_OAUTH_TOKEN"], jobs.StandInPrefix) {
 		t.Fatal("the agent's sign-in is not the placeholder")
 	}
 	if want := filepath.Join(home, homesDir, session); env["HOME"] != want {
@@ -293,7 +293,7 @@ func TestUpRelayRecordsADirectCall(t *testing.T) {
 	session := out["session"].(string)
 	waitFor(t, "the running turn's report", func() bool { _, err := os.Stat(report); return err == nil })
 	placeholder := envOf(t, report)["CLAUDE_CODE_OAUTH_TOKEN"]
-	if !strings.HasPrefix(placeholder, jobs.TokenPrefix) {
+	if !strings.HasPrefix(placeholder, jobs.StandInPrefix) {
 		t.Fatal("no placeholder")
 	}
 	req, _ := http.NewRequest("POST", "http://"+svc.addr+jobs.RelayPrefix+"anthropic/v1/messages",

@@ -87,9 +87,13 @@ func TestLaunchGolden(t *testing.T) {
 	with := func(r engine.Request, f func(*engine.Request)) engine.Request { f(&r); return r }
 	asked := &event.Origin{Kind: event.OriginAsked, Session: "s0", Turn: "t_0"}
 	or := func(r *engine.Request) { r.Access, r.KeyEnv = "openrouter", "OPENROUTER_API_KEY" }
-	// access api on a runner that holds no secret: the child's credential
-	// is the placeholder, and control's relay adds the key set in Settings.
-	apiKey := func(r *engine.Request) { r.Access, r.Placeholder, r.Token = "api", true, "abr_test-placeholder" }
+	// A runner that holds no secret: the child's credential is the turn's
+	// stand-in, and control's relay swaps in the real one. The turn token
+	// is for control's API only, and never in a credential's place
+	// (checkStandIn).
+	relayed := func(r *engine.Request) { r.Token, r.StandIn = "abr_test-token", "abs_test-standin" }
+	// access api there: control's relay adds the key set in Settings.
+	apiKey := func(r *engine.Request) { relayed(r); r.Access = "api" }
 	lists := "read_folders = [\"<readfolder>\"]\nallow = [\"go test\", \"git commit\"]\nforbid = [\"git push\", \"rm -rf\"]\n"
 	var cases []launchCase
 	for _, h := range []string{"claude", "codex"} {
@@ -119,6 +123,7 @@ func TestLaunchGolden(t *testing.T) {
 			launchCase{name: h + " access unknown", turns: []engine.Request{with(first(h), func(r *engine.Request) { r.Access = "local" })}},
 			launchCase{name: h + " api key, not relayed", turns: []engine.Request{with(first(h), func(r *engine.Request) { r.Access = "api" })}},
 			launchCase{name: h + " api key, relayed, then resume", turns: []engine.Request{with(first(h), apiKey), with(next("t_2"), apiKey)}},
+			launchCase{name: h + " subscription, relayed, then resume", turns: []engine.Request{with(first(h), relayed), with(next("t_2"), relayed)}},
 			launchCase{name: h + " api key, relayed, with a model", turns: []engine.Request{with(first(h), func(r *engine.Request) { apiKey(r); r.Model = "opus" })}},
 			launchCase{name: h + " subagents off, then resume", perm: "subagents = false\n", turns: []engine.Request{first(h), next("t_2")}},
 			launchCase{name: h + " subagents off, read-only, with lists", perm: lists + "subagents = false\n",
@@ -168,6 +173,8 @@ func TestLaunchGolden(t *testing.T) {
 		launchCase{name: "agy in a home of its own, then resume", homes: true, turns: []engine.Request{first("agy"), next("t_2")}},
 		launchCase{name: "agy folder with AGENTS.md, asked by another agent", agentsMD: true,
 			turns: []engine.Request{with(first("agy"), func(r *engine.Request) { r.Origin = asked })}},
+		launchCase{name: "agy subscription, relayed, in a home of its own", homes: true,
+			turns: []engine.Request{with(first("agy"), relayed)}},
 		launchCase{name: "agy api key, not relayed", turns: []engine.Request{with(first("agy"), func(r *engine.Request) { r.Access = "api" })}},
 		launchCase{name: "agy api key, relayed, with a model", turns: []engine.Request{with(first("agy"), func(r *engine.Request) {
 			apiKey(r)
@@ -226,6 +233,51 @@ func realTemp(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return d
+}
+
+// checkStandIn: a turn whose model credential is a stand-in carries it in
+// its credential's place (an argument, a variable or a file in its home),
+// and its turn token nowhere but AGENTBUS_TOKEN, for control's API. An agent
+// sends its sign-in to its vendor directly too (Claude Code to
+// api.anthropic.com, agy to www.googleapis.com, measured 2026-11-15).
+func checkStandIn(t *testing.T, name string, req engine.Request, rep fakeReport, home string) {
+	t.Helper()
+	if req.StandIn == "" {
+		return
+	}
+	seen := false
+	for _, a := range rep.Args {
+		if strings.Contains(a, req.Token) {
+			t.Errorf("%s: an argument holds the turn token: %q", name, a)
+		}
+		seen = seen || strings.Contains(a, req.StandIn)
+	}
+	for _, kv := range rep.Env {
+		if strings.HasPrefix(kv, "AGENTBUS_TOKEN=") {
+			continue
+		}
+		if strings.Contains(kv, req.Token) {
+			t.Errorf("%s: a variable holds the turn token: %q", name, kv)
+		}
+		seen = seen || strings.Contains(kv, req.StandIn)
+	}
+	filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if strings.Contains(string(b), req.Token) {
+			t.Errorf("%s: the home's %s holds the turn token", name, path)
+		}
+		seen = seen || strings.Contains(string(b), req.StandIn)
+		return nil
+	})
+	if !seen {
+		t.Errorf("%s: the stand-in is in no argument, variable or home file", name)
+	}
 }
 
 var tokenValue = regexp.MustCompile(`AGENTBUS_TOKEN=\S+`)
@@ -380,6 +432,7 @@ func runLaunchCase(t *testing.T, self string, c launchCase) string {
 			if err := json.Unmarshal(raw, &rep); err != nil {
 				t.Fatal(err)
 			}
+			checkStandIn(t, c.name, req, rep, filepath.Join(homes, "s1"))
 			for _, a := range rep.Args {
 				fmt.Fprintf(&b, "arg %s\n", mask(strconv.Quote(a)))
 			}

@@ -25,6 +25,7 @@ import (
 	"github.com/staysup/agentbus/credentials"
 	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/folders"
+	"github.com/staysup/agentbus/jobs"
 	"github.com/staysup/agentbus/netjail"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/settings"
@@ -265,8 +266,9 @@ func TestRunnerHoldsNoKey(t *testing.T) {
 	// The vendor got the server's key; the agent never had it.
 	env := envOf(t, ns.report)
 	placeholder := env["ANTHROPIC_AUTH_TOKEN"]
-	if !strings.HasPrefix(placeholder, "abr_") || env["AB_TEST_OR_KEY"] != placeholder || env["AGENTBUS_TOKEN"] != placeholder ||
-		env["AGENTBUS_URL"] != "http://"+ns.server.addr {
+	turnTok := env["AGENTBUS_TOKEN"]
+	if !strings.HasPrefix(placeholder, jobs.StandInPrefix) || env["AB_TEST_OR_KEY"] != placeholder ||
+		!strings.HasPrefix(turnTok, jobs.TokenPrefix) || env["AGENTBUS_URL"] != "http://"+ns.server.addr {
 		t.Fatalf("the agent's credential and API: %q %q %q %q", placeholder, env["AB_TEST_OR_KEY"], env["AGENTBUS_TOKEN"], env["AGENTBUS_URL"])
 	}
 	b, _ := os.ReadFile(ns.report)
@@ -275,6 +277,18 @@ func TestRunnerHoldsNoKey(t *testing.T) {
 	}
 	if got := ns.or.seen(); len(got) != 1 || got[0] != "/v1/messages Bearer fake-openrouter-key-for-tests" {
 		t.Fatalf("OpenRouter saw %v", got)
+	}
+	// The running turn's own token, sent as a model call's credential, gets
+	// none: only its stand-in does.
+	req, _ := http.NewRequest("POST", "http://"+ns.server.addr+"/relay/openrouter/v1/messages", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+turnTok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized || len(ns.or.seen()) != 1 {
+		t.Fatalf("a running turn's token as a credential: %d, %d calls", resp.StatusCode, len(ns.or.seen()))
 	}
 	os.WriteFile(ns.release, nil, 0o600)
 	if jj := waitJob(t, ns.server, ns.tok, j.ID); jj.State != queue.Finished {
@@ -309,25 +323,26 @@ func TestRunnerHoldsNoKey(t *testing.T) {
 	if counts["model.requested"] != 1 || counts["model.responded"] != 1 {
 		t.Fatalf("the server's record of the call: %v", counts)
 	}
-	// Once the attempt ended, its token adds no credential and calls no API.
-	req, _ := http.NewRequest("POST", "http://"+ns.server.addr+"/relay/openrouter/v1/messages", strings.NewReader(`{}`))
+	// Once the attempt ended, its stand-in adds no credential and its token
+	// calls no API.
+	req, _ = http.NewRequest("POST", "http://"+ns.server.addr+"/relay/openrouter/v1/messages", strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer "+placeholder)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized || len(ns.or.seen()) != 1 {
-		t.Fatalf("an ended turn's token: %d, %d calls", resp.StatusCode, len(ns.or.seen()))
+		t.Fatalf("an ended turn's stand-in: %d, %d calls", resp.StatusCode, len(ns.or.seen()))
 	}
-	if code, _ := getAPI(t, ns.server, placeholder, "/api/v0/sessions"); code != http.StatusUnauthorized {
+	if code, _ := getAPI(t, ns.server, turnTok, "/api/v0/sessions"); code != http.StatusUnauthorized {
 		t.Fatalf("an ended turn's token on the API: %d", code)
 	}
-	// A forged token is refused.
+	// A forged stand-in is refused.
 	req, _ = http.NewRequest("POST", "http://"+ns.server.addr+"/relay/openrouter/v1/messages", strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSuffix(placeholder, placeholder[len(placeholder)-4:])+"0000")
 	if resp, err = http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a forged token: %v %v", err, resp)
+		t.Fatalf("a forged stand-in: %v %v", err, resp)
 	}
 	resp.Body.Close()
 	// A next turn names its agent, and gets that saved agent's key.
@@ -388,7 +403,7 @@ func TestRunnerUsesConnectedSubscription(t *testing.T) {
 		t.Fatalf("the vendor saw %v", got)
 	}
 	env := envOf(t, ns.report)
-	if !strings.HasPrefix(env["CLAUDE_CODE_OAUTH_TOKEN"], "abr_") {
+	if !strings.HasPrefix(env["CLAUDE_CODE_OAUTH_TOKEN"], jobs.StandInPrefix) {
 		t.Fatalf("the agent's sign-in: %q", env["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
 	b, _ := os.ReadFile(ns.report)
@@ -452,7 +467,7 @@ func TestRunnerUsesConnectedCodexSubscription(t *testing.T) {
 	waitFor(t, "the running turn's report", func() bool { _, err := os.Stat(ns.report); return err == nil })
 	env := envOf(t, ns.report)
 	placeholder := env["AGENTBUS_CODEX_TOKEN"]
-	if !strings.HasPrefix(placeholder, "abr_") {
+	if !strings.HasPrefix(placeholder, jobs.StandInPrefix) {
 		t.Fatalf("the agent's key: %q", placeholder)
 	}
 	// codex runs in the session's own home, and no sign-in file is put
@@ -596,7 +611,7 @@ func TestRunnerUsesConnectedAgySubscription(t *testing.T) {
 		Token  map[string]string `json:"token"`
 		Method string            `json:"auth_method"`
 	}
-	if json.Unmarshal(b, &ph) != nil || !strings.HasPrefix(ph.Token["access_token"], "abr_") || ph.Token["refresh_token"] != "" || ph.Method != "consumer" {
+	if json.Unmarshal(b, &ph) != nil || !strings.HasPrefix(ph.Token["access_token"], jobs.StandInPrefix) || ph.Token["refresh_token"] != "" || ph.Method != "consumer" {
 		t.Fatalf("the placeholder file: %s", b)
 	}
 	rb, _ := os.ReadFile(ns.report)

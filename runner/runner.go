@@ -97,8 +97,9 @@ type Config struct {
 	// token too, as NoSecrets says.
 	Forward bool
 	// NoSecrets: this runner holds no credential. Its agents' model calls
-	// carry the turn token as a placeholder, and control's gateway adds the
-	// real credential (jobs/relay.go): on a runner of a server, and in
+	// carry the turn's stand-in (jobs.AttemptStarted.StandIn), never its
+	// token, and control's gateway adds the real credential
+	// (jobs/relay.go): on a runner of a server, and in
 	// agentbus up, whose gateways add it in the same process. A turn
 	// whose agent control has no credential for is refused before it starts
 	// (jobs.AttemptStarted.Signin).
@@ -494,8 +495,9 @@ type attempt struct {
 	start   string
 	session string
 
-	// token is the attempt's turn token, minted by control (jobs.AttemptStarted).
-	token string
+	// token is the attempt's turn token, minted by control (jobs.AttemptStarted),
+	// and standIn its agent's model credential, minted with it.
+	token, standIn string
 	// sent is what of the turn's record control holds (record.go).
 	fwdMu sync.Mutex
 	sent  sent
@@ -698,7 +700,7 @@ func (r *Runner) work(ctx context.Context, job queue.Job, a queue.Attempt) {
 	}
 	at.mu.Lock()
 	at.until = time.Now().Add(r.lease)
-	at.token, at.signin = st.Token, st.Signin
+	at.token, at.standIn, at.signin = st.Token, st.StandIn, st.Signin
 	at.mu.Unlock()
 	done := make(chan struct{})
 	defer close(done)
@@ -772,15 +774,21 @@ func (r *Runner) request(at *attempt) run.Request {
 	sp := at.job.Spec
 	req := run.Request{Turn: at.job.Turn, Prompt: sp.Prompt, Model: sp.Model, ReadOnly: sp.ReadOnly,
 		IdempotencyKey: at.job.IdempotencyKey, AllowOnce: sp.AllowOnce}
-	// The agent's token is control's: a runner of a server's always, and
-	// in up the one its calls carry as their placeholder.
+	// The agent's token for the API is control's: a runner of a server's
+	// always, and in up too. Its model calls carry the stand-in, not the token.
 	if (r.cfg.Forward || r.cfg.NoSecrets) && at.token != "" {
-		req.Token, req.APIURL, req.Placeholder = at.token, r.cfg.Queue, r.cfg.NoSecrets
+		req.Token, req.APIURL = at.token, r.cfg.Queue
 	}
 	// Control adds this runner's agents' credentials, and has none for
-	// this agent now: the engine refuses the turn in control's words.
+	// this agent now: the engine refuses the turn in control's words. The
+	// agent's own credential is the stand-in control minted with the
+	// token; a control that sent none is one from before stand-ins, and its
+	// relay would want the turn token, which the agent never gets.
 	if r.cfg.NoSecrets {
-		req.Signin = at.signin
+		req.StandIn, req.Signin = at.standIn, at.signin
+		if at.standIn == "" && at.signin == "" {
+			req.Signin = "control sent this turn no stand-in credential for its agent; update agentbus on control to this runner's version"
+		}
 	}
 	switch {
 	case sp.Session != "":

@@ -1,20 +1,21 @@
 package jobs
 
 // Control's gateway for runners' model calls. A runner holds no secret: its
-// agent's model calls carry the turn's token as their credential (a
-// placeholder), the runner's own gateway sends them here, and the relay swaps
-// the token for the real credential on the way out: an API key from
+// agent's model calls carry the turn's stand-in as their credential
+// (AttemptStarted.StandIn, tokens.go), the runner's own gateway sends them
+// here, and the relay swaps the stand-in for the real credential on the way
+// out: an API key from
 // control's environment, or the person's own subscription connected on
 // control (package credentials). The vendor's reply goes back as it came.
 //
-// Which credential, by one rule: that of the agent the token's job names,
+// Which credential, by one rule: that of the agent the stand-in's job names,
 // as control read it from its saved agents when the turn was asked for. The
 // runner's engine starts the turn with the same agent, so the two never
 // disagree. A saved agent's access and key variable come from control's
 // saved agents, never from a runner or the record a runner writes.
 //
 // The relay records every call it carries, in control's record, with the
-// session and turn of the job the token names: the request, then the reply
+// session and turn of the job the stand-in names: the request, then the reply
 // as it streams (model.requested, model.responded, tool events, usage and
 // cost), through a gateway of control's own for the vendor (Upstream.Gateways)
 // that does what a gateway on the agent's machine does. One rule: control
@@ -22,9 +23,10 @@ package jobs
 // none of its calls (runner/record.go). A call the relay refuses, or whose
 // vendor it cannot reach, is recorded too, with why. A call that never
 // reached control reached no vendor: it stays in the runner's own record. A
-// call without a running turn's token is refused and recorded nowhere: it
+// call without a running turn's stand-in is refused and recorded nowhere: it
 // names no session, but for the one call a listing of models makes with its
-// own token (models.go). A credential goes only on a call the vendor's adapter
+// own token (models.go). The turn token is not a stand-in: an agent that
+// sends it as its credential is refused as any other caller. A credential goes only on a call the vendor's adapter
 // records (gateway/recorded.go): any other is refused and recorded as
 // call.refused.
 
@@ -146,7 +148,7 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, noRelay)
 		return
 	}
-	j, _, ok := s.turnJob(callToken(r))
+	j, ok := s.standInJob(callToken(r))
 	if !ok {
 		if harness, listing := s.listing(callToken(r)); listing {
 			s.relayListing(w, r, up, harness, "/"+rest)
@@ -169,7 +171,7 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request) {
 	g.ServeRelayed(w, r, rl)
 }
 
-// callToken is the turn token a model call carries as its credential: as
+// callToken is the stand-in a model call carries as its credential: as
 // "Authorization: Bearer", or, for agy on the Gemini API, which sends its
 // key only there, in X-Goog-Api-Key (harness/agy.go WireAPI).
 func callToken(r *http.Request) string {
@@ -182,10 +184,10 @@ func callToken(r *http.Request) string {
 // Why the relay, or a gateway of agentbus up, adds no credential to a call.
 const (
 	noRelay = "control relays no model calls on this path"
-	noTurn  = "the call carries no turn token of a turn running now; control adds credentials only to a running turn's calls"
+	noTurn  = "the call carries no stand-in of a turn running now; control adds credentials only to a running turn's calls"
 	// otherTurn: a gateway of agentbus up took a call on another turn's
-	// path than its token's.
-	otherTurn = "the call's token is another turn's than its path names; control adds a credential only to a turn's own calls"
+	// path than its stand-in's.
+	otherTurn = "the call's stand-in is another turn's than its path names; control adds a credential only to a turn's own calls"
 )
 
 // turnCredential is the credential for one call of j's turn on up: what
@@ -208,10 +210,10 @@ func (s *Server) turnCredential(j queue.Job, up Upstream) (func(http.Header), ga
 }
 
 // credentialHeader sets cred on a request to the vendor, in place of the
-// agent's placeholder.
+// agent's stand-in.
 func credentialHeader(cred credentials.Cred) func(http.Header) {
 	return func(h http.Header) {
-		// The agent's placeholder is in one of these: it goes, whichever
+		// The agent's stand-in is in one of these: it goes, whichever
 		// header the real credential takes.
 		h.Del("X-Api-Key")
 		h.Del("X-Goog-Api-Key")
@@ -233,22 +235,23 @@ func refusal(status int, why string) *gateway.Refusal {
 }
 
 // TurnGate is agentbus up's gateway entrance check. It refuses a call whose
-// path names another turn than its token's, or whose token is no running
-// turn's, before the gateway processes or records it — so a token used on
-// another turn's path leaves no record and gets no credential. It adds no
-// credential of its own: the agent's placeholder passes through to control's
-// relay over loopback, which swaps it for the real one on the calls that pass
-// (the relay above). It keeps the turn check of the in-process Local credential
-// retired in 0.5.10, without Local's in-process injection, which would have
-// recorded each call a second time beside the relay. The path check runs only
-// here, on up, where the turn is in this process's own queue; a runner on
-// another machine binds a call to its token's turn at the relay instead.
+// path names another turn than its stand-in's, or whose stand-in is no running
+// turn's, before the gateway processes or records it — so a stand-in used on
+// another turn's path leaves no record and gets no credential, and the turn
+// token, which is not a stand-in, is refused on a model route like any other
+// caller. It adds no credential of its own: the agent's stand-in passes through
+// to control's relay over loopback, which swaps it for the real one on the
+// calls that pass (the relay above). It keeps the turn check of the in-process
+// Local credential retired in 0.5.10, without Local's in-process injection,
+// which would have recorded each call a second time beside the relay. The path
+// check runs only here, on up, where the turn is in this process's own queue; a
+// runner on another machine binds a call to its stand-in's turn at the relay.
 func (s *Server) TurnGate() gateway.Credential {
 	return gateway.Credential{
-		// A path that names another turn than the token's, or no running turn's
-		// token, is refused here, before the gateway records anything.
+		// A path that names another turn than the stand-in's, or no running
+		// turn's stand-in, is refused here, before the gateway records anything.
 		Turn: func(r *http.Request, session, turn string) *gateway.Refusal {
-			j, _, found := s.turnJob(callToken(r))
+			j, found := s.standInJob(callToken(r))
 			switch {
 			case !found:
 				return refusal(http.StatusUnauthorized, noTurn)
@@ -258,8 +261,9 @@ func (s *Server) TurnGate() gateway.Credential {
 			return nil
 		},
 		// No credential and no refusal: the call passes through to the relay,
-		// which checks the path prefix, adds the credential, and refuses or
-		// records as it does for a runner on another machine.
+		// which checks the path prefix, swaps the stand-in for the real
+		// credential, and refuses or records as it does for a runner on
+		// another machine.
 		Read: func(*http.Request) (func(http.Header), gateway.Signin, *gateway.Refusal) {
 			return nil, gateway.Signin{}, nil
 		},

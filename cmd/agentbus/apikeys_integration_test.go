@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/staysup/agentbus/jobs"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/store"
 )
@@ -117,7 +118,7 @@ func TestRunnerUsesAPIKeysSetInSettings(t *testing.T) {
 		t.Fatalf("Anthropic's API saw keys %v", got)
 	}
 	env := envOf(t, ns.report)
-	if tok := env["ANTHROPIC_AUTH_TOKEN"]; !strings.HasPrefix(tok, "abr_") || env["ANTHROPIC_API_KEY"] != "" ||
+	if tok := env["ANTHROPIC_AUTH_TOKEN"]; !strings.HasPrefix(tok, jobs.StandInPrefix) || env["ANTHROPIC_API_KEY"] != "" ||
 		!strings.HasSuffix(env["ANTHROPIC_BASE_URL"], "/key/claude") {
 		t.Fatalf("claude's environment: %q %q %q", tok, env["ANTHROPIC_API_KEY"], env["ANTHROPIC_BASE_URL"])
 	}
@@ -134,7 +135,7 @@ func TestRunnerUsesAPIKeysSetInSettings(t *testing.T) {
 	if got := ns.keyed["codex"].seen(); len(got) != 1 || got[0] != "/v1/responses Bearer "+keys["openai"] {
 		t.Fatalf("OpenAI's API saw %v", got)
 	}
-	if tok := envOf(t, ns.report)["AGENTBUS_OPENAI_TOKEN"]; !strings.HasPrefix(tok, "abr_") {
+	if tok := envOf(t, ns.report)["AGENTBUS_OPENAI_TOKEN"]; !strings.HasPrefix(tok, jobs.StandInPrefix) {
 		t.Fatalf("codex's placeholder: %q", tok)
 	}
 	os.Remove(ns.report)
@@ -156,7 +157,7 @@ func TestRunnerUsesAPIKeysSetInSettings(t *testing.T) {
 		t.Fatalf("the Gemini API saw keys %v", got)
 	}
 	env = envOf(t, ns.report)
-	if tok := env["GEMINI_API_KEY"]; !strings.HasPrefix(tok, "abr_") || !strings.HasSuffix(env["GOOGLE_GEMINI_BASE_URL"], "/key/agy") {
+	if tok := env["GEMINI_API_KEY"]; !strings.HasPrefix(tok, jobs.StandInPrefix) || !strings.HasSuffix(env["GOOGLE_GEMINI_BASE_URL"], "/key/agy") {
 		t.Fatalf("agy's environment: %q %q", tok, env["GOOGLE_GEMINI_BASE_URL"])
 	}
 	t.Setenv("AGENTBUS_FAKE_AGY_BODY", "")
