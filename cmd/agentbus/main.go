@@ -776,6 +776,17 @@ func start(c config) (*service, error) {
 			g.SetGuard(eng)
 		}
 	}
+	// A -gateway local runner's calls carry none of control's sign-ins, so a
+	// reply's plan-usage headers would otherwise be dropped. Attribute them to
+	// this machine's own sign-in, keyed by its connector so control can tell
+	// them from a subscription it holds (jobs/record.go guards it). Only the
+	// machine's own subscription gateways (anth, oai, gem) report it: an
+	// OpenRouter or API-key gateway is not a subscription sign-in.
+	if c.mode == modeRunner && c.gatewayMode == gatewayLocal && fr != nil {
+		for _, g := range []*gateway.Gateway{anth, oai, gem} {
+			g.SetPlanSignin(gateway.Signin{Subscription: g.Vendor(), Connection: fr.Connector()})
+		}
+	}
 	if claudeReplay != nil {
 		anth.SetRewriter(claudeReplay)
 		orAnth.SetRewriter(claudeReplay)
