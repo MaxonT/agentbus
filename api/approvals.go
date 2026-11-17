@@ -30,8 +30,7 @@ type HeldCall struct {
 	Agent     string    `json:"agent,omitempty" doc:"The session's agent (harness) that asked, such as claude; a cockpit shows its product name. Absent for a session no run started."`
 	ToolID    string    `json:"tool_id,omitempty" doc:"The model's id for the tool call."`
 	ToolName  string    `json:"tool_name,omitempty" doc:"The shell tool's name, such as Bash."`
-	Command   string    `json:"command" doc:"Every held command in the reply, one per line, for a person to read at a glance."`
-	Commands  []string  `json:"commands" doc:"Every held command in the reply, in order: a cockpit shows one card with a row per command. One answer (once, always or refuse) covers them all."`
+	Commands  []string  `json:"commands" doc:"Every held command in the reply, in order: a cockpit shows one card with a row per command, joining them for a glance where it wants one line. One answer (once, always or refuse) covers them all."`
 	Rule      string    `json:"rule" doc:"An entry an \"always\" would add to the allow list: the ask entry the first command matched, or one suggested from a command on no list (such as git push). Empty when nothing clean can be suggested (a run-time command)."`
 	Requested time.Time `json:"requested" doc:"When the command was refused and recorded."`
 }
@@ -76,7 +75,7 @@ func (h heldReply) heldCall(agent string) HeldCall {
 	}
 	return HeldCall{
 		ID: h.id, Session: h.session, Turn: h.turn, Agent: agent,
-		ToolID: h.toolID, ToolName: h.toolName, Command: strings.Join(h.commands, "\n"),
+		ToolID: h.toolID, ToolName: h.toolName,
 		Commands: h.commands, Rule: rule, Requested: h.requested.UTC(),
 	}
 }
