@@ -621,7 +621,7 @@ func TestRunTurnCarriesAgentAndFolder(t *testing.T) {
 
 	// The same call pointed at the gateway by hand, with no turn's token:
 	// in agentbus up a call's turn comes from its token, so it is refused
-	// and recorded nowhere (a gateway with -gateway local records it).
+	// and recorded nowhere.
 	resp, err := http.Post("http://"+svc.addr+"/s/byhand/v1/messages", "application/json",
 		strings.NewReader(`{"model":"claude-x","messages":[{"role":"user","content":"by hand"}]}`))
 	if err != nil {
@@ -710,7 +710,7 @@ func TestCodexOwnInstructionsLeaveOutTheHint(t *testing.T) {
 	t.Setenv("AGENTBUS_FAKE_EXIT", "0")
 	// Each session has a home of its own since 0.5.1, so the person's own
 	// codex config is not read there, and codex gets the hint as claude
-	// does. A runner with -gateway local reads it (harness tests).
+	// does.
 	for agent, want := range map[string]bool{"codex": true, "claude": true} {
 		report := filepath.Join(t.TempDir(), "report")
 		t.Setenv("AGENTBUS_FAKE_OUT", report)

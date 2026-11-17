@@ -212,7 +212,7 @@ const enrollFileRemoved = "agentbus runner: -enroll-token-file was removed in 0.
 // gatewayLocalRemoved is what agentbus runner -gateway local says since 0.5.10:
 // a runner holds no sign-in of its own. It gets its agents' credentials from
 // control, and runs each session in a home of its own, like every other runner.
-const gatewayLocalRemoved = "agentbus runner: -gateway local was removed in 0.5.10. A runner gets its agents' sign-ins from control: connect yours there (agentbus connect, or the cockpit's Agents). Run with -gateway server, or with no -gateway at all."
+const gatewayLocalRemoved = "agentbus runner: -gateway local was removed in 0.5.10. A runner gets its agents' sign-ins from control: connect yours in the cockpit (Agents, the agent's Connect step). Run with -gateway server, or with no -gateway at all."
 
 // folderFlags is -folder, given once per folder.
 type folderFlags []string
