@@ -136,7 +136,7 @@ func TestMCPToolListFollowsTheToken(t *testing.T) {
 		t.Errorf("write turn: %v, want %v", w, allButApply)
 	}
 	ro := toolNames(t, e, mcpReadTok)
-	want := []string{"list_turns", "get_turn", "turn_diff", "search_history", "list_agents"}
+	want := []string{"list_turns", "get_turn", "turn_diff", "turn_changes", "turn_calls", "turn_tools", "search_history", "list_agents"}
 	if !slices.Equal(ro, want) {
 		t.Errorf("read-only turn: %v, want %v", ro, want)
 	}
@@ -355,7 +355,7 @@ func TestMCPAnnotations(t *testing.T) {
 	for _, x := range dig(v, "result", "tools").([]any) {
 		m := x.(map[string]any)
 		a := m["annotations"].(map[string]any)
-		read := strings.Contains("list_agents list_turns get_turn turn_diff search_history", m["name"].(string))
+		read := strings.Contains("list_agents list_turns get_turn turn_diff turn_changes turn_calls turn_tools search_history", m["name"].(string))
 		if a["destructiveHint"] != false || a["readOnlyHint"] != read {
 			t.Errorf("%s: %v", m["name"], a)
 		}

@@ -215,26 +215,30 @@ func (c *client) turn(body map[string]any) started {
 	}
 }
 
-// diffFiles is a turn's diff, path to change and the unified diff.
+// diffFiles is a turn's changes, path to change and the unified diff: its
+// summary is on GET /diff, its files on GET /changes.
 func (c *client) diffFiles(turn string) map[string]string {
 	c.t.Helper()
 	var d struct {
-		Files *struct {
-			Isolated bool
-			Changes  []struct {
-				Path, Change string
-				Diff         *string
-			}
-		}
+		Files *struct{ Isolated bool }
 	}
 	if code, out := c.call("GET", "/api/v0/turns/"+turn+"/diff", nil, &d); code != 200 || d.Files == nil {
 		c.t.Fatalf("diff of %s: %d %s", turn, code, out)
 	}
-	got := map[string]string{}
 	if !d.Files.Isolated {
 		c.t.Fatalf("turn %s did not run in an isolated copy", turn)
 	}
-	for _, f := range d.Files.Changes {
+	var p struct {
+		Changes []struct {
+			Path, Change string
+			Diff         *string
+		}
+	}
+	if code, out := c.call("GET", "/api/v0/turns/"+turn+"/changes", nil, &p); code != 200 {
+		c.t.Fatalf("changes of %s: %d %s", turn, code, out)
+	}
+	got := map[string]string{}
+	for _, f := range p.Changes {
 		s := f.Change
 		if f.Diff != nil {
 			s += "\n" + *f.Diff

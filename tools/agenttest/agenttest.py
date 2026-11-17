@@ -42,6 +42,9 @@ R = {
     "session_turns": "/api/v0/turns?session={session}",
     "turn": "/api/v0/turns/{id}",
     "turn_diff": "/api/v0/turns/{id}/diff",
+    "turn_changes": "/api/v0/turns/{id}/changes",
+    "turn_calls": "/api/v0/turns/{id}/calls",
+    "turn_tools": "/api/v0/turns/{id}/tools",
     "turn_events": "/api/v0/sessions/{session}/events?turn={id}",
     "turn_stop": "/api/v0/turns/{id}/stop",
 }
@@ -282,8 +285,8 @@ def setup(c, task, folder, hid):
         while time.time() - t0 < 240:
             ts = [t for t in c.asked_by(session=sid) if t.get("kind") == "turn"]
             if ts and ts[0].get("state") == "running":
-                d = c.get("turn_diff", id=ts[0]["id"])
-                if any("sleep" in " ".join(x.get("commands") or []) for x in d["tools"]["calls"]):
+                d = c.get("turn_tools", id=ts[0]["id"])
+                if any("sleep" in " ".join(x.get("commands") or []) for x in d["calls"]):
                     long = ts[0]
                     break
             time.sleep(3)
@@ -354,6 +357,22 @@ def check(c, task, folder, tid, reply, facts):
     return k
 
 
+def _pages(c, key, tid):
+    # Every item of a paged turn list (turn_tools calls, turn_changes changes),
+    # walking next_before; the lists moved off /diff onto their own routes. The
+    # first page is the newest items and next_before walks to earlier ones, so
+    # prepend each page to keep the whole list in its original order.
+    out, before = [], None
+    for _ in range(1000):
+        path = R[key].format(id=tid) + (f"?before={before}" if before is not None else "")
+        page = c.call("GET", path)
+        out = page.get("calls", page.get("changes", [])) + out
+        before = page.get("next_before")
+        if before is None:
+            break
+    return out
+
+
 def run(args):
     data = os.path.abspath(flag(args, "-dir"))
     nofollow = flag(args, "-no-followup", takes=False)
@@ -375,9 +394,10 @@ def run(args):
         c.post("turn_stop", id=tid)
         t = c.wait_turn(tid, 120)
     diff, events = c.get("turn_diff", id=tid), c.get("turn_events", id=tid, session=sid)
+    tools = {"calls": _pages(c, "turn_tools", tid)}  # the lists moved off /diff onto paged routes
     k = check(c, task, folder, tid, (t or {}).get("reply"), facts)
     res = dict(agent=agent, model=model, task=task, label=label, prompt=PROMPTS[task], session=sid, test_turn=tid,
-               facts=facts, turn=t, timed_out=timed_out, diff=diff, events=events, check=k,
+               facts=facts, turn=t, timed_out=timed_out, diff=diff, tools=tools, events=events, check=k,
                seed_seconds=round(t1 - t0), test_seconds=round(time.time() - t1))
     if task == 4 and not k["done"]:
         try:
@@ -424,7 +444,7 @@ def api_calls(res):
     failed when its answer is a refusal (it starts with its HTTP status)."""
     outs = {e.get("tool_id"): e.get("tool_output") or "" for e in res["events"]["events"] if e["kind"] == "tool.completed"}
     calls = []
-    for x in res["diff"]["tools"]["calls"]:
+    for x in res["tools"]["calls"]:
         o = outs.get(x["id"], "")
         if x["name"].startswith(TOOL):
             calls.append(dict(tool=x["name"], command=tool_text(x)[:200], n=1,
@@ -446,7 +466,7 @@ def api_calls(res):
 
 
 def first_tool(res):
-    for x in res["diff"]["tools"]["calls"]:
+    for x in res["tools"]["calls"]:
         cmd = " ".join(x.get("commands") or [])
         if re.search(r"agentbus-api |agentbus api |curl ", cmd):
             return "agentbus-api"
@@ -463,7 +483,7 @@ def summary(res):
     calls = api_calls(res)
     return dict(label=res["label"], task=res["task"], done=res["check"]["done"], first=first_tool(res),
                 api_calls=sum(x["n"] for x in calls), api_failed=sum(1 for x in calls if x["failed"]),
-                tool_calls=len(res["diff"]["tools"]["calls"]), model_calls=t.get("model_calls"),
+                tool_calls=len(res["tools"]["calls"]), model_calls=t.get("model_calls"),
                 tokens_in=(u.get("input_tokens") or 0) + (u.get("cache_read_tokens") or 0) + (u.get("cache_write_tokens") or 0),
                 tokens_out=u.get("output_tokens"), cost_usd=t.get("cost_usd"), seconds=res.get("test_seconds"),
                 state=t.get("state"), timed_out=res.get("timed_out"))
@@ -477,7 +497,7 @@ def show(args):
         print(json.dumps(s))
         print("reply:", (t.get("reply") or "")[:1200])
         outs = {e.get("tool_id"): e.get("tool_output") or "" for e in res["events"]["events"] if e["kind"] == "tool.completed"}
-        for x in res["diff"]["tools"]["calls"]:
+        for x in res["tools"]["calls"]:
             what = " ;; ".join(x.get("commands") or []) or json.dumps(x.get("input"))[:200]
             print(f"  - {x['name']}: {what[:300]}\n      -> {outs.get(x['id'], '')[:240]!r}")
         print("check:", json.dumps(res["check"])[:600])

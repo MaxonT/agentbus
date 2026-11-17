@@ -365,7 +365,7 @@ func callOfTurn(h func(*API, http.ResponseWriter, *http.Request, string)) func(*
 			return
 		}
 		if !in {
-			writeError(w, http.StatusNotFound, "this turn has no such call; GET /api/v0/turns/{id}/diff lists its calls")
+			writeError(w, http.StatusNotFound, "this turn has no such call; GET /api/v0/turns/{id}/calls lists them")
 			return
 		}
 		h(a, w, r, call)

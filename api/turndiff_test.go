@@ -21,14 +21,14 @@ func TestTurnFilesTruncatedSaysWhy(t *testing.T) {
 		f, _ := reflect.TypeOf(v).FieldByName(field)
 		return f.Tag.Get("doc")
 	}
-	diff, changed := doc(TurnFiles{}, "Truncated"), doc(event.TurnChanges{}, "Truncated")
+	diff, changed := doc(TurnChangesPage{}, "Truncated"), doc(event.TurnChanges{}, "Truncated")
 	if !strings.Contains(diff, "past "+strconv.Itoa(workspace.MaxChanges)+",") || !strings.Contains(diff, "count misses some too") {
-		t.Errorf("TurnFiles.truncated: %s", diff)
+		t.Errorf("TurnChangesPage.truncated: %s", diff)
 	}
 	if strings.TrimPrefix(diff, "changes") != strings.TrimPrefix(changed, "files") {
-		t.Errorf("the diff and turn.changed differ:\n%s\n%s", diff, changed)
+		t.Errorf("the changes route and turn.changed differ:\n%s\n%s", diff, changed)
 	}
-	if c := doc(TurnFiles{}, "Count"); c != doc(event.TurnChanges{}, "Count") || strings.HasPrefix(c, "Every") {
+	if c := doc(TurnChangesPage{}, "Count"); c != doc(event.TurnChanges{}, "Count") || strings.HasPrefix(c, "Every") {
 		t.Errorf("count: %s", c)
 	}
 }
@@ -49,6 +49,7 @@ func TestTurnDiffKeepsARefusalStoredFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The diff summarises: one tool call counted, no list embedded.
 	resp, body := do(t, e.req(t, "GET", "/api/v0/turns/t_1/diff", nil))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("%d %s", resp.StatusCode, body)
@@ -57,8 +58,20 @@ func TestTurnDiffKeepsARefusalStoredFirst(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &d); err != nil {
 		t.Fatal(err)
 	}
-	if d.Tools.Count != 1 || len(d.Tools.Calls) != 1 || d.Tools.Calls[0].RefusedRule != "git push" ||
-		len(d.Commands) != 1 || d.Commands[0] != "git push" || d.Files != nil || d.Apply.State != "none" {
+	if d.Tools.Count != 1 || d.Files != nil || d.Apply.State != "none" {
 		t.Fatalf("diff: %s", body)
+	}
+	// The tool calls route holds the call, its refusal and its command.
+	resp, body = do(t, e.req(t, "GET", "/api/v0/turns/t_1/tools", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("tools: %d %s", resp.StatusCode, body)
+	}
+	var tp TurnToolsPage
+	if err := json.Unmarshal([]byte(body), &tp); err != nil {
+		t.Fatal(err)
+	}
+	if tp.Count != 1 || len(tp.Calls) != 1 || tp.Calls[0].RefusedRule != "git push" ||
+		len(tp.Calls[0].Commands) != 1 || tp.Calls[0].Commands[0] != "git push" || tp.NextBefore != nil {
+		t.Fatalf("tools: %s", body)
 	}
 }
