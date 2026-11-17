@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,19 @@ func diffOf(t *testing.T, e *env, turn string) TurnDiff {
 	return d
 }
 
+func turnChangesOf(t *testing.T, e *env, turn string) TurnChangesPage {
+	t.Helper()
+	code, out := as(t, e, token, "GET", "/api/v0/turns/"+turn+"/changes", "")
+	if code != 200 {
+		t.Fatalf("changes %s: %d %s", turn, code, out)
+	}
+	var p TurnChangesPage
+	if err := json.Unmarshal([]byte(out), &p); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 // A turn in an isolated copy has a diff with each file's own unified diff,
 // and applying it writes the files into the person's folder. The same apply
 // again is a no-op. A file the person changed since refuses the next apply
@@ -128,10 +142,38 @@ func TestTurnDiffAndApply(t *testing.T) {
 		t.Fatalf("files: %+v", d.Files)
 	}
 	diffs := map[string]string{}
-	for _, f := range d.Files.Changes {
+	for _, f := range turnChangesOf(t, e, first.Turn).Changes {
 		if f.Diff != nil {
 			diffs[f.Path] = f.Change + "\n" + *f.Diff
 		}
+	}
+	// The changes list pages: limit 1 returns one file at a time and
+	// next_before walks the rest; count stays 3 and no file is cut.
+	paged, before := map[string]bool{}, int64(0)
+	for i := 0; i < 5; i++ {
+		path := "/api/v0/turns/" + first.Turn + "/changes?limit=1"
+		if before > 0 {
+			path += "&before=" + strconv.FormatInt(before, 10)
+		}
+		code, out := as(t, e, token, "GET", path, "")
+		if code != 200 {
+			t.Fatalf("changes page: %d %s", code, out)
+		}
+		var p TurnChangesPage
+		if err := json.Unmarshal([]byte(out), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Count != 3 || len(p.Changes) != 1 {
+			t.Fatalf("changes page: count %d, %d files", p.Count, len(p.Changes))
+		}
+		paged[p.Changes[0].Path] = true
+		if p.NextBefore == nil {
+			break
+		}
+		before = *p.NextBefore
+	}
+	if len(paged) != 3 {
+		t.Fatalf("paged %d distinct files, want 3", len(paged))
 	}
 	want := map[string]string{
 		"a.txt":    "modified\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n",
@@ -288,7 +330,7 @@ func TestTurnChangesAreTheCheckpointDiff(t *testing.T) {
 				if err != nil || changed == nil || changed.Count != c.count {
 					t.Fatalf("turn %s: turn.changed %+v, %v", c.st.Turn, changed, err)
 				}
-				if d := diffOf(t, e, c.st.Turn); !reflect.DeepEqual(d.Files, turnFiles(changed)) {
+				if d := diffOf(t, e, c.st.Turn); !reflect.DeepEqual(d.Files, filesSummary(changed)) {
 					t.Fatalf("turn %s: the diff %+v is not the record's %+v", c.st.Turn, d.Files, changed)
 				}
 				if setting == settings.IsolationNone {

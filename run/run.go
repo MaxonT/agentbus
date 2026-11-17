@@ -1288,22 +1288,22 @@ func askedLine(asked *event.Origin, client, tools bool) string {
 	if tools {
 		return "Another agent asked for this work, from session " + asked.Session + ", turn " + asked.Turn +
 			" (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN). Your folder may not hold its changes. " +
-			"To read what that turn changed, with each file's diff, call turn_diff with turn " + asked.Turn + " and session " + asked.Session +
-			". Its files are null while that turn still runs; read it again once its state is no longer running. " +
+			"To read what that turn changed, with each file's diff, call turn_changes with turn " + asked.Turn + " and session " + asked.Session +
+			". Its changes are empty while that turn still runs; read it again once its state is no longer running. " +
 			"That session's earlier turns: list_turns with session " + asked.Session + "."
 	}
 	get := `agentbus-api GET "%s"`
 	if !client {
 		get = `curl -s -H "Authorization: Bearer $AGENTBUS_TOKEN" "$AGENTBUS_URL%s"`
 	}
-	diff := fmt.Sprintf(get, "/api/v0/turns/"+asked.Turn+"/diff?session="+asked.Session)
+	changes := fmt.Sprintf(get, "/api/v0/turns/"+asked.Turn+"/changes?session="+asked.Session)
 	list := fmt.Sprintf(get, "/api/v0/turns?session="+asked.Session)
 	return "Another agent asked for this work, from session " + asked.Session + ", turn " + asked.Turn +
 		" (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in " +
 		fmt.Sprintf(get, "/api/v0/turns") + "). Your folder may not hold its changes. " +
-		"To read what that turn changed, with each file's diff, run:\n" + diff +
-		"\nIts files are null while that turn still runs; read it again once its state is no longer running. " +
-		"That session's earlier turns, each with its own diff: " + list
+		"To read what that turn changed, with each file's diff, run:\n" + changes +
+		"\nIts changes are empty while that turn still runs; read it again once its state is no longer running. " +
+		"That session's earlier turns: " + list
 }
 
 // ToolPath is control's tool server, under a turn's API address: the API as

@@ -201,12 +201,12 @@ func TestTurnEnvAsked(t *testing.T) {
 func TestAskedLine(t *testing.T) {
 	o := &event.Origin{Kind: event.OriginAsked, Session: "s1", Turn: "t_1"}
 	line := askedLine(askedBy(o), true, false)
-	for _, want := range []string{"session s1, turn t_1", `agentbus-api GET "/api/v0/turns/t_1/diff?session=s1"`, `agentbus-api GET "/api/v0/turns?session=s1"`} {
+	for _, want := range []string{"session s1, turn t_1", `agentbus-api GET "/api/v0/turns/t_1/changes?session=s1"`, `agentbus-api GET "/api/v0/turns?session=s1"`} {
 		if !strings.Contains(line, want) {
 			t.Errorf("line lacks %q: %s", want, line)
 		}
 	}
-	if line := askedLine(askedBy(o), false, false); !strings.Contains(line, `"$AGENTBUS_URL/api/v0/turns/t_1/diff?session=s1"`) {
+	if line := askedLine(askedBy(o), false, false); !strings.Contains(line, `"$AGENTBUS_URL/api/v0/turns/t_1/changes?session=s1"`) {
 		t.Errorf("curl: %s", line)
 	}
 	for _, o := range []*event.Origin{nil, {Kind: event.OriginResult, Session: "s1", Turn: "t_1"}, {Kind: event.OriginAsked, Session: "s1"}} {

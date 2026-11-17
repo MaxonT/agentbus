@@ -496,7 +496,7 @@ func TestAskedAgentReadsTheAskersChanges(t *testing.T) {
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args-child"))
 	// With the tools, on by default, the line names the tool and the turn.
-	if want := "call turn_diff with turn " + root.Turn + " and session " + root.Session; !strings.Contains(string(args), want) {
+	if want := "call turn_changes with turn " + root.Turn + " and session " + root.Session; !strings.Contains(string(args), want) {
 		t.Errorf("the child's instructions do not name %s: %s", want, args)
 	}
 	if got, _ := os.ReadFile(filepath.Join(pwdOf(t, dir, "child"), "a.txt")); string(got) != "one\n" {
@@ -518,25 +518,37 @@ func TestAskedAgentReadsTheAskersChanges(t *testing.T) {
 		t.Error("the person's own turn says it was asked")
 	}
 	release(dir, "root")
-	path := "/api/v0/turns/" + root.Turn + "/diff?session=" + root.Session
+	diffPath := "/api/v0/turns/" + root.Turn + "/diff?session=" + root.Session
+	changesPath := "/api/v0/turns/" + root.Turn + "/changes?session=" + root.Session
 	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		code, out := as(t, e, childTok, "GET", path, "")
+		code, out := as(t, e, childTok, "GET", diffPath, "")
 		if code != 200 {
 			t.Fatalf("the child reads the root's diff: %d %s", code, out)
 		}
 		var d struct {
 			Files *struct {
-				Changes []struct {
-					Path, Diff string
-				} `json:"changes"`
+				Count int `json:"count"`
 			} `json:"files"`
 		}
 		if err := json.Unmarshal([]byte(out), &d); err != nil {
 			t.Fatal(err)
 		}
 		if d.Files != nil {
-			if len(d.Files.Changes) != 1 || d.Files.Changes[0].Path != "a.txt" || !strings.Contains(d.Files.Changes[0].Diff, "+two") {
-				t.Fatalf("the root's diff: %s", out)
+			ccode, cout := as(t, e, childTok, "GET", changesPath, "")
+			if ccode != 200 {
+				t.Fatalf("the child reads the root's changes: %d %s", ccode, cout)
+			}
+			var p struct {
+				Changes []struct {
+					Path string  `json:"path"`
+					Diff *string `json:"diff"`
+				} `json:"changes"`
+			}
+			if err := json.Unmarshal([]byte(cout), &p); err != nil {
+				t.Fatal(err)
+			}
+			if len(p.Changes) != 1 || p.Changes[0].Path != "a.txt" || p.Changes[0].Diff == nil || !strings.Contains(*p.Changes[0].Diff, "+two") {
+				t.Fatalf("the root's changes: %s", cout)
 			}
 			break
 		}

@@ -1,11 +1,12 @@
 package api
 
-// A turn's full diff and its apply: GET /api/v0/turns/{id}/diff and
-// POST /api/v0/turns/{id}/apply. The diff is read from the record: the
-// turn's turn.changed holds its file changes, its turn.applied events its
-// applies, and its other events its model calls, tool calls and commands.
-// A turn from before 0.5 has its changes and applies in its jobs' results. An apply is a job (queue.KindApply) that the
-// runner holding the turn's session runs through its isolation backend.
+// A turn's diff summary and its apply: GET /api/v0/turns/{id}/diff and
+// POST /api/v0/turns/{id}/apply. The summary is read from the record: the
+// turn's turn.changed holds its file changes (listed at /changes), and its
+// events its model calls (/calls) and tool calls (/tools); its turn.applied
+// events hold its applies. A turn from before 0.5 has its changes and applies
+// in its jobs' results. An apply is a job (queue.KindApply) that the runner
+// holding the turn's session runs through its isolation backend.
 
 import (
 	"context"
@@ -22,38 +23,34 @@ import (
 	"github.com/staysup/agentbus/workspace"
 )
 
-// TurnDiff is the answer to GET /api/v0/turns/{id}/diff: everything the
-// record holds about what one turn did.
+// TurnDiff is the answer to GET /api/v0/turns/{id}/diff: the summary of what
+// one turn did. Its lists each have their own paged route: the file changes
+// at GET /api/v0/turns/{id}/changes, the model calls at .../calls, the tool
+// calls at .../tools. No list is embedded here, so none is cut.
 type TurnDiff struct {
-	Turn       string     `json:"turn"`
-	Session    string     `json:"session"`
-	Agent      string     `json:"agent" doc:"The harness that ran the turn, from its turn.started."`
-	AgentID    string     `json:"agent_id,omitempty" doc:"The saved agent that ran the turn, from its turn.started."`
-	Model      string     `json:"model" doc:"The model the turn's last call asked for. Empty when it made no calls."`
-	State      string     `json:"state" doc:"running, finished, failed or stopped, as GET /api/v0/turns/{id} says."`
-	Started    time.Time  `json:"started"`
-	Ended      *time.Time `json:"ended,omitempty" doc:"Absent while running."`
-	DurationMS *int64     `json:"duration_ms" doc:"From started to ended. Null while running."`
-	Files      *TurnFiles `json:"files" doc:"What the turn changed in its session's copy, or in the folder it ran in. Null when the record holds none: the turn is running, or this service did not run it."`
-	ModelCalls TurnCalls  `json:"model_calls"`
-	Tools      TurnTools  `json:"tools"`
-	Commands   []string   `json:"commands" doc:"The shell commands the agent asked to run, in order, as the gateway's guard reads them. A command built at run time, or run from a script, is not seen."`
-	Apply      ApplyState `json:"apply" doc:"Whether the turn's changes were applied to the person's folder. state none when no apply was asked for."`
+	Turn       string        `json:"turn"`
+	Session    string        `json:"session"`
+	Agent      string        `json:"agent" doc:"The harness that ran the turn, from its turn.started."`
+	AgentID    string        `json:"agent_id,omitempty" doc:"The saved agent that ran the turn, from its turn.started."`
+	Model      string        `json:"model" doc:"The model the turn's last call asked for. Empty when it made no calls."`
+	State      string        `json:"state" doc:"running, finished, failed or stopped, as GET /api/v0/turns/{id} says."`
+	Started    time.Time     `json:"started"`
+	Ended      *time.Time    `json:"ended,omitempty" doc:"Absent while running."`
+	DurationMS *int64        `json:"duration_ms" doc:"From started to ended. Null while running."`
+	Files      *FilesSummary `json:"files" doc:"What the turn changed, in summary: the whole list pages at GET /api/v0/turns/{id}/changes. Null when the record holds none: the turn is running, or this service did not run it."`
+	ModelCalls CallsSummary  `json:"model_calls" doc:"The turn's model calls, in summary: the list pages at GET /api/v0/turns/{id}/calls."`
+	Tools      ToolsSummary  `json:"tools" doc:"The turn's tool calls, in summary: the list pages at GET /api/v0/turns/{id}/tools, each tool call with the commands it ran."`
+	Apply      ApplyState    `json:"apply" doc:"Whether the turn's changes were applied to the person's folder. state none when no apply was asked for."`
 }
 
-// TurnFiles is a turn's file changes, from its turn.changed.
-type TurnFiles struct {
+// FilesSummary is a turn's file changes in summary, from its turn.changed.
+// The list is at GET /api/v0/turns/{id}/changes.
+type FilesSummary struct {
 	Isolated bool   `json:"isolated" doc:"The turn ran in an isolated copy, between two checkpoints: POST /api/v0/turns/{id}/apply can put its changes in the person's folder."`
 	From     string `json:"from,omitempty" doc:"The checkpoint the turn started from. In an isolated copy only."`
 	To       string `json:"to,omitempty" doc:"The checkpoint the turn ended with. The same as from: the turn changed nothing."`
 	Kind     string `json:"kind" doc:"Always snapshot: the files were compared by their SHA-256."`
-	// Count is every change; Changes holds at most workspace.MaxChanges.
-	Count          int          `json:"count" doc:"The files the turn added, modified or deleted; with truncated, see there."`
-	Truncated      bool         `json:"truncated,omitempty" doc:"changes is not every change: files were left out past 1000, or to fit the runner's finish, and count still counts them; or the copy held more files than a checkpoint keeps, and count misses some too."`
-	Changes        []FileChange `json:"changes" doc:"Each changed file, sorted by path."`
-	DiffsCut       bool         `json:"diffs_cut,omitempty" doc:"Some text files have no diff here: all the turn's diffs together passed 1 MiB, and the later ones were left out (each marked diff_left_out)."`
-	ContentLeftOut bool         `json:"content_left_out,omitempty" doc:"Some small text files have no content here, to keep the result small."`
-	Error          string       `json:"error,omitempty" doc:"The workspace could not be read at the end of the turn."`
+	Count    int    `json:"count" doc:"The files the turn added, modified or deleted."`
 }
 
 // FileChange is one changed file.
@@ -68,15 +65,14 @@ type FileChange struct {
 	Content     *string `json:"content,omitempty" doc:"The whole file at the end, when it is small UTF-8 text."`
 }
 
-// TurnCalls is a turn's model calls.
-type TurnCalls struct {
+// CallsSummary is a turn's model calls in summary. The list is at
+// GET /api/v0/turns/{id}/calls.
+type CallsSummary struct {
 	Count        int          `json:"count" doc:"The turn's model.requested events."`
 	Usage        *event.Usage `json:"usage" doc:"Summed over the replies that carried usage. Null when none did."`
 	CostUSD      float64      `json:"cost_usd"`
 	CostComplete bool         `json:"cost_complete" doc:"False when a reply lacks a complete cost."`
 	Models       []ModelCount `json:"models" doc:"Calls per model, in the order each model was first asked for."`
-	Calls        []ModelCall  `json:"calls" doc:"Each call, oldest first, at most 500."`
-	Truncated    bool         `json:"truncated,omitempty" doc:"calls holds the first 500 only."`
 }
 
 // ModelCount is how many calls asked for one model.
@@ -95,11 +91,10 @@ type ModelCall struct {
 	LatencyMS *int64       `json:"latency_ms,omitempty"`
 }
 
-// TurnTools is a turn's tool calls.
-type TurnTools struct {
-	Count     int        `json:"count" doc:"The turn's tool.requested events."`
-	Calls     []ToolCall `json:"calls" doc:"Each tool call, oldest first, at most 1000."`
-	Truncated bool       `json:"truncated,omitempty" doc:"calls holds the first 1000 only."`
+// ToolsSummary is a turn's tool calls in summary. The list, each tool call
+// with the commands it ran, is at GET /api/v0/turns/{id}/tools.
+type ToolsSummary struct {
+	Count int `json:"count" doc:"The turn's tool.requested events."`
 }
 
 // ToolCall is one tool call of a turn.
@@ -130,40 +125,23 @@ type ApplyState struct {
 	Error     string                `json:"error,omitempty" doc:"Why it was refused or failed."`
 }
 
-// Caps on what a diff lists.
 const (
-	maxDiffCalls = 500
-	maxDiffTools = 1000
+	// maxToolInput: a tool call's input is left out past this, with input_left_out.
 	maxToolInput = 4 << 10
-	// maxDiffPages bounds the event pages read for one diff.
+	// maxDiffPages bounds the event pages read for one turn's activity.
 	maxDiffPages = 200
 )
 
-// GET /api/v0/turns/<id>/diff: one turn's full diff.
+// GET /api/v0/turns/<id>/diff: one turn's summary; its lists page elsewhere.
 func (a *API) turnDiff(w http.ResponseWriter, r *http.Request, id string) {
-	tq := store.TurnQuery{Turn: id, Limit: 1}
-	if q := r.URL.Query(); q.Has("session") {
-		tq.Session = q.Get("session")
-		if !sessionID.MatchString(tq.Session) {
-			writeError(w, http.StatusBadRequest, "session must match "+sessionID.String())
-			return
-		}
-	}
-	list, err := a.cfg.Store.Turns(tq)
-	if err != nil {
-		a.internal(w)
+	t, ok := a.turnByID(w, r, id)
+	if !ok {
 		return
 	}
-	if len(list.Turns) == 0 {
-		writeError(w, http.StatusNotFound, noTurn)
-		return
-	}
-	t := list.Turns[0]
 	d := TurnDiff{Turn: t.ID, Session: t.Session, Agent: t.Harness, AgentID: t.AgentID, Model: t.Model, State: t.State,
-		Started: t.Started, Ended: t.Ended, Commands: []string{}, Apply: ApplyState{State: "none"},
-		ModelCalls: TurnCalls{Count: t.ModelCalls, Usage: t.Usage, CostUSD: t.CostUSD, CostComplete: t.CostComplete,
-			Models: []ModelCount{}, Calls: []ModelCall{}},
-		Tools: TurnTools{Calls: []ToolCall{}}}
+		Started: t.Started, Ended: t.Ended, Apply: ApplyState{State: "none"},
+		ModelCalls: CallsSummary{Count: t.ModelCalls, Usage: t.Usage, CostUSD: t.CostUSD, CostComplete: t.CostComplete,
+			Models: []ModelCount{}}}
 	if t.Ended != nil {
 		ms := t.Ended.Sub(t.Started).Milliseconds()
 		d.DurationMS = &ms
@@ -180,7 +158,7 @@ func (a *API) turnDiff(w http.ResponseWriter, r *http.Request, id string) {
 						a.internal(w)
 						return
 					}
-					d.Files = turnFiles(c)
+					d.Files = filesSummary(c)
 				}
 				if j.Ended == nil && d.State != queue.TurnStopped {
 					// As GET /api/v0/turns/{id}: running until its job has
@@ -199,35 +177,56 @@ func (a *API) turnDiff(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 	}
-	if err := a.turnActivity(&d); err != nil {
+	act, err := a.buildActivity(d.Turn, d.Session)
+	if err != nil {
 		a.internal(w)
 		return
 	}
+	d.ModelCalls.Models = act.Models
+	d.Tools.Count = len(act.Tools)
 	writeJSON(w, http.StatusOK, d)
 }
 
-// turnFiles is a turn's changes as the diff shows them. nil for nil.
-func turnFiles(c *event.TurnChanges) *TurnFiles {
+// filesSummary is a turn's file changes in summary, for the diff. nil for nil.
+func filesSummary(c *event.TurnChanges) *FilesSummary {
 	if c == nil {
 		return nil
 	}
-	f := &TurnFiles{Isolated: c.Isolated, From: c.From, To: c.To, Kind: workspace.KindSnapshot, Count: c.Count,
-		Truncated: c.Truncated, Changes: make([]FileChange, len(c.Files)), DiffsCut: c.DiffsCut,
-		ContentLeftOut: c.ContentLeftOut, Error: c.Error}
-	for i, ch := range c.Files {
-		f.Changes[i] = FileChange{Path: ch.Path, Change: ch.Change, Size: ch.Size, SHA256: ch.SHA256, SHA256Prior: ch.SHA256Before,
-			Diff: ch.Diff, DiffLeftOut: ch.DiffLeftOut, Content: ch.Content}
-	}
-	return f
+	return &FilesSummary{Isolated: c.Isolated, From: c.From, To: c.To, Kind: workspace.KindSnapshot, Count: c.Count}
 }
 
-// turnActivity reads the turn's model calls, tool calls and commands from
-// its events.
-func (a *API) turnActivity(d *TurnDiff) error {
-	f := store.Filter{Turn: d.Turn, TurnSession: d.Session}
-	calls := map[string]int{} // exchange -> index in Calls
+// fileChanges is a turn's changes as the changes route lists them: the full
+// list and the record's completeness flags. nil for nil.
+func fileChanges(c *event.TurnChanges) ([]FileChange, bool, bool, bool, string) {
+	if c == nil {
+		return nil, false, false, false, ""
+	}
+	out := make([]FileChange, len(c.Files))
+	for i, ch := range c.Files {
+		out[i] = FileChange{Path: ch.Path, Change: ch.Change, Size: ch.Size, SHA256: ch.SHA256, SHA256Prior: ch.SHA256Before,
+			Diff: ch.Diff, DiffLeftOut: ch.DiffLeftOut, Content: ch.Content}
+	}
+	return out, c.Truncated, c.DiffsCut, c.ContentLeftOut, c.Error
+}
+
+// activity is a turn's model calls, tool calls and per-model counts, read
+// whole from its events: no cap, so a list route pages them and the summary
+// counts them. Models is an aggregate; Calls and Tools are the full lists,
+// oldest first (each tool call carries its own commands).
+type activity struct {
+	Models []ModelCount
+	Calls  []ModelCall
+	Tools  []ToolCall
+}
+
+// buildActivity reads a turn's model calls, tool calls and commands from its
+// events, every one. maxDiffPages bounds the pages read, as before.
+func (a *API) buildActivity(turn, session string) (*activity, error) {
+	f := store.Filter{Turn: turn, TurnSession: session}
+	out := &activity{Models: []ModelCount{}, Calls: []ModelCall{}, Tools: []ToolCall{}}
+	callIdx := map[string]int{} // exchange -> index in Calls
 	models := map[string]int{}
-	tools := map[string]int{} // tool id -> index in Calls
+	toolIdx := map[string]int{} // tool id -> index in Tools
 	// The gateway stores a call's tool.refused before its tool.requested,
 	// so a refusal waits here for its call.
 	refused := map[string]string{}
@@ -235,7 +234,7 @@ func (a *API) turnActivity(d *TurnDiff) error {
 	for range maxDiffPages {
 		recs, more, err := a.cfg.Store.Page(after, f, 1000, store.PageBytes)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, rec := range recs {
 			after = rec.Seq
@@ -251,45 +250,35 @@ func (a *API) turnActivity(d *TurnDiff) error {
 			switch e.Kind {
 			case event.ModelRequested:
 				if i, ok := models[e.Model]; ok {
-					d.ModelCalls.Models[i].Calls++
+					out.Models[i].Calls++
 				} else {
-					models[e.Model] = len(d.ModelCalls.Models)
-					d.ModelCalls.Models = append(d.ModelCalls.Models, ModelCount{Model: e.Model, Calls: 1})
+					models[e.Model] = len(out.Models)
+					out.Models = append(out.Models, ModelCount{Model: e.Model, Calls: 1})
 				}
-				if len(d.ModelCalls.Calls) >= maxDiffCalls {
-					d.ModelCalls.Truncated = true
-					continue
-				}
-				calls[e.Exchange] = len(d.ModelCalls.Calls)
-				d.ModelCalls.Calls = append(d.ModelCalls.Calls, ModelCall{Exchange: e.Exchange, Model: e.Model})
+				callIdx[e.Exchange] = len(out.Calls)
+				out.Calls = append(out.Calls, ModelCall{Exchange: e.Exchange, Model: e.Model})
 			case event.ModelResponded:
-				if i, ok := calls[e.Exchange]; ok {
-					c := &d.ModelCalls.Calls[i]
+				if i, ok := callIdx[e.Exchange]; ok {
+					c := &out.Calls[i]
 					c.Status, c.Usage, c.CostUSD, c.LatencyMS = e.Status, e.Usage, e.CostUSD, e.LatencyMS
 				}
 			case event.ToolRequested:
-				d.Tools.Count++
 				cmds := gateway.ToolCommands(e.Vendor, e.ToolName, e.ToolInput)
-				d.Commands = append(d.Commands, cmds...)
-				if len(d.Tools.Calls) >= maxDiffTools {
-					d.Tools.Truncated = true
-					continue
-				}
 				tc := ToolCall{ID: e.ToolID, Name: e.ToolName, Commands: cmds, RefusedRule: refused[e.ToolID]}
 				if len(e.ToolInput) <= maxToolInput {
 					tc.Input = e.ToolInput
 				} else {
 					tc.InputCut = true
 				}
-				tools[e.ToolID] = len(d.Tools.Calls)
-				d.Tools.Calls = append(d.Tools.Calls, tc)
+				toolIdx[e.ToolID] = len(out.Tools)
+				out.Tools = append(out.Tools, tc)
 			case event.ToolCompleted:
-				if i, ok := tools[e.ToolID]; ok && e.ToolError != nil {
-					d.Tools.Calls[i].Error = e.ToolError
+				if i, ok := toolIdx[e.ToolID]; ok && e.ToolError != nil {
+					out.Tools[i].Error = e.ToolError
 				}
 			case event.ToolRefused:
-				if i, ok := tools[e.ToolID]; ok {
-					d.Tools.Calls[i].RefusedRule = e.Rule
+				if i, ok := toolIdx[e.ToolID]; ok {
+					out.Tools[i].RefusedRule = e.Rule
 				} else {
 					refused[e.ToolID] = e.Rule
 				}
@@ -299,7 +288,7 @@ func (a *API) turnActivity(d *TurnDiff) error {
 			break
 		}
 	}
-	return nil
+	return out, nil
 }
 
 // Refusals of an apply. Fixed wording.

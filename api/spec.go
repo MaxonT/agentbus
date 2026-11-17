@@ -504,7 +504,7 @@ func describe(runner bool) (*openapi3.T, error) {
 		}
 		if strings.Contains(rt.path, "{call}") {
 			op.Parameters = append(op.Parameters, &openapi3.ParameterRef{Value: openapi3.NewPathParameter("call").
-				WithDescription("A model call of the turn: the exchange field of its events, as the turn's diff lists it in model_calls.").
+				WithDescription("A model call of the turn: the exchange field of its events, as GET /api/v0/turns/{id}/calls lists it.").
 				WithSchema(&openapi3.Schema{Type: &openapi3.Types{"string"}, Pattern: sessionID.String()})})
 		}
 		if strings.Contains(rt.path, "{n}") {
