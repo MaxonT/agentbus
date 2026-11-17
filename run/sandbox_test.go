@@ -46,7 +46,7 @@ func TestSandboxRefusedBeforeStart(t *testing.T) {
 		homes        bool
 		want         string
 	}{
-		{"no homes", "[sandbox]\nmode = \"on\"\n", false, "no home of their own"},
+		{"no homes", "[sandbox]\nmode = \"on\"\n", false, "no home of its own"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e, st := sandboxEngine(t, c.policy, c.homes, "exit 0")

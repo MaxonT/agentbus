@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/staysup/agentbus/body"
 	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/store"
@@ -28,21 +27,19 @@ type RecordBatch struct {
 
 // RunnerKinds are the event kinds a runner may send in a RecordBatch: those
 // its run engine (run/), its gateway and adapters, and its replay write for
-// a turn. plan.usage is taken too, but only a -gateway local runner's own
-// machine reading, and record() guards it (it must name the runner's own
-// connector, so it cannot override a subscription control holds). Every other
-// kind is control's own and is refused: events.dropped (the store's, marking
-// other sessions'), turn.changed and turn.applied (control's record of a job's
-// end, outcome.go), tools.listed (control's tool server), session.renamed (the
-// API), control's operations in no session, the retired kinds, and a program's
-// x.* kinds.
+// a turn. Every other kind is control's own and is refused: events.dropped
+// (the store's, marking other sessions'), turn.changed and turn.applied
+// (control's record of a job's end, outcome.go), plan.usage (control's
+// reading of a subscription it holds, gateway/plan.go), tools.listed
+// (control's tool server), session.renamed (the API), control's operations
+// in no session, the retired kinds, and a program's x.* kinds.
 var RunnerKinds = map[event.Kind]bool{
 	event.TurnStarted: true, event.ModelRequested: true, event.ModelResponded: true,
 	event.ToolRequested: true, event.ToolCompleted: true, event.TurnCompleted: true,
 	event.SessionOpened: true, event.SessionClosed: true, event.ContextAdded: true,
 	event.NetworkRefused: true, event.SchemaUnexpected: true, event.ReplayFailed: true,
 	event.ToolRefused: true, event.CallRefused: true, event.VendorCalled: true,
-	event.ApprovalRequested: true, event.PlanUsage: true,
+	event.ApprovalRequested: true,
 }
 
 // RecordAck answers a RecordBatch: how many events were new.
@@ -53,151 +50,10 @@ type RecordAck struct {
 // Recorder is the control plane's record, for a runner's turn.
 type Recorder interface {
 	AppendOnce(e event.Event) (bool, error)
-	KeepSent(c store.CallContext) (missing []string, err error)
-	KeepReply(r body.Reply) error
 	CallSession(exchange string) (session string, found bool, err error)
 	OtherTurns(exchange, session, turn string) (bool, error)
 	Continuation(session string) (store.Continuation, error)
 	Finder
-}
-
-// CallBatch is the body of POST /api/v0/runner/attempts/{id}/calls: model calls of
-// the attempt's turn as the runner's own record kept them, and the replies
-// kept for them. A piece may come without its bytes when the runner sent
-// them before; control answers with the hashes it lacks. Every body is sent
-// as base64, so its bytes arrive as they were kept: JSON's own encoding
-// would compact them and escape <, > and &, and a piece's hash names its
-// exact bytes.
-type CallBatch struct {
-	Number  int           `json:"number" doc:"The attempt's number."`
-	Calls   []SentCall    `json:"calls" doc:"Calls of the turn, each with its pieces; a piece without bytes must be held by control already."`
-	Replies []ReplyRecord `json:"replies" doc:"Replies kept for calls of the turn."`
-}
-
-// SentCall is one call as the runner's record kept it.
-type SentCall struct {
-	Exchange string      `json:"exchange"`
-	Session  string      `json:"session"`
-	Vendor   string      `json:"vendor"`
-	Time     time.Time   `json:"time"`
-	Size     int         `json:"size"`
-	Top      []byte      `json:"top" doc:"The request's other top-level fields, as kept, base64."`
-	Pieces   []SentPiece `json:"pieces"`
-}
-
-// SentPiece is one piece of a SentCall.
-type SentPiece struct {
-	Hash  string `json:"hash"`
-	Kind  string `json:"kind"`
-	Label string `json:"label,omitempty"`
-	Bytes []byte `json:"bytes,omitempty" doc:"The piece's bytes, base64; absent when control holds them."`
-}
-
-// SentCallOf is c as it is sent: with every piece's bytes, or without those
-// of the pieces have says control holds.
-func SentCallOf(c store.CallContext, have func(hash string) bool) SentCall {
-	out := SentCall{Exchange: c.Exchange, Session: c.Session, Vendor: c.Vendor, Time: c.Time, Size: c.Size, Top: []byte(c.Request)}
-	for _, p := range c.Pieces {
-		sp := SentPiece{Hash: p.Hash, Kind: p.Kind, Label: p.Label}
-		if !have(p.Hash) {
-			sp.Bytes = []byte(p.JSON)
-		}
-		out.Pieces = append(out.Pieces, sp)
-	}
-	return out
-}
-
-// context is c as the store takes it.
-func (c SentCall) context() store.CallContext {
-	out := store.CallContext{Exchange: c.Exchange, Session: c.Session, Vendor: c.Vendor, Time: c.Time, Size: c.Size,
-		Request: json.RawMessage(c.Top), Pieces: make([]store.Piece, len(c.Pieces))}
-	for i, p := range c.Pieces {
-		out.Pieces[i] = store.Piece{Hash: p.Hash, Kind: p.Kind, Label: p.Label}
-		if p.Bytes != nil {
-			out.Pieces[i].JSON = json.RawMessage(p.Bytes)
-		}
-	}
-	return out
-}
-
-// ReplyRecord is one kept reply (body.Reply), its message as base64.
-type ReplyRecord struct {
-	Exchange string    `json:"exchange"`
-	Status   int       `json:"status"`
-	Stop     string    `json:"stop"`
-	Time     time.Time `json:"time"`
-	Message  []byte    `json:"message"`
-}
-
-// CallAck answers a CallBatch: how many calls were stored, and the piece
-// hashes control lacks, whose calls were not stored: send those calls again
-// with these pieces' bytes.
-type CallAck struct {
-	Stored  int      `json:"stored"`
-	Missing []string `json:"missing"`
-}
-
-func (s *Server) calls(w http.ResponseWriter, r *http.Request, rn queue.Runner) {
-	if s.cfg.Record == nil {
-		fail(w, http.StatusNotFound, "this service keeps no record")
-		return
-	}
-	var b CallBatch
-	if !decode(r, &b) || len(b.Calls)+len(b.Replies) > MaxBatch {
-		fail(w, http.StatusBadRequest, "the body must be one JSON object with number and at most 500 calls and replies")
-		return
-	}
-	j, err := s.cfg.Queue.Current(rn.ID, r.PathValue("id"), b.Number)
-	if err != nil {
-		s.queueError(w, err)
-		return
-	}
-	// The same rule as the events: every call is of the session control
-	// assigned the job.
-	assigned := assignedSession(j)
-	for _, c := range b.Calls {
-		if c.Exchange == "" || assigned == "" || c.Session != assigned {
-			fail(w, http.StatusBadRequest, "every call needs an exchange and must be of the session control assigned the attempt's job")
-			return
-		}
-	}
-	// And of the job's turn: a call or reply whose exchange an event of
-	// another turn of the session carries is that turn's, and is not stored.
-	other := func(exchange string) (bool, error) { return s.cfg.Record.OtherTurns(exchange, assigned, j.Turn) }
-	ack := CallAck{Missing: []string{}}
-	for _, c := range b.Calls {
-		if o, err := other(c.Exchange); err != nil {
-			s.internal(w)
-			return
-		} else if o {
-			fail(w, http.StatusBadRequest, "every call must be of the attempt's own turn")
-			return
-		}
-		missing, err := s.cfg.Record.KeepSent(c.context())
-		if err != nil {
-			fail(w, http.StatusBadRequest, "a call could not be stored: its pieces must match their hashes")
-			return
-		}
-		if len(missing) > 0 {
-			ack.Missing = append(ack.Missing, missing...)
-			continue
-		}
-		ack.Stored++
-	}
-	for _, rp := range b.Replies {
-		// A reply belongs to a call already held for this session.
-		if sess, found, err := s.cfg.Record.CallSession(rp.Exchange); err != nil || !found || sess != assigned {
-			continue
-		}
-		if o, err := other(rp.Exchange); err != nil || o {
-			continue
-		}
-		if err := s.cfg.Record.KeepReply(body.Reply{Exchange: rp.Exchange, Status: rp.Status, Stop: rp.Stop, Time: rp.Time, Message: json.RawMessage(rp.Message)}); err != nil {
-			s.internal(w)
-			return
-		}
-	}
-	writeJSON(w, http.StatusOK, ack)
 }
 
 func (s *Server) record(w http.ResponseWriter, r *http.Request, rn queue.Runner) {
@@ -229,17 +85,6 @@ func (s *Server) record(w http.ResponseWriter, r *http.Request, rn queue.Runner)
 		if !RunnerKinds[e.Kind] {
 			fail(w, http.StatusBadRequest, string(e.Kind)+" is not an event a runner sends")
 			return
-		}
-		// A runner's plan.usage is its own machine's subscription only: it must
-		// name the runner's connector as its connect, so it can never override a
-		// subscription control holds (those name a cockpit connect, never a
-		// connector). A forged reading for another subscription carries no such
-		// connect, so the batch is refused whole.
-		if e.Kind == event.PlanUsage {
-			if e.Plan == nil || rn.Caps == nil || e.Plan.Connection == "" || e.Plan.Connection != rn.Caps.Connector {
-				fail(w, http.StatusBadRequest, "a runner's plan.usage must be its own machine's: plan.connection is the runner's connector")
-				return
-			}
 		}
 		e.Seq, e.Folder = 0, ""
 		evs = append(evs, e)

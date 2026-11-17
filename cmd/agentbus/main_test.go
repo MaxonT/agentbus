@@ -3,10 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,19 +16,15 @@ import (
 	"time"
 
 	"github.com/staysup/agentbus/credentials"
-	"github.com/staysup/agentbus/event"
-	"github.com/staysup/agentbus/store"
 )
 
 func startService(t *testing.T, home string, upstreamURL string) *service {
 	t.Helper()
 	up, _ := url.Parse(upstreamURL)
 	// codex's upstream is unreachable here: no test reaches chatgpt.com.
-	// The gateway passing each call on with the agent's own sign-in, as a
-	// runner with -gateway local does: agentbus up sends every call to its
-	// relay since 0.5.1 (nosecrets and up_signin tests).
-	svc, err := start(config{listen: "127.0.0.1:0", home: home, upstream: up, chatgpt: mustURL("http://127.0.0.1:1"), logf: t.Logf,
-		gatewayMode: gatewayLocal})
+	// agentbus up sends every model call to its own relay, which the upstream
+	// backs (nosecrets and up_signin tests cover the credential path).
+	svc, err := start(config{listen: "127.0.0.1:0", home: home, upstream: up, chatgpt: mustURL("http://127.0.0.1:1"), logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,50 +122,6 @@ func TestAPIPathsNeverReachUpstream(t *testing.T) {
 	}
 }
 
-func TestGatewayPathsReachUpstreamAndStore(t *testing.T) {
-	var gotAuth atomic.Value
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth.Store(r.Header.Get("Authorization"))
-		io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"type":"message","model":"claude-x","role":"assistant","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":1}}`)
-	}))
-	defer upstream.Close()
-	home := t.TempDir()
-	svc := startService(t, home, upstream.URL)
-
-	req, _ := http.NewRequest("POST", "http://"+svc.addr+"/s/sess-1/v1/messages",
-		strings.NewReader(`{"model":"claude-x","messages":[{"role":"user","content":"hello"}]}`))
-	req.Header.Set("Authorization", "Bearer vendor-sign-in")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != 200 || gotAuth.Load() != "Bearer vendor-sign-in" {
-		t.Fatalf("status %d, upstream auth %v", resp.StatusCode, gotAuth.Load())
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		recs, _ := svc.store.After(0, store.Filter{Session: "sess-1", Only: true}, 100)
-		var kinds []string
-		for _, r := range recs {
-			kinds = append(kinds, string(r.Kind))
-			if bytes.Contains(r.Data, []byte("vendor-sign-in")) {
-				t.Fatal("a header reached a stored event")
-			}
-		}
-		if strings.Contains(strings.Join(kinds, " "), "model.responded") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("stored kinds %v", kinds)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 func TestTokenMadeOnceWithMode0600(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "nested", "home")
 	svc := startService(t, home, "http://127.0.0.1:1")
@@ -260,10 +209,8 @@ func TestSecondServiceOnOneFolderRefused(t *testing.T) {
 
 func TestOddPathsRefusedBeforeRouting(t *testing.T) {
 	var hits atomic.Int32
-	var gotPath atomic.Value
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		gotPath.Store(r.URL.Path)
 	}))
 	defer upstream.Close()
 	home := t.TempDir()
@@ -289,14 +236,9 @@ func TestOddPathsRefusedBeforeRouting(t *testing.T) {
 	if hits.Load() != 0 {
 		t.Fatalf("upstream reached %d times by refused paths", hits.Load())
 	}
-
-	// Normal paths still route.
-	if code := rawGet(t, svc.addr, "/v1/messages?q=/../x", ""); code != 200 || hits.Load() != 1 {
-		t.Errorf("/v1/messages: %d, hits %d", code, hits.Load())
-	}
-	if code := rawGet(t, svc.addr, "/s/abc/v1/models", ""); code != 200 || gotPath.Load() != "/v1/models" {
-		t.Errorf("/s/abc/v1/models: %d, upstream path %v", code, gotPath.Load())
-	}
+	// That a normal path routes to its vendor is proven across processes in
+	// TestXProcEachVendorPathReachesOnlyItsVendor; here only that an odd path
+	// is refused before routing, which needs no running turn.
 	if code := rawGet(t, svc.addr, "/api/v0/sessions", "Bearer "+tok); code != 200 {
 		t.Errorf("/api/v0/sessions: %d", code)
 	}
@@ -305,59 +247,6 @@ func TestOddPathsRefusedBeforeRouting(t *testing.T) {
 	}
 }
 
-func TestBarePathIsTheDefaultSession(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"type":"message","model":"claude-x","role":"assistant","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":1}}`)
-	}))
-	defer upstream.Close()
-	home := t.TempDir()
-	svc := startService(t, home, upstream.URL)
-	tok := readToken(t, home)
-
-	resp, err := http.Post("http://"+svc.addr+"/v1/messages", "application/json",
-		strings.NewReader(`{"model":"claude-x","messages":[{"role":"user","content":"hello"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	io.ReadAll(resp.Body)
-	resp.Body.Close()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		req, _ := http.NewRequest("GET", "http://"+svc.addr+"/api/v0/sessions/default/events", nil)
-		req.Header.Set("Authorization", "Bearer "+tok)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var page struct {
-			Events []struct {
-				Kind    string `json:"kind"`
-				Session string `json:"session"`
-			} `json:"events"`
-		}
-		json.NewDecoder(resp.Body).Decode(&page)
-		resp.Body.Close()
-		var kinds []string
-		for _, e := range page.Events {
-			if e.Session != "default" {
-				t.Fatalf("event of session %q", e.Session)
-			}
-			kinds = append(kinds, e.Kind)
-		}
-		if strings.Contains(strings.Join(kinds, " "), "model.responded") {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("session default has %v", kinds)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-// An existing data folder kept its mode, so a 0755 folder left the store
 // readable by other users. Start makes it 0700.
 func TestExistingDataFolderMadePrivate(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "data")
@@ -377,51 +266,6 @@ func TestExistingDataFolderMadePrivate(t *testing.T) {
 	}
 }
 
-// The service prices every model.responded before storing it.
-func TestStoredReplyCarriesCost(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"type":"message","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"hi"}],`+
-			`"stop_reason":"end_turn","usage":{"input_tokens":1000,"output_tokens":2000,"cache_read_input_tokens":100000,`+
-			`"cache_creation_input_tokens":50000,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":50000},"service_tier":"standard"}}`)
-	}))
-	defer upstream.Close()
-	svc := startService(t, t.TempDir(), upstream.URL)
-
-	resp, err := http.Post("http://"+svc.addr+"/s/sess-1/v1/messages", "application/json",
-		strings.NewReader(`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hello"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	io.ReadAll(resp.Body)
-	resp.Body.Close()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		recs, _ := svc.store.After(0, store.Filter{Session: "sess-1", Only: true}, 100)
-		for _, r := range recs {
-			if r.Kind != event.ModelResponded {
-				continue
-			}
-			var e event.Event
-			if err := json.Unmarshal(r.Data, &e); err != nil {
-				t.Fatal(err)
-			}
-			// 1000*4 + 2000*20 + 100000*0.20 + 50000*8 (1h write), per million.
-			if e.CostUSD == nil || math.Abs(*e.CostUSD-0.464) > 1e-9 || e.CostComplete == nil || !*e.CostComplete {
-				t.Fatalf("stored cost_usd %v cost_complete %v, want 0.464 true", e.CostUSD, e.CostComplete)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no model.responded stored")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-// The turns token is made once beside the main token, with mode 0600 and its
 // own prefix. It starts, stops and reads turns, and nothing else.
 func TestTurnsTokenMadeAndScoped(t *testing.T) {
 	home := t.TempDir()

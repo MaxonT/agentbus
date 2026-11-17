@@ -234,15 +234,6 @@ type Signin struct {
 // own header is replaced, never passed on. Call it before serving.
 func (g *Gateway) SetCredential(c Credential) { g.credential = c }
 
-// SetPlanSignin names the subscription to attribute plan usage to on a
-// -gateway local runner, whose calls carry none of control's: the machine's
-// own sign-in, keyed by its connector so control can tell it from a
-// subscription it holds. Call it before serving. Zero elsewhere.
-func (g *Gateway) SetPlanSignin(si Signin) { g.planSignin = si }
-
-// Vendor is this gateway's adapter's vendor, such as anthropic.
-func (g *Gateway) Vendor() string { return g.adapter.Vendor() }
-
 type credKey struct{}
 
 // credCall is what a call's Credential gave.

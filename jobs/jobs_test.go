@@ -124,11 +124,12 @@ func TestTokenScopes(t *testing.T) {
 		{a.Token, "POST", "/api/v0/runner/register", EnrollRequest{Name: "x", Capacity: 1, Protocol: ProtocolVersion}, 401},
 		{"abr_wrong", "POST", "/api/v0/runner/take", TakeRequest{Protocol: ProtocolVersion}, 401},
 		{enrollTok, "POST", "/api/v0/runner/register", EnrollRequest{Name: "x", Capacity: 1, Protocol: 99}, 400},
-		// A runner of the previous protocol, still running when control
-		// moved on: refused at its next take, so it never sends its copy of
-		// calls the relay records.
-		{a.Token, "POST", "/api/v0/runner/take", TakeRequest{Protocol: 2}, 400},
-		{enrollTok, "POST", "/api/v0/runner/register", EnrollRequest{Name: "x", Capacity: 1, Protocol: 2}, 400},
+		// A runner of protocol 4 is a pre-0.5.10 binary, the version an old
+		// -gateway local runner speaks. It is refused at register and at its
+		// next take, before any turn, so it never reaches the attempts/calls
+		// route (gone in 0.5.10) with a 404 mid-turn.
+		{a.Token, "POST", "/api/v0/runner/take", TakeRequest{Protocol: 4}, 400},
+		{enrollTok, "POST", "/api/v0/runner/register", EnrollRequest{Name: "x", Capacity: 1, Protocol: 4}, 400},
 		{enrollTok, "POST", "/api/v0/runner/register", EnrollRequest{Name: "x", Capacity: 65, Protocol: ProtocolVersion}, 400},
 	} {
 		if got := send(t, srv, c.tok, c.method, c.path, c.body, nil); got != c.want {

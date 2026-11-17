@@ -1,9 +1,9 @@
 package run
 
-// NoHomes is why a runner cannot sandbox a session when it gives sessions
-// no home of their own (Config.Homes is empty): the wall needs one. The
-// runner's sandbox report says it, and so does a turn's refusal.
-const NoHomes = "this runner gives sessions no home of their own (a runner with -gateway local runs them in this user's home)"
+// NoHomes is why a session cannot be sandboxed when it has no home of its own
+// (Config.Homes is empty, or a session from before homes): the wall needs one.
+// The runner's sandbox report says it, and so does a turn's refusal.
+const NoHomes = "this session has no home of its own, so it cannot be sandboxed"
 
 // NoAgent is why a turn that names no agent is refused: every turn names
 // the saved agent it runs on, a session's next turn too (his rule,

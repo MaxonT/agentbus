@@ -68,11 +68,6 @@ type Gateway struct {
 	// credential, when set, is where each call gets its credential
 	// (SetCredential); nil passes the agent's own on.
 	credential Credential
-	// planSignin names the subscription to attribute plan usage to when a
-	// call carries none of control's (SetPlanSignin): a -gateway local
-	// runner's own machine sign-in, keyed by its connector. Zero elsewhere,
-	// where a call that reads plan usage carries control's sign-in already.
-	planSignin Signin
 	// reads counts the credential reads made through holdThenRead, for the
 	// test that every path reads one that way.
 	reads atomic.Int64
@@ -244,11 +239,6 @@ type exchange struct {
 	session string
 	client  string
 	turn    string
-	// runTurn is the run turn the call arrived on (/t/<turn>), before any
-	// synthesized id and "" for a probe or a call with no run turn. readPlan
-	// uses it, never turn, so a -gateway local reading is read only for a call
-	// a turn can carry to control.
-	runTurn string
 	start   time.Time
 	// probe: the adapter marked the request as the harness's own check, so
 	// every event of the exchange carries Probe.
@@ -551,7 +541,6 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, session, runTurn
 		session: session,
 		client:  clientName(r.UserAgent()),
 		turn:    runTurn,
-		runTurn: runTurn,
 		start:   g.now(),
 		relayed: rl != nil,
 		checked: checked,
@@ -637,11 +626,9 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, session, runTurn
 					evs[i].Replayed = replayed
 				}
 			}
-			// A probe starts no turn and has no turn id, a run's included; its
-			// plan usage is read on no turn either, so it is never emitted or
-			// cached on a -gateway local runner (readPlan's runTurn).
+			// A probe starts no turn and has no turn id, a run's included.
 			if ex.probe {
-				ex.turn, ex.runTurn = "", ""
+				ex.turn = ""
 			}
 			g.emit(ex, evs)
 		}
@@ -687,7 +674,7 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 		g.serviceReplied(ex, resp.StatusCode)
 		return nil
 	}
-	g.readPlan(ex, ex.runTurn, resp.Header)
+	g.readPlan(ex, resp.Header)
 	status, header := resp.StatusCode, resp.Header.Clone()
 	// The guard reads the reply as the vendor sent it. The vendor is asked
 	// for no encoding (Accept-Encoding is dropped); a reply compressed anyway

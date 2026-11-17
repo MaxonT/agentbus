@@ -92,54 +92,6 @@ func TestRecordRoute(t *testing.T) {
 	}
 }
 
-// A runner's calls and replies are of its attempt's own turn: a call whose
-// exchange an earlier turn of the session carries is refused, and its reply
-// is not stored. Codex found it on the api04 round (evt_5193378050d8d465).
-func TestCallsOfAnotherTurnRefused(t *testing.T) {
-	q, err := queue.Open(filepath.Join(t.TempDir(), "jobs.db"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(filepath.Join(t.TempDir(), "events.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fr, _ := testFolders(t)
-	s, err := New(Config{Queue: q, Token: mainTok, EnrollToken: enrollTok, MaxWait: 200 * time.Millisecond, Folders: fr, Record: st})
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := httptest.NewServer(s)
-	t.Cleanup(func() { srv.Close(); q.Close(); st.Close() })
-	startFinisher(t, s)
-	a := enroll(t, srv, 1)
-	makeJob(t, q, queue.Spec{Harness: "claude", Folder: "/x", Prompt: "hi"})
-	var taken TakenWork
-	if code := send(t, srv, a.Token, "POST", "/api/v0/runner/take", TakeRequest{Protocol: ProtocolVersion}, &taken); code != 200 {
-		t.Fatalf("take: %d", code)
-	}
-	session := taken.Job.Session
-	// An earlier turn of the session made the call x_prior.
-	if _, _, err := st.Append(event.Event{ID: "evt_p", Kind: event.ModelRequested, Time: time.Now().UTC(), Session: session,
-		Turn: "t_prior", Exchange: "x_prior", Model: "m"}); err != nil {
-		t.Fatal(err)
-	}
-	path := "/api/v0/runner/attempts/" + taken.Attempt.ID + "/calls"
-	call := func(x string) SentCall {
-		return SentCall{Exchange: x, Session: session, Vendor: "anthropic", Time: time.Now().UTC(), Top: []byte(`{}`), Pieces: []SentPiece{}}
-	}
-	if code := send(t, srv, a.Token, "POST", path, CallBatch{Number: 1, Calls: []SentCall{call("x_prior")}}, nil); code != 400 {
-		t.Fatalf("a call of another turn: %d, want 400", code)
-	}
-	if _, found, _ := st.CallSession("x_prior"); found {
-		t.Fatal("the other turn's call was stored")
-	}
-	var ack CallAck
-	if code := send(t, srv, a.Token, "POST", path, CallBatch{Number: 1, Calls: []SentCall{call("x_own")}}, &ack); code != 200 || ack.Stored != 1 {
-		t.Fatalf("a call of its own turn: %d %+v", code, ack)
-	}
-}
-
 // A review's turn runs in the session control named for it when it made the
 // job (Links.ReviewSession): its record goes there and nowhere else. Each
 // case is a reproducer an earlier review round found.

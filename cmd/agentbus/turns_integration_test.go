@@ -195,39 +195,3 @@ func getJSON(t *testing.T, svc *service, tok, path string, v any) {
 		t.Fatalf("GET %s: %v", path, err)
 	}
 }
-
-// Traffic pointed at the gateway by hand, with no run, keeps the hash id:
-// on a gateway that passes the agent's own sign-in on, as a runner with
-// -gateway local does. agentbus up refuses it (a call's turn is its
-// token's).
-func TestHandPointedTrafficKeepsHashTurn(t *testing.T) {
-	home := t.TempDir()
-	svc := startService(t, home, "http://127.0.0.1:1")
-	for i := 0; i < 2; i++ {
-		resp, err := http.Post("http://"+svc.addr+"/s/byhand/v1/messages", "application/json",
-			strings.NewReader(`{"model":"claude-x","messages":[{"role":"user","content":"by hand"}]}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		io.ReadAll(resp.Body)
-		resp.Body.Close()
-	}
-	var evs []turnEvent
-	waitFor(t, "two replies", func() bool {
-		evs = turnEvents(t, svc.store, "byhand")
-		return count(evs, "model.responded") == 2
-	})
-	// A retry of the same conversation is the same turn: one id, one turn.started.
-	ids := map[string]bool{}
-	for _, e := range evs {
-		ids[e.Turn] = true
-	}
-	if len(ids) != 1 || ids[""] || count(evs, "turn.started") != 1 {
-		t.Fatalf("hand-pointed turn ids %v, %d turn.started", ids, count(evs, "turn.started"))
-	}
-	for id := range ids {
-		if !strings.HasPrefix(id, "t_") || len(id) != 18 {
-			t.Fatalf("hand-pointed turn id %q, want t_ and 16 hex characters", id)
-		}
-	}
-}

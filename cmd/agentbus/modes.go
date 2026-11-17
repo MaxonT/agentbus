@@ -43,34 +43,25 @@ const (
 	modeConnector = "connector"
 )
 
-// Where a runner's agents' model calls get their credential (agentbus runner
-// -gateway). The runner's own gateway records them either way.
+// gatewayServer is agentbus runner -gateway's only value, a no-op kept so
+// commands from before 0.5.10 keep working: every runner holds no secret and
+// gets its agents' credentials from control (jobs/relay.go). gatewayLocal is
+// refused at start (parse); its code was removed in 0.5.10.
 const (
-	// gatewayServer: the runner holds no secret. Its gateway sends each call
-	// on to the server's, which adds the credential (jobs/relay.go).
 	gatewayServer = "server"
-	// gatewayLocal: the call goes to the vendor with the sign-in or key of
-	// the runner's own machine, as before.
-	gatewayLocal = "local"
+	gatewayLocal  = "local"
 )
 
 // noSecrets: a process that runs turns whose agents' credentials come from
-// control: a runner of a server, through the server's relay, and agentbus
-// up, through its own. Only a runner with -gateway local uses its machine's
-// own sign-in and keys.
-func (c config) noSecrets() bool { return c.hasEngine() && c.gatewayMode != gatewayLocal }
+// control — a runner, through the server's relay, and agentbus up, through its
+// own. Every such process holds no secret: a runner gets its sign-ins from
+// control, not from the machine.
+func (c config) noSecrets() bool { return c.hasEngine() }
 
-// canSandbox is this process's sandbox report: whether a session's wall can
-// be built here, and why not. A runner that gives sessions no home of its
-// own (-gateway local: noSecrets is false) cannot, whatever the machine
-// can, since the wall needs the session's home: every walled turn would be
-// refused (engine.NoHomes), so it says so before any turn.
-func (c config) canSandbox() (bool, string) {
-	if !c.noSecrets() {
-		return false, engine.NoHomes
-	}
-	return sandbox.Can()
-}
+// canSandbox is this process's sandbox report: whether a session's wall can be
+// built here, and why not. Every runner gives each session a home of its own,
+// so the only limit is the machine's (sandbox.Can).
+func (c config) canSandbox() (bool, string) { return sandbox.Can() }
 
 // hasQueue: the service keeps the job queue (up, server).
 func (c config) hasQueue() bool { return c.mode != modeRunner }
@@ -87,7 +78,7 @@ func (c config) modeName() string {
 
 const usage = `usage: agentbus up     [-listen 127.0.0.1:8787] [-origin http://localhost:5173] [-replay=false] [-max-runs 4] [-open]
        agentbus server [-listen 127.0.0.1:8787] [-origin http://localhost:5173] [-replay=false]
-       agentbus runner -server URL [-gateway server|local] [-capacity 4] [-name NAME] [-folder DIR]... [-labels a,b] [-listen 127.0.0.1:0] [-replay=false]
+       agentbus runner -server URL [-capacity 4] [-name NAME] [-folder DIR]... [-labels a,b] [-listen 127.0.0.1:0] [-replay=false]
        agentbus login URL [runner's flags]   (on a machine, once: sign it in to the control at URL; approve it on the Runners page)
        agentbus version
 
@@ -146,7 +137,7 @@ func parse(args []string, home string, stderr io.Writer) (config, bool) {
 		labels = fl.String("labels", "", "words a job can ask for in spec.labels, comma-separated, such as gpu,docker; default agentbus")
 		server = fl.String("server", "", "the server's URL, such as http://192.168.1.10:8787 (required)")
 		runnerName = fl.String("name", "", "the runner's name; default the host name")
-		gatewayMode = fl.String("gateway", gatewayServer, "where agents' model calls get their credential: server (the server's gateway adds it; this runner holds no key or sign-in) or local (this machine's own sign-in and keys)")
+		gatewayMode = fl.String("gateway", gatewayServer, "kept for commands from before 0.5.10; server is the only value. A runner gets its agents' credentials from control, never from this machine")
 	}
 	if c.mode == modeRunner {
 		for _, a := range args[1:] {
@@ -184,12 +175,15 @@ func parse(args []string, home string, stderr io.Writer) (config, bool) {
 			return c, false
 		}
 		switch *gatewayMode {
-		case gatewayLocal, gatewayServer:
+		case gatewayServer:
+		case gatewayLocal:
+			fmt.Fprintln(stderr, gatewayLocalRemoved)
+			return c, false
 		default:
-			fmt.Fprintf(stderr, "%s: -gateway must be local or server\n", name)
+			fmt.Fprintf(stderr, "%s: -gateway server is the only value\n", name)
 			return c, false
 		}
-		c.server, c.runnerName, c.gatewayMode = *server, *runnerName, *gatewayMode
+		c.server, c.runnerName = *server, *runnerName
 		for _, f := range folderList {
 			if !filepath.IsAbs(f) || len(f) > 4096 {
 				fmt.Fprintf(stderr, "%s: -folder must be an absolute path\n", name)
@@ -214,6 +208,11 @@ func parse(args []string, home string, stderr io.Writer) (config, bool) {
 // since 0.5.1: control writes no enrollment token, and a machine joins only
 // by agentbus login, which the person approves.
 const enrollFileRemoved = "agentbus runner: -enroll-token-file was removed in 0.5.1: sign this machine in with agentbus login URL, and approve it on control's Runners page"
+
+// gatewayLocalRemoved is what agentbus runner -gateway local says since 0.5.10:
+// a runner holds no sign-in of its own. It gets its agents' credentials from
+// control, and runs each session in a home of its own, like every other runner.
+const gatewayLocalRemoved = "agentbus runner: -gateway local was removed in 0.5.10. A runner gets its agents' sign-ins from control: connect yours there (agentbus connect, or the cockpit's Agents). Run with -gateway server, or with no -gateway at all."
 
 // folderFlags is -folder, given once per folder.
 type folderFlags []string

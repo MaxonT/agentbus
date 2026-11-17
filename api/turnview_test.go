@@ -292,9 +292,11 @@ func TestRunnerProtocolDescribedApart(t *testing.T) {
 			}
 		}
 	}
-	// 19: the snapshot route is retired in 0.5.1.
-	if n != 19 {
-		t.Errorf("the runner protocol has %d operations, want 19", n)
+	// 18: the snapshot route is retired in 0.5.1, and the attempts/{id}/calls
+	// route in 0.5.10 with -gateway local (a runner sends no model calls of
+	// its own; the relay records them).
+	if n != 18 {
+		t.Errorf("the runner protocol has %d operations, want 18", n)
 	}
 	e := newEnv(t)
 	for p, want := range map[string]string{
