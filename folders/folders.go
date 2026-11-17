@@ -46,9 +46,10 @@ var (
 
 // CheckShape says why path cannot name a folder by its shape alone, or nil:
 // it must be an absolute path of at most MaxPath bytes. It touches no
-// filesystem, so the control plane may call it on its own thread (the
-// synchronous 400 for a bad path); existence and readability are Check's,
-// run on the folder's own machine through the folder job.
+// filesystem, so Register uses it to issue a reference without reading the
+// folder; existence and readability are Check's, run on the folder's own
+// machine through the folder job. The control plane cannot import this
+// package, so it makes the same synchronous shape check inline (api/runs.go).
 func CheckShape(path string) error {
 	if len(path) > MaxPath || !filepath.IsAbs(path) {
 		return ErrNotAbsolute

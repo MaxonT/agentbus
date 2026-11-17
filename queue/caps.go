@@ -347,7 +347,7 @@ func ResolveFolders(spec *Spec, f FolderIssuer) string {
 		}
 		ref, err := f.Register(*p.path)
 		if err != nil {
-			return "folder must be an absolute path to an existing directory, at most 4096 bytes"
+			return "folder must be an absolute path, at most 4096 bytes"
 		}
 		*p.ref, *p.path = ref, ""
 	}
