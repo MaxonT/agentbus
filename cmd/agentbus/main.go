@@ -631,7 +631,7 @@ func start(c config) (*service, error) {
 		}
 	}
 	acfg := api.Config{Store: st, Token: token, TurnsToken: turnsToken, Port: port, AnyHost: !loopback,
-		BaseURL: baseURL, Origin: c.origin, Hosts: c.hosts, Environ: c.environ, Folders: issuer, Build: build(debug.ReadBuildInfo()),
+		BaseURL: baseURL, Origin: c.origin, Hosts: c.hosts, Getenv: c.getenvOr(), Folders: issuer, Build: build(debug.ReadBuildInfo()),
 		Queue: q, Jobs: runnerJobs, Engine: eng, TurnWait: c.turnWait, Agents: saved, Settings: cfgStore, Subscriptions: logins,
 		Logf: svcLog.Printf}
 	if q != nil {

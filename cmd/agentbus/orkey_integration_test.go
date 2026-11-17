@@ -31,7 +31,7 @@ func TestRunnerUsesKeySetInSettings(t *testing.T) {
 	// Nothing set yet: the list says so.
 	code, raw := getAPI(t, ns.server, ns.tok, "/api/v0/subscriptions")
 	keep(raw)
-	if code != 200 || !strings.Contains(raw, `"openrouter_key":{"set":false}`) {
+	if code != 200 || !strings.Contains(raw, `"openrouter":{"set":false}`) {
 		t.Fatalf("before: %d %s", code, raw)
 	}
 	// A key that cannot be one is refused, and its words quote nothing.
@@ -50,23 +50,28 @@ func TestRunnerUsesKeySetInSettings(t *testing.T) {
 	}
 	code, raw = getAPI(t, ns.server, ns.tok, "/api/v0/subscriptions")
 	keep(raw)
-	if code != 200 || !strings.Contains(raw, `"openrouter_key":{"set":true,"set_at":`) {
+	if code != 200 || !strings.Contains(raw, `"openrouter":{"set":true,"set_at":`) {
 		t.Fatalf("after: %d %s", code, raw)
 	}
 	// An agent whose variable is not set anywhere has a key now.
 	code, ag := sendAPI(t, ns.server, ns.tok, "POST", "/api/v0/agents", map[string]any{"name": "DeepSeek", "harness": "claude",
 		"access": "openrouter", "model": "deepseek/deepseek-v4.1-flash", "key_env": "AB_TEST_UNSET_KEY"})
-	if code != http.StatusCreated || ag["key_set"] != true {
+	if code != http.StatusCreated {
 		t.Fatalf("create: %d %v", code, ag)
 	}
-	for _, p := range []string{"/api/v0/agents", "/api/v0/harnesses"} {
-		code, raw = getAPI(t, ns.server, ns.tok, p)
-		keep(raw)
-		// The OpenRouter agent's key; access api's key_set is the vendor's.
-		if code != 200 || !strings.Contains(raw, `"key_set":true`) || strings.Contains(raw, `"key_env":"AB_TEST_UNSET_KEY","key_set":false`) ||
-			strings.Contains(raw, `"key_env":"OPENROUTER_API_KEY","key_set":false`) {
-			t.Fatalf("%s: %d %s", p, code, raw)
-		}
+	// Whether a key is available is answered on subscriptions, the one place:
+	// the Settings key (api_keys.openrouter) covers this agent, whose key_env
+	// is not set in control's environment (env_keys). The harnesses view still
+	// shows a per-access key_set for the model picker.
+	code, raw = getAPI(t, ns.server, ns.tok, "/api/v0/subscriptions")
+	keep(raw)
+	if code != 200 || !strings.Contains(raw, `"openrouter":{"set":true,"set_at":`) || !strings.Contains(raw, `"AB_TEST_UNSET_KEY":false`) {
+		t.Fatalf("subscriptions: %d %s", code, raw)
+	}
+	code, raw = getAPI(t, ns.server, ns.tok, "/api/v0/harnesses")
+	keep(raw)
+	if code != 200 || !strings.Contains(raw, `"key_set":true`) {
+		t.Fatalf("harnesses: %d %s", code, raw)
 	}
 	j := queueTurn(t, ns.server, ns.tok, map[string]any{"agent": ag["id"], "folder_ref": ns.ref, "connector": ns.connector, "prompt": "hello"})
 	if jj := waitJob(t, ns.server, ns.tok, j.ID); jj.State != queue.Finished {
@@ -97,7 +102,12 @@ func TestRunnerUsesKeySetInSettings(t *testing.T) {
 	}
 	code, raw = getAPI(t, ns.server, ns.tok, "/api/v0/subscriptions")
 	keep(raw)
-	if !strings.Contains(raw, `"openrouter_key":{"set":false}`) {
+	// With the Settings key gone, subscriptions still answers "is a key
+	// available" correctly from the environment: the agent keyed only by
+	// key_env (AB_TEST_OR_KEY, set where control runs) reads set, and the one
+	// whose variable is unset (AB_TEST_UNSET_KEY) reads unset.
+	if !strings.Contains(raw, `"openrouter":{"set":false}`) ||
+		!strings.Contains(raw, `"AB_TEST_OR_KEY":true`) || !strings.Contains(raw, `"AB_TEST_UNSET_KEY":false`) {
 		t.Fatalf("after remove: %s", raw)
 	}
 	j3 := queueTurn(t, ns.server, ns.tok, map[string]any{"agent": envAg["id"], "folder_ref": ns.ref, "connector": ns.connector, "prompt": "hello"})

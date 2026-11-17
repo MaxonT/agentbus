@@ -9,7 +9,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/staysup/agentbus/agents"
@@ -166,18 +165,14 @@ func accessOptions(info harness.Info) []AccessOption {
 // in Settings, or name set, and not empty, in the service's environment.
 // Its value is never kept or sent.
 func (a *API) keySet(name string) bool {
-	if a.keptKeySet() {
-		return true
-	}
-	if a.cfg.Environ == nil || name == "" {
-		return false
-	}
-	for _, kv := range a.cfg.Environ() {
-		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
-			return v != ""
-		}
-	}
-	return false
+	return a.keptKeySet() || a.envSet(name)
+}
+
+// envSet says whether the environment variable name is set (non-empty) where
+// control runs. Names only; the value is never read out. GET /api/v0/subscriptions
+// uses it to answer "is a key available from the environment" (env_keys).
+func (a *API) envSet(name string) bool {
+	return a.cfg.Getenv != nil && name != "" && a.cfg.Getenv(name) != ""
 }
 
 // FolderList is the answer to GET /api/v0/folders.

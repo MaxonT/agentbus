@@ -89,7 +89,7 @@ func TestOpenRouterAgentTurnGoesThroughTheGateway(t *testing.T) {
 
 	code, ag := sendAPI(t, svc, tok, "POST", "/api/v0/agents", map[string]any{"name": "DeepSeek", "harness": "claude",
 		"access": "openrouter", "model": "deepseek/deepseek-v4.1-flash", "key_env": "AB_TEST_OR_KEY"})
-	if code != http.StatusCreated || ag["key_set"] != true {
+	if code != http.StatusCreated {
 		t.Fatalf("create: %d %v", code, ag)
 	}
 	id := ag["id"].(string)
@@ -208,7 +208,7 @@ func TestOpenRouterAgentWithoutKeyRefused(t *testing.T) {
 	tok := readToken(t, home)
 	code, ag := sendAPI(t, svc, tok, "POST", "/api/v0/agents", map[string]any{"name": "DeepSeek", "harness": "claude",
 		"access": "openrouter", "model": "deepseek/deepseek-v4.1-flash", "key_env": "AB_TEST_OR_KEY"})
-	if code != http.StatusCreated || ag["key_set"] != false {
+	if code != http.StatusCreated {
 		t.Fatalf("create: %d %v", code, ag)
 	}
 	before := svc.store.Last()

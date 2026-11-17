@@ -106,7 +106,7 @@ func TestUpAPIKeyOnlyOnRecordedCalls(t *testing.T) {
 				t.Fatalf("set the key: %d", code)
 			}
 			code, ag := sendAPI(t, svc, tok, "POST", "/api/v0/agents", map[string]any{"name": tc.harness + " on its key", "harness": tc.harness, "access": "api"})
-			if code != http.StatusCreated || ag["key_set"] != true {
+			if code != http.StatusCreated {
 				t.Fatalf("agent: %d %v", code, ag)
 			}
 			report, release := filepath.Join(t.TempDir(), "report"), filepath.Join(t.TempDir(), "release")

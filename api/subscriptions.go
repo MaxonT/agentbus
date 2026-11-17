@@ -22,10 +22,14 @@ import (
 
 // SubscriptionList is GET /api/v0/subscriptions.
 type SubscriptionList struct {
-	Subscriptions []SubscriptionState   `json:"subscriptions" doc:"One per harness whose subscription can be connected here."`
-	OpenRouterKey credentials.KeyStatus `json:"openrouter_key" doc:"Whether an OpenRouter key is set in Settings (PUT /api/v0/subscriptions/openrouter/key). Never the key."`
-	// APIKeys are the vendors' API keys, by name.
-	APIKeys map[string]credentials.KeyStatus `json:"api_keys" doc:"Whether each vendor's API key is set in Settings (PUT /api/v0/subscriptions/{name}/key), by its name: anthropic (claude), openai (codex) and gemini (agy). Never a key."`
+	Subscriptions []SubscriptionState `json:"subscriptions" doc:"One per harness whose subscription can be connected here."`
+	// APIKeys is the one place a stored key's "is it set" is answered, by
+	// name (openrouter included). Never a key.
+	APIKeys map[string]credentials.KeyStatus `json:"api_keys" doc:"Whether each vendor's key is set in Settings (PUT /api/v0/subscriptions/{name}/key), by its name: anthropic (claude), openai (codex), gemini (agy) and openrouter. Never a key."`
+	// EnvKeys answers "is a key available from the environment" for the
+	// variables saved agents name in key_env, so a cockpit can show a key-set
+	// dot without the agent carrying its own copy.
+	EnvKeys map[string]bool `json:"env_keys" doc:"For each environment variable a saved openrouter agent names in key_env (such as OPENROUTER_API_KEY), whether it is set where control runs, read at request time. Names only, never values. A key set in Settings (api_keys.openrouter) covers every openrouter agent regardless of this."`
 }
 
 // KeyInput is the body of PUT /api/v0/subscriptions/<name>/key.
@@ -282,11 +286,20 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 		out.Subscriptions = append(out.Subscriptions, s)
 	}
 	// A key file that cannot be read shows as not set: a turn then says why.
-	out.OpenRouterKey, _ = m.Store.KeyStatus(credentials.AccessOpenRouter)
+	// openrouter is one of the names, so it is in api_keys like the rest.
 	out.APIKeys = map[string]credentials.KeyStatus{}
 	for _, name := range credentials.KeyNames {
-		if name != credentials.AccessOpenRouter {
-			out.APIKeys[name], _ = m.Store.KeyStatus(name)
+		out.APIKeys[name], _ = m.Store.KeyStatus(name)
+	}
+	// env_keys: the variables saved openrouter agents name in key_env, and
+	// whether control's own environment holds each, read now. So the one
+	// place "is a key available" is answered is here, not a copy on each agent.
+	out.EnvKeys = map[string]bool{}
+	if a.cfg.Agents != nil {
+		for _, ag := range a.cfg.Agents.List() {
+			if ag.Access == harness.OpenRouter && ag.KeyEnv != "" {
+				out.EnvKeys[ag.KeyEnv] = a.envSet(ag.KeyEnv)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
