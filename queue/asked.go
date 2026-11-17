@@ -212,7 +212,11 @@ func (q *Queue) Deliver(team string, name func(id string) string, agent AgentOf)
 		if err != nil {
 			return n, err
 		}
-		spec := Spec{Session: j.Links.Asker.Session, Prompt: ResultPrompt(j, c, name)}
+		reply, err := q.replyOf(j)
+		if err != nil {
+			return n, err
+		}
+		spec := Spec{Session: j.Links.Asker.Session, Prompt: ResultPrompt(j, c, reply, name)}
 		why := ""
 		asking, err := q.JobByTurn(team, j.Links.Asker.Turn)
 		switch {
@@ -333,7 +337,7 @@ const MaxResultPrompt = 32 << 10
 // did the work, how it ended, where, what it changed (c), and its final reply,
 // or a review's verdict and findings. It says that AgentBus wrote it, not the
 // person. name gives a saved agent's name; nil names it by id.
-func ResultPrompt(j Job, c *workspace.Changes, name func(id string) string) string {
+func ResultPrompt(j Job, c *workspace.Changes, reply string, name func(id string) string) string {
 	r, _ := ReadResult(j.Result)
 	var b strings.Builder
 	what := "the turn you asked for"
@@ -408,7 +412,6 @@ func ResultPrompt(j Job, c *workspace.Changes, name func(id string) string) stri
 			b.WriteString("- (more; the list stops here)\n")
 		}
 	}
-	reply := firstOf(r.ReplyText, r.Reply)
 	if reply != "" {
 		b.WriteString("\nIts final reply:\n\n")
 		if len(reply) > MaxResultReply {
@@ -438,6 +441,18 @@ func firstOf(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// firstRunes is the first n characters of s.
+func firstRunes(s string, n int) string {
+	c := 0
+	for i := range s {
+		if c == n {
+			return s[:i]
+		}
+		c++
+	}
+	return s
 }
 
 func oneLine(s string) string {

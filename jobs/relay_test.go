@@ -24,6 +24,9 @@ func (c calls) AppendOnce(event.Event) (bool, error)            { return true, n
 func (c calls) KeepReply(body.Reply) error                      { return nil }
 func (c calls) Continuation(string) (store.Continuation, error) { return store.Continuation{}, nil }
 func (c calls) CallSession(x string) (string, bool, error)      { v, ok := c[x]; return v[0], ok, nil }
+func (c calls) TurnText(string, string) (string, string, bool, error) {
+	return "", "", false, nil
+}
 func (c calls) EventByID(string, string, string) (event.Event, bool, error) {
 	return event.Event{}, false, nil
 }

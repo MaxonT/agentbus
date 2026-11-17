@@ -110,6 +110,14 @@ func TestDeliver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The delivered reply is read from the record by the child's turn, not
+	// from a copy in its result.
+	q.ReadReplyWith(func(session, turn string) (string, error) {
+		if session == child.Session && turn == child.Turn {
+			return "the whole answer", nil
+		}
+		return "", nil
+	})
 	cj, ca := take(t, q, r)
 	if cj.ID != child.ID {
 		t.Fatalf("took %s, want the child", cj.ID)
@@ -120,7 +128,7 @@ func TestDeliver(t *testing.T) {
 	if n, err := q.Deliver(DefaultTeam, nil, nil); err != nil || n != 0 {
 		t.Fatalf("before the child ends: %d %v", n, err)
 	}
-	res := `{"session":"` + child.Session + `","state":"finished","reply":"short","reply_text":"the whole answer","folder":"/w/1",` +
+	res := `{"session":"` + child.Session + `","state":"finished","folder":"/w/1",` +
 		`"changes":{"count":2,"files":[{"path":"a.go","change":"modified"},{"path":"b.go","change":"added"}]}}`
 	if _, err := q.End(r.ID, ca.ID, ca.Number, Finish{Status: Finished, Result: json.RawMessage(res)}); err != nil {
 		t.Fatal(err)
@@ -181,18 +189,18 @@ func TestResultPrompt(t *testing.T) {
 	v := VerdictFail
 	p := ResultPrompt(Job{ID: "job_1", Kind: KindReview, State: Finished, Verdict: &v, Spec: Spec{AgentID: "codex", Model: "m-1"},
 		Findings: []Finding{{Severity: "P1", File: "a.go", Line: 3, Summary: "bad\nthing"}},
-		Result:   json.RawMessage(`{"session":"rs"}`)}, nil, func(id string) string { return map[string]string{"codex": "Codex"}[id] })
+		Result:   json.RawMessage(`{"session":"rs"}`)}, nil, "", func(id string) string { return map[string]string{"codex": "Codex"}[id] })
 	for _, want := range []string{"the review you asked for", "Agent: Codex (id codex, model m-1)", "Verdict: fail", "- P1 a.go:3 bad thing", "Session: rs"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("review prompt lacks %q:\n%s", want, p)
 		}
 	}
+	// The reply is read from the record and passed in; a reply past the cap is cut.
 	long := strings.Repeat("x", MaxResultReply+100)
-	b, _ := json.Marshal(map[string]string{"reply_text": long})
-	if p := ResultPrompt(Job{Kind: KindTurn, State: Finished, Result: b}, nil, nil); strings.Contains(p, long) || !strings.Contains(p, "cut here") {
+	if p := ResultPrompt(Job{Kind: KindTurn, State: Finished, Result: json.RawMessage(`{"session":"s"}`)}, nil, long, nil); strings.Contains(p, long) || !strings.Contains(p, "cut here") {
 		t.Error("a long reply was not cut")
 	}
-	p = ResultPrompt(Job{Kind: KindTurn, State: Failed, Reason: ReasonSetup, Result: json.RawMessage(`{"refused":"no such agent"}`)}, nil, nil)
+	p = ResultPrompt(Job{Kind: KindTurn, State: Failed, Reason: ReasonSetup, Result: json.RawMessage(`{"refused":"no such agent"}`)}, nil, "", nil)
 	if !strings.Contains(p, "failed (setup)") || !strings.Contains(p, "Error: no such agent") {
 		t.Errorf("refused prompt:\n%s", p)
 	}
@@ -345,7 +353,7 @@ func TestResultPromptBounded(t *testing.T) {
 		fs = append(fs, Finding{Severity: "P1", File: strings.Repeat("d/", 2000), Summary: strings.Repeat("y\x00", 5000)})
 	}
 	p := ResultPrompt(Job{Kind: KindReview, State: Finished, Verdict: &v, Findings: fs,
-		Result: json.RawMessage(`{"error":"` + strings.Repeat("e", 100000) + `"}`)}, nil, nil)
+		Result: json.RawMessage(`{"error":"` + strings.Repeat("e", 100000) + `"}`)}, nil, "", nil)
 	if len(p) > MaxResultPrompt+100 || strings.IndexByte(p, 0) >= 0 {
 		t.Fatalf("prompt of %d bytes, NUL %v", len(p), strings.IndexByte(p, 0) >= 0)
 	}

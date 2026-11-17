@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-	"unicode/utf8"
 
 	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/queue"
@@ -21,6 +20,11 @@ import (
 // Turn is one turn: what the record says of it, and what its job adds.
 type Turn struct {
 	store.Turn
+	// Prompt and Reply are the whole text, served only by GET /api/v0/turns/{id}
+	// (the single turn), read from the record at request time. The turn list
+	// leaves them empty: it carries facts only.
+	Prompt   string           `json:"prompt,omitempty" doc:"Only on GET /api/v0/turns/{id}: the person's whole words from the turn's turn.started. Absent on the turn list, and absent here when the turn has no prompt text. For a queued turn it is the prompt it was asked with."`
+	Reply    string           `json:"reply,omitempty" doc:"Only on GET /api/v0/turns/{id}: the whole text of the reply to the turn's last model call, read from the record. Absent on the turn list, and absent here while that reply has not come, when it carried no text, or when the turn has no calls."`
 	Kind     string           `json:"kind" doc:"turn, or review: a turn that reviews another, by POST /api/v0/turns/{id}/review."`
 	Reviews  string           `json:"reviews,omitempty" doc:"For a review: the turn it reviews."`
 	Verdict  *string          `json:"verdict,omitempty" doc:"For a review that has ended: pass, fail or unknown. Any P1 finding makes it fail."`
@@ -102,7 +106,6 @@ func (a *API) waiting(j queue.Job) Turn {
 	// No started: it has not started. asked says when it was asked for.
 	t := store.Turn{ID: j.Turn, Session: turnSession(j), Harness: sp.Harness, AgentID: sp.AgentID, Model: sp.Model,
 		State: queue.TurnState(j.State)}
-	t.Prompt, t.PromptTruncated = previewText(sp.Prompt)
 	// Who asked for it, as its turn.started will say once it starts. The
 	// job id stays out: it is the queue's, not the API's.
 	switch l := j.Links; {
@@ -125,21 +128,6 @@ func (a *API) waiting(j queue.Job) Turn {
 		v.Ahead, _ = a.turnsAhead(j.ID)
 	}
 	return v
-}
-
-// previewText is a prompt's first store.PromptPreviewRunes characters.
-func previewText(s string) (string, bool) {
-	if utf8.RuneCountInString(s) <= store.PromptPreviewRunes {
-		return s, false
-	}
-	n := 0
-	for i := range s {
-		if n == store.PromptPreviewRunes {
-			return s[:i], true
-		}
-		n++
-	}
-	return s, false
 }
 
 func firstNonEmpty(a, b string) string {
@@ -313,9 +301,24 @@ func (a *API) oneTurn(w http.ResponseWriter, r *http.Request, id string) (Turn, 
 		if j != nil && turnSession(*j) != list.Turns[0].Session {
 			j = nil
 		}
-		return a.view(list.Turns[0], j), true, nil
+		v := a.view(list.Turns[0], j)
+		// The single turn carries the whole prompt and reply, read from the
+		// record now; the list carries neither.
+		prompt, reply, ok, err := a.cfg.Store.TurnText(v.Session, v.ID)
+		if err != nil {
+			a.internal(w)
+			return Turn{}, false, err
+		}
+		if ok {
+			v.Prompt, v.Reply = prompt, reply
+		}
+		return v, true, nil
 	case j != nil:
-		return a.waiting(*j), true, nil
+		v := a.waiting(*j)
+		// A queued turn has no record yet: its whole prompt is the one it was
+		// asked with, from the job's spec.
+		v.Prompt = j.Spec.Prompt
+		return v, true, nil
 	}
 	writeError(w, http.StatusNotFound, noTurn)
 	return Turn{}, false, nil

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/staysup/agentbus/event"
 )
@@ -37,17 +36,13 @@ type Turn struct {
 	Harness string `json:"agent" doc:"From the turn's turn.started. Empty for a turn no run started."`
 	AgentID string `json:"agent_id,omitempty" doc:"From the turn's turn.started: the saved agent that ran it, as GET /api/v0/agents names it. Turns of one session may name different agents. Absent for a turn started by harness name alone, or no run started."`
 	Folder  string `json:"folder" doc:"From the turn's turn.started. Empty for a turn no run started."`
-	// Prompt is a preview: the list holds many turns, and one prompt can be
-	// 256 KiB (100 turns answered 26 MB).
-	Prompt          string `json:"prompt" doc:"The person's words from the turn's turn.started: the first 500 characters. The whole prompt is that turn.started's text, in GET /api/v0/sessions/{id}/events?turn={id}."`
-	PromptTruncated bool   `json:"prompt_truncated,omitempty" doc:"True when prompt was cut to its first 500 characters."`
-	// Reply, Model and ModelCalls let a list show a turn without its events.
-	// The last call is the turn's model.requested with the highest seq; its
-	// reply is the model.responded of the same exchange.
-	Reply          string `json:"reply" doc:"The text of the reply to the turn's last model call: the first 500 characters. Empty while that reply has not come, when it carried no text, or when the turn has no calls. The whole text is that model.responded's text, in GET /api/v0/sessions/{id}/events?turn={id}."`
-	ReplyTruncated bool   `json:"reply_truncated,omitempty" doc:"True when reply was cut to its first 500 characters."`
-	Model          string `json:"model" doc:"The model the turn's last model call asked for: its model.requested's model. Empty when the turn has no calls."`
-	ModelCalls     int    `json:"model_calls" doc:"How many model calls the turn made: its model.requested events."`
+	// Model and ModelCalls are facts a list carries about a turn's calls. The
+	// last call is the turn's model.requested with the highest seq; its reply
+	// is the model.responded of the same exchange. The whole prompt and reply
+	// are not in the list: GET /api/v0/turns/{id} serves them, read from the
+	// record at request time (api.Turn's prompt and reply).
+	Model      string `json:"model" doc:"The model the turn's last model call asked for: its model.requested's model. Empty when the turn has no calls."`
+	ModelCalls int    `json:"model_calls" doc:"How many model calls the turn made: its model.requested events."`
 	// StartedSeq orders turns and pages them.
 	StartedSeq int64      `json:"started_seq" doc:"The seq of the turn's turn.started. Send it as before for older turns."`
 	Started    time.Time  `json:"started,omitzero" doc:"When the turn started: the time of its turn.started. Absent until it starts; asked is when it was asked for."`
@@ -72,36 +67,12 @@ type Turn struct {
 	CostComplete bool         `json:"cost_complete" doc:"False when a reply lacks a complete cost, or a drop names the turn's session."`
 }
 
-// PromptPreviewRunes bounds a listed turn's prompt and reply, in characters
-// (runes).
-const PromptPreviewRunes = 500
-
 // TurnPageBytes bounds one page of turns, as encoded JSON rows. A page always
 // holds at least one turn, and next_before is set when the budget stops it.
-// Each row's size, prompt and reply previews included, is counted with a fixed
-// allowance for the fields the aggregate adds (usage, cost, ended, outcome).
+// The list carries no prompt or reply text, so a row is its facts and the
+// aggregate's fields (usage, cost, ended, outcome), covered by a fixed
+// allowance.
 const TurnPageBytes = 4 << 20
-
-// previewBytes is the most of a prompt or reply read for its preview: 500
-// runes of at most 4 bytes each.
-const previewBytes = PromptPreviewRunes * utf8.UTFMax
-
-// preview is the first PromptPreviewRunes runes of a text (a prompt or a
-// reply), from head, its first bytes, and total, its whole length in bytes. A
-// rune cut by the byte cap is left out. truncated is true when the preview is
-// shorter than the text.
-func preview(head []byte, total int64) (string, bool) {
-	n, runes := 0, 0
-	for n < len(head) && runes < PromptPreviewRunes {
-		r, size := utf8.DecodeRune(head[n:])
-		if r == utf8.RuneError && size <= 1 && !utf8.FullRune(head[n:]) {
-			break // a rune the byte cap cut in two
-		}
-		n += size
-		runes++
-	}
-	return string(head[:n]), int64(n) < total
-}
 
 // rowAllowance covers the fields filled after a row is counted.
 const rowAllowance = 512
@@ -157,11 +128,10 @@ func (s *Store) Turns(q TurnQuery) (TurnList, error) {
 		where += ` AND e.seq < ?`
 		args = append(args, q.Before)
 	}
-	args = append(args, q.Limit+1, hi, previewBytes, previewBytes)
-	// At most previewBytes of the prompt and of the reply are read, so a whole
-	// 256 KiB prompt never enters the list, then cut to runes in Go (preview).
-	// As a BLOB: SQLite's text substr and length stop at a NUL, which a prompt
-	// can hold.
+	args = append(args, q.Limit+1, hi)
+	// The list carries no prompt or reply text; the single turn serves them
+	// (api.Turn, store.TurnText). The reply is still paired here for its model
+	// and for the refusal status and error the list shows.
 	//
 	// The turn's last model call is its model.requested with the highest seq.
 	// Its reply is the model.responded with the same exchange, the first if
@@ -189,11 +159,7 @@ func (s *Store) Turns(q TurnQuery) (TurnList, error) {
 			COALESCE(json_extract(s.data, '$.agent'), ''), COALESCE(json_extract(s.data, '$.agent_id'), ''),
 			COALESCE(json_extract(s.data, '$.folder'), ''), COALESCE(json_extract(s.data, '$.idempotency_key'), ''),
 			COALESCE(json_extract(s.data, '$.origin'), ''),
-			substr(CAST(COALESCE(json_extract(s.data, '$.text'), '') AS BLOB), 1, ?),
-			length(CAST(COALESCE(json_extract(s.data, '$.text'), '') AS BLOB)),
 			u.calls, COALESCE(json_extract(q.data, '$.model'), ''),
-			substr(CAST(COALESCE(json_extract(r.data, '$.text'), '') AS BLOB), 1, ?),
-			length(CAST(COALESCE(json_extract(r.data, '$.text'), '') AS BLOB)),
 			COALESCE(json_extract(r.data, '$.status'), 0), COALESCE(json_extract(r.data, '$.error'), ''),
 			(SELECT COUNT(*) FROM events n WHERE n.session = s.session AND n.kind = 'turn.started' AND n.turn <> '' AND n.seq <= s.seq)
 		FROM u JOIN events s ON s.seq = u.seq
@@ -219,13 +185,12 @@ func (s *Store) Turns(q TurnQuery) (TurnList, error) {
 			break
 		}
 		var t Turn
-		var tm, promptLen, replyLen int64
-		var head, replyHead []byte
+		var tm int64
 		var origin string
 		var replyStatus int64
 		var replyErr string
 		if err := rows.Scan(&t.StartedSeq, &t.Session, &t.ID, &tm, &t.Harness, &t.AgentID, &t.Folder, &t.IdempotencyKey, &origin,
-			&head, &promptLen, &t.ModelCalls, &t.Model, &replyHead, &replyLen, &replyStatus, &replyErr, &t.Number); err != nil {
+			&t.ModelCalls, &t.Model, &replyStatus, &replyErr, &t.Number); err != nil {
 			rows.Close()
 			return list, fmt.Errorf("store: read turns: %w", err)
 		}
@@ -235,8 +200,6 @@ func (s *Store) Turns(q TurnQuery) (TurnList, error) {
 				t.Origin = &o
 			}
 		}
-		t.Prompt, t.PromptTruncated = preview(head, promptLen)
-		t.Reply, t.ReplyTruncated = preview(replyHead, replyLen)
 		t.Started = time.Unix(0, tm).UTC()
 		t.State = TurnRunning
 		if replyStatus != 0 && replyStatus != 200 {

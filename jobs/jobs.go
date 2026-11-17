@@ -153,6 +153,13 @@ func New(cfg Config) (*Server, error) {
 			c, err := Changes(rec, j)
 			return WorkspaceChanges(c), err
 		})
+		// The queue reads a review's author reply and an asked result's reply
+		// from the record, where the turn's reply lives once, in place of a
+		// copy in the result.
+		cfg.Queue.ReadReplyWith(func(session, turn string) (string, error) {
+			_, reply, _, err := rec.TurnText(session, turn)
+			return reply, err
+		})
 	}
 	s := &Server{cfg: cfg, token: sha256.Sum256([]byte(cfg.Token)), enrol: sha256.Sum256([]byte(cfg.EnrollToken)), mux: http.NewServeMux(),
 		tokenKey: sha256.Sum256([]byte("agentbus runner turn tokens\x00" + cfg.Token)), sealer: standInSealer(cfg.Token)}

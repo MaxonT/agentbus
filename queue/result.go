@@ -18,17 +18,17 @@ type Result struct {
 	Stopped    bool     `json:"stopped,omitempty"`
 	Unsettled  bool     `json:"unsettled,omitempty"`
 	Error      string   `json:"error,omitempty"`
-	Reply      string   `json:"reply,omitempty"`
 	ModelCalls int      `json:"model_calls,omitempty"`
 	CostUSD    *float64 `json:"cost_usd,omitempty"`
 	// Refused: why the turn did not start, and the status that says what
 	// kind (run.Refusal).
 	Refused string `json:"refused,omitempty"`
 	Status  int    `json:"status,omitempty"`
-	// ReplyText, for a review job and asked work: the whole text of the turn's
-	// last reply, at most runner.MaxReplyText bytes. The queue reads the
-	// verdict from it. Reply is only its first 500 characters.
-	ReplyText string `json:"reply_text,omitempty"`
+	// The turn's reply is not copied here: it lives once in the record (the
+	// model.responded event). A review's verdict and an asked result's reply
+	// are read from there by its turn (store.TurnText), and the single turn
+	// GET /api/v0/turns/{id} serves the whole reply.
+	//
 	// Folder and Changes: the job's workspace and what changed in it, set
 	// when the runner watched a folder.
 	Folder  string             `json:"folder,omitempty"`
