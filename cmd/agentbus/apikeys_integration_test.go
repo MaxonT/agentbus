@@ -35,14 +35,14 @@ func TestRunnerUsesAPIKeysSetInSettings(t *testing.T) {
 
 	code, raw := getAPI(t, ns.server, ns.tok, "/api/v0/subscriptions")
 	keep(raw)
-	if code != 200 || !strings.Contains(raw, `"api_keys":{"anthropic":{"set":false},"gemini":{"set":false},"openai":{"set":false}}`) {
+	if code != 200 || !strings.Contains(raw, `"api_keys":{"anthropic":{"set":false},"gemini":{"set":false},"openai":{"set":false},"openrouter":{"set":false}}`) {
 		t.Fatalf("before: %d %s", code, raw)
 	}
 	// One agent per harness on its vendor's API key.
 	ids := map[string]string{}
 	for _, h := range []string{"claude", "codex", "agy"} {
 		code, ag := sendAPI(t, ns.server, ns.tok, "POST", "/api/v0/agents", map[string]any{"name": h + " on its key", "harness": h, "access": "api"})
-		if code != http.StatusCreated || ag["key_set"] != false {
+		if code != http.StatusCreated {
 			t.Fatalf("create %s: %d %v", h, code, ag)
 		}
 		ids[h] = ag["id"].(string)
@@ -93,15 +93,16 @@ func TestRunnerUsesAPIKeysSetInSettings(t *testing.T) {
 			t.Fatalf("after: %s", raw)
 		}
 	}
-	if !strings.Contains(raw, `"openrouter_key":{"set":false}`) {
+	if !strings.Contains(raw, `"openrouter":{"set":false}`) {
 		t.Fatalf("a vendor key reads as the OpenRouter key: %s", raw)
 	}
-	for _, p := range []string{"/api/v0/agents", "/api/v0/harnesses"} {
-		code, raw = getAPI(t, ns.server, ns.tok, p)
-		keep(raw)
-		if code != 200 || !strings.Contains(raw, `"key_set":true`) {
-			t.Fatalf("%s: %d %s", p, code, raw)
-		}
+	// Whether a key is set is answered by GET /api/v0/subscriptions (api_keys,
+	// checked above), not the agent. The harnesses/models view still shows a
+	// per-access key_set for the model picker.
+	code, raw = getAPI(t, ns.server, ns.tok, "/api/v0/harnesses")
+	keep(raw)
+	if code != 200 || !strings.Contains(raw, `"key_set":true`) {
+		t.Fatalf("harnesses: %d %s", code, raw)
 	}
 
 	// claude: the key in x-api-key, no Authorization, at Anthropic's API.
