@@ -16,8 +16,8 @@ func TestRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !connectorShape(r.Connector()) {
-		t.Fatalf("connector %q", r.Connector())
+	if !connectorShape(r.Machine()) {
+		t.Fatalf("connector %q", r.Machine())
 	}
 	dir := t.TempDir()
 	ref, err := r.Register(dir)
@@ -34,7 +34,7 @@ func TestRegistry(t *testing.T) {
 		t.Fatalf("folders.json: %v %v", info.Mode(), err)
 	}
 	r2, err := Open(p)
-	if err != nil || r2.Connector() != r.Connector() {
+	if err != nil || r2.Machine() != r.Machine() {
 		t.Fatalf("reopened: %v", err)
 	}
 	if got, ok := r2.Path(ref); !ok || got != filepath.Clean(dir) {
@@ -145,5 +145,37 @@ func TestAddChecks(t *testing.T) {
 		if _, ok := r.Path(Ref(c.path)); ok != (c.want == nil) || (c.want == nil && ref != Ref(dir)) {
 			t.Errorf("Add(%s) registered %v, ref %q", c.path, ok, ref)
 		}
+	}
+}
+
+// compat 0.6: drop connector. A folders.json a build before 0.6 wrote holds
+// the machine id under "connector". Open reads it, and the next save writes
+// it under "machine" and drops the old key, so the name leaves after one
+// release without a runner losing its id.
+func TestOpenFoldsOldConnectorKey(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "folders.json")
+	const id = "con_0123456789abcdef"
+	if err := os.WriteFile(p, []byte(`{"connector":"`+id+`","folders":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(p)
+	if err != nil || r.Machine() != id {
+		t.Fatalf("read old key: machine %q, err %v", r.Machine(), err)
+	}
+	// A register saves; the file now names the id under machine, not connector.
+	if _, err := r.Register(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(b); !strings.Contains(s, `"machine":"`+id+`"`) || strings.Contains(s, `"connector"`) {
+		t.Fatalf("saved file still names connector or lost machine: %s", s)
+	}
+	// And it reopens from the new key alone.
+	r2, err := Open(p)
+	if err != nil || r2.Machine() != id {
+		t.Fatalf("reopen from machine key: %q %v", r2.Machine(), err)
 	}
 }

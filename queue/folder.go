@@ -27,7 +27,7 @@ func (q *Queue) RegisterFolder(team, machine, path string) (Job, error) {
 	// hands the job out before its path is here.
 	q.typedMu.Lock()
 	defer q.typedMu.Unlock()
-	job, _, err := q.create(team, KindFolder, "", Spec{Connector: machine}, Links{}, Limits{}, "")
+	job, _, err := q.create(team, KindFolder, "", Spec{Machine: machine}, Links{}, Limits{}, "")
 	if err != nil {
 		return Job{}, err
 	}
@@ -65,7 +65,7 @@ func (q *Queue) AskHome(team, machine string) (Job, error) {
 	if err := q.dropJobs(team, KindHome, `cancel = ?`, 1); err != nil {
 		return Job{}, err
 	}
-	job, _, err := q.create(team, KindHome, "", Spec{Connector: machine}, Links{}, Limits{}, "")
+	job, _, err := q.create(team, KindHome, "", Spec{Machine: machine}, Links{}, Limits{}, "")
 	return job, err
 }
 
@@ -88,8 +88,10 @@ func endFoldersTx(tx *sql.Tx, now time.Time) error {
 // Machines is the id of every machine of the team whose runner was seen
 // within RunnerFresh, sorted.
 func (q *Queue) Machines(team string) ([]string, error) {
-	rows, err := q.db.Query(`SELECT DISTINCT json_extract(caps, '$.connector') FROM runners WHERE team = ? AND seen >= ? AND removed IS NULL
-		AND COALESCE(json_extract(caps, '$.role'), '') = '' AND COALESCE(json_extract(caps, '$.connector'), '') != '' ORDER BY 1`,
+	// compat 0.6: drop connector. A runner of a build before 0.6 reports the
+	// id under the old key, so read machine then connector.
+	rows, err := q.db.Query(`SELECT DISTINCT COALESCE(json_extract(caps, '$.machine'), json_extract(caps, '$.connector')) FROM runners WHERE team = ? AND seen >= ? AND removed IS NULL
+		AND COALESCE(json_extract(caps, '$.role'), '') = '' AND COALESCE(json_extract(caps, '$.machine'), json_extract(caps, '$.connector'), '') != '' ORDER BY 1`,
 		team, nanos(q.now().Add(-RunnerFresh)))
 	if err != nil {
 		return nil, fmt.Errorf("queue: read runners: %w", err)

@@ -262,8 +262,8 @@ type Spec struct {
 	Access  string `json:"access,omitempty"`
 	KeyEnv  string `json:"key_env,omitempty"`
 	// Folder and Repo are paths, as a request names them. The control
-	// plane never keeps them: the folder's connector gives it a reference
-	// (FolderRef, RepoRef, and Connector, the connector that owns it), and
+	// plane never keeps them: the folder's machine gives it a reference
+	// (FolderRef, RepoRef, and Machine, the machine that owns it), and
 	// only the reference is stored. A job stored before references may
 	// still hold a path; the runner that takes it registers it.
 	Folder    string `json:"folder,omitempty"`
@@ -271,8 +271,11 @@ type Spec struct {
 	Isolate   bool   `json:"isolate,omitempty"`
 	Repo      string `json:"repo,omitempty"`
 	RepoRef   string `json:"repo_ref,omitempty"`
-	Connector string `json:"connector,omitempty"`
-	Base      string `json:"base,omitempty"`
+	// Machine is the only machine-id field. compat 0.6: drop connector. The
+	// old key is read and written only inside MarshalJSON/UnmarshalJSON, never
+	// as a struct field, so a caller cannot set the wrong one.
+	Machine string `json:"machine,omitempty"`
+	Base    string `json:"base,omitempty"`
 	// Labels: a runner takes the job only if it has every one.
 	Labels   []string `json:"labels,omitempty"`
 	Session  string   `json:"session,omitempty"`
@@ -292,12 +295,12 @@ type Spec struct {
 	// of it was applied before.
 	ApplyFrom string `json:"apply_from,omitempty"`
 	ApplyTo   string `json:"apply_to,omitempty"`
-	// Typed and TypedConnector: a new session's folder as the request typed
-	// it, and the connector it named. They are never stored; they only keep
+	// Typed and TypedMachine: a new session's folder as the request typed
+	// it, and the machine it named. They are never stored; they only keep
 	// the request's hash what was asked, so a retry with the same key gets
 	// its turn without its folder being checked again.
-	Typed          string `json:"-"`
-	TypedConnector string `json:"-"`
+	Typed        string `json:"-"`
+	TypedMachine string `json:"-"`
 	// AllowOnce are command lines a person allowed once on an earlier card
 	// (api/approvals.go, decision "once"): the continuation turn's gateway
 	// lets exactly these run, this turn only, and nothing is written to the
@@ -309,6 +312,40 @@ type Spec struct {
 // saved agent by its id, without what the control plane filled in from it.
 // A retry after the agent was edited then still matches, and gets the job
 // the first request made, with what was frozen then.
+// UnmarshalJSON reads a spec, taking the machine id from the old key when a
+// build before 0.6 wrote it there. compat 0.6: drop connector.
+func (spec *Spec) UnmarshalJSON(b []byte) error {
+	type raw Spec
+	var r raw
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	*spec = Spec(r)
+	if spec.Machine == "" {
+		var old struct {
+			Connector string `json:"connector"`
+		}
+		_ = json.Unmarshal(b, &old)
+		spec.Machine = old.Connector
+	}
+	return nil
+}
+
+// MarshalJSON writes the machine id under both keys. compat 0.6: drop
+// connector. The spec is sent to a runner in the take response, which a
+// runner of a build before 0.6 reads leniently (json.Unmarshal) and takes
+// the id from "connector"; a 0.6 runner takes it from "machine". The runner
+// wire, unlike the strict control decode, tolerates the extra key, so both
+// are safe to send. The old key retires here when 0.5 runners are no longer
+// served.
+func (spec Spec) MarshalJSON() ([]byte, error) {
+	type raw Spec
+	return json.Marshal(struct {
+		raw
+		Connector string `json:"connector,omitempty"`
+	}{raw(spec), spec.Machine})
+}
+
 func (spec Spec) asked() Spec {
 	a := spec
 	if a.AgentID != "" {
@@ -316,7 +353,7 @@ func (spec Spec) asked() Spec {
 	}
 	a.AgentID, a.Access, a.KeyEnv, a.AgentModel = "", "", "", ""
 	if a.Typed != "" {
-		a.Folder, a.FolderRef, a.Connector = a.Typed, "", a.TypedConnector
+		a.Folder, a.FolderRef, a.Machine = a.Typed, "", a.TypedMachine
 	}
 	if a.ModelFromAgent {
 		a.Model = ""

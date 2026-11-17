@@ -155,17 +155,17 @@ func (q *Queue) TreeSessions(team, root string) ([]string, error) {
 }
 
 // SessionFolder is the folder the session's first turn named, or its repo
-// for a worktree (repo true): its reference and its connector, or "" when
+// for a worktree (repo true): its reference and its machine, or "" when
 // it named none, or a path, as a job stored before references did.
-func (q *Queue) SessionFolder(team, session string) (ref, connector string, repo bool, err error) {
+func (q *Queue) SessionFolder(team, session string) (ref, machine string, repo bool, err error) {
 	sp, err := q.firstSpec(team, session)
 	if err != nil {
 		return "", "", false, err
 	}
 	if sp.FolderRef == "" && sp.RepoRef != "" {
-		return sp.RepoRef, sp.Connector, true, nil
+		return sp.RepoRef, sp.Machine, true, nil
 	}
-	return sp.FolderRef, sp.Connector, false, nil
+	return sp.FolderRef, sp.Machine, false, nil
 }
 
 // ReviewLinked is ReviewAs with links: for a review an agent asked for, its

@@ -46,9 +46,13 @@ const badRun = "the body must be one JSON object with prompt, agent and folder (
 type TurnRequest struct {
 	Session   string `json:"session,omitempty" doc:"A session the snapshot calls resumable: this turn is its next one. Absent: a new session."`
 	Agent     string `json:"agent,omitempty" doc:"A saved agent's id, from GET /api/v0/agents: its harness, access and model run the turn. A removed agent, a default one (claude, codex, agy) too, is refused: pick another. Required on every turn, a session's next one too (400 without it): a session keeps no agent of its own. The agent is read as it is when the turn is asked for, and its model is the turn's unless model is sent. A removed agent is refused: pick another. With session the turn runs in the session's folder. On the same harness as the latest turn the conversation continues by own replay; on another harness the turn gets the earlier turns as plain text (continuity transcript)."`
-	Folder    string `json:"folder,omitempty" doc:"An absolute path to a directory on the machine named in connector, that the user its runner runs as can read. Typing it is the grant for this session: that machine's runner checks it and registers it (agentbus up's own; on agentbus server the machine named in connector, or the only one online), and the session runs on that machine for its whole life. The queue keeps only the folder's reference, and GET /api/v0/folders lists the folder from then on. Without session, folder or folder_ref is required. With session it is the session's own; if sent it must match."`
+	Folder    string `json:"folder,omitempty" doc:"An absolute path to a directory on the machine named by machine, that the user its runner runs as can read. Typing it is the grant for this session: that machine's runner checks it and registers it (agentbus up's own; on agentbus server the machine named by machine, or the only one online), and the session runs on that machine for its whole life. The queue keeps only the folder's reference, and GET /api/v0/folders lists the folder from then on. Without session, folder or folder_ref is required. With session it is the session's own; if sent it must match."`
 	FolderRef string `json:"folder_ref,omitempty" doc:"A folder's reference, fld_ and 16 hex digits, from GET /api/v0/folders: the turn runs in that folder, on the runner of the machine that holds it. For a new session, instead of folder."`
-	Connector string `json:"connector,omitempty" doc:"The machine the session runs on (con_ and 16 hex digits): a runner's connector in GET /api/v0/runners, or a folder's in GET /api/v0/folders. Only the runner on that machine takes the session's work. With folder_ref: the machine that holds the folder. With folder: the machine whose runner checks and registers it. Absent: this service's own machine (agentbus up), or else the only one online; with several online, it is required for folder. The name is kept from before 0.5, when a connector held a machine's folders."`
+	Machine   string `json:"machine,omitempty" doc:"The machine the session runs on (con_ and 16 hex digits): a runner's machine in GET /api/v0/runners, or a folder's in GET /api/v0/folders. Only the runner on that machine takes the session's work. With folder_ref: the machine that holds the folder. With folder: the machine whose runner checks and registers it. Absent: this service's own machine (agentbus up), or else the only one online; with several online, it is required for folder."`
+	// compat 0.6: drop connector. A client of a build before 0.6 sends the
+	// machine under the old key; decode folds it into Machine when Machine
+	// is absent. Removed next release.
+	Connector string `json:"connector,omitempty" doc:"Deprecated alias of machine, read for one release. Send machine."`
 	Isolate   *bool  `json:"isolate,omitempty" doc:"True unless false, for a new session. True: the session runs in its own copy of folder, exactly as folder is now, uncommitted edits included, made as the isolation setting says (auto, overlay, copy, git or none). False: always folder as it is. Not sent with session."`
 	Prompt    string `json:"prompt" doc:"From 1 byte to 256 KiB, no NUL byte. Always passed after --."`
 	Model     string `json:"model,omitempty" doc:"Passed only as the value of --model, for this turn only. Absent: the named agent's model, as it is when the turn is asked for; an agent with none runs on its harness's own default."`
@@ -89,6 +93,13 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, badRun)
 		return
 	}
+	// compat 0.6: drop connector. A client before 0.6 names the machine
+	// under the old key; prefer machine, then read it. Code below reads
+	// Machine only.
+	if body.Machine == "" {
+		body.Machine = body.Connector
+	}
+	body.Connector = ""
 	// Only a body without session starts a new session. A session sent as
 	// "" or null is refused, never read as absent: that would start a new
 	// session in place of the one the caller meant.
@@ -134,8 +145,8 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "isolate is for a new session; a session keeps its own copy")
 			return
 		}
-		if body.FolderRef != "" || body.Connector != "" {
-			writeError(w, http.StatusBadRequest, "folder_ref and connector are for a new session; a session keeps its own folder")
+		if body.FolderRef != "" || body.Machine != "" {
+			writeError(w, http.StatusBadRequest, "folder_ref and machine are for a new session; a session keeps its own folder")
 			return
 		}
 		// Every turn names its agent, a next one too (his rule,
@@ -198,14 +209,14 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 		if spec.Model == "" && ag.Model != "" {
 			spec.Model, spec.ModelFromAgent = ag.Model, true
 		}
-		spec.Folder, spec.FolderRef, spec.Connector = body.Folder, body.FolderRef, body.Connector
+		spec.Folder, spec.FolderRef, spec.Machine = body.Folder, body.FolderRef, body.Machine
 		spec.Isolate = body.Isolate == nil || *body.Isolate
 		if body.Folder != "" && body.FolderRef == "" {
 			// A typed folder: its machine's runner checks and registers it, and the
 			// session goes on by its reference. A retry of a key already used
 			// is not checked again: the queue answers with the key's turn, or
 			// 409 when the request differs.
-			spec.Typed, spec.TypedConnector = body.Folder, body.Connector
+			spec.Typed, spec.TypedMachine = body.Folder, body.Machine
 			known := false
 			if body.IdempotencyKey != "" {
 				if known, err = a.cfg.Queue.HasKey(queue.DefaultTeam, body.IdempotencyKey); err != nil {
@@ -217,7 +228,7 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 			if !known {
 				var status int
 				var msg string
-				ref, conn, status, msg = a.typedFolder(r.Context(), body.Folder, body.Connector)
+				ref, conn, status, msg = a.typedFolder(r.Context(), body.Folder, body.Machine)
 				switch {
 				case status == 0 && msg != "":
 					return // the caller went away
@@ -229,7 +240,7 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			spec.Folder, spec.FolderRef, spec.Connector = "", ref, conn
+			spec.Folder, spec.FolderRef, spec.Machine = "", ref, conn
 		}
 		if msg := queue.ResolveFolders(&spec, a.cfg.Folders); msg != "" {
 			writeError(w, http.StatusBadRequest, msg)

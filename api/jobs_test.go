@@ -159,7 +159,7 @@ func TestRemovedRunnerRefusesNextTurnAndReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := e.q.Create(queue.DefaultTeam, queue.KindTurn, "", queue.Spec{Harness: "claude", Prompt: "p",
-		FolderRef: "fld_0123456789abcdef", Connector: machine, Isolate: true}, queue.Links{}); err != nil {
+		FolderRef: "fld_0123456789abcdef", Machine: machine, Isolate: true}, queue.Links{}); err != nil {
 		t.Fatal(err)
 	}
 	j, a, ok, _, err := e.q.Take(r.ID, time.Minute, false)

@@ -391,7 +391,7 @@ func (a *API) askChecks(w http.ResponseWriter, g run.Grant, perm settings.Policy
 	// path. Whether a path is inside a folder is for the folder's machine
 	// to say (queue.FolderIssuer). The new session names the same machine,
 	// so it runs where this one does.
-	ref, connector, repo, err := a.cfg.Queue.SessionFolder(queue.DefaultTeam, g.Session)
+	ref, machine, repo, err := a.cfg.Queue.SessionFolder(queue.DefaultTeam, g.Session)
 	if err != nil {
 		a.internal(w)
 		return queue.Links{}, false
@@ -405,7 +405,7 @@ func (a *API) askChecks(w http.ResponseWriter, g run.Grant, perm settings.Policy
 	// A remote runner holds the folder, and control holds no path of a remote
 	// session (jobs/record.go drops it), so a request that needs a path check
 	// is left to that machine, never answered from here.
-	local := a.cfg.Folders != nil && a.cfg.Folders.Connector() == connector
+	local := a.cfg.Folders != nil && a.cfg.Folders.Machine() == machine
 	switch {
 	case body.Folder == "" && body.FolderRef == "" && repo && local:
 		// A worktree's session: the new session works on the worktree as
@@ -422,18 +422,18 @@ func (a *API) askChecks(w http.ResponseWriter, g run.Grant, perm settings.Policy
 	case body.Folder == "" && body.FolderRef == "":
 		// The folder the person picked, so the new session gets a copy of
 		// its own beside this one, not inside it.
-		body.FolderRef, body.Connector = ref, connector
+		body.FolderRef, body.Machine = ref, machine
 	case body.FolderRef != "":
 		// A folder named by reference. It must be on the session's machine
-		// (connector), whichever machine that is. The same reference as the
+		// (machine), whichever machine that is. The same reference as the
 		// session's own folder is in scope with no path check, so it is
 		// allowed on a remote runner too. A different reference is inside the
 		// session's folder only if the folder's machine says so, which control
 		// can ask only when that machine is its own.
-		if body.Connector == "" {
-			body.Connector = connector
+		if body.Machine == "" {
+			body.Machine = machine
 		}
-		if body.Connector != connector {
+		if body.Machine != machine {
 			return refuse(turnFolderRefused)
 		}
 		if body.FolderRef != ref && (!local || !a.cfg.Folders.WithinRef(body.FolderRef, ref)) {
@@ -459,10 +459,10 @@ func (a *API) askChecks(w http.ResponseWriter, g run.Grant, perm settings.Policy
 	// A path was checked on this service's own machine, so it goes there
 	// and nowhere else: never to another machine.
 	if body.Folder != "" {
-		if body.Connector != "" && body.Connector != connector {
+		if body.Machine != "" && body.Machine != machine {
 			return refuse(turnFolderRefused)
 		}
-		body.Connector = connector
+		body.Machine = machine
 	}
 	return askedLinks(g), true
 }

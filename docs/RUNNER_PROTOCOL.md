@@ -101,9 +101,15 @@ gets 409 with `stale: true`, and the runner stops that turn.
 
 **One program per machine.** A runner holds its machine's folders and runs that machine's
 sessions. It reports its machine's id as `capabilities.connector` (`con_` and 16 hex digits, kept
-in `folders.json` in its data folder; the name is kept from before 0.5) and the folders it holds
-as `capabilities.folders`, by reference. **A job that names a machine (`spec.connector`) goes to
-that machine's runner and no other**, so a session runs on the machine that holds its folder for
+in `folders.json` in its data folder). The runner sends the id under the old key alone: control's
+runner-wire decode is strict, so a control of a build before 0.6 refuses an unknown `machine`
+field; a 0.6 control reads the id through either key (machine or connector). The id leaves this
+wire for `machine` next release, when runners of a build before 0.6 are no longer served. The
+other way, control sends a job's spec to a runner under both keys (the runner reads it leniently),
+so a runner of a build before 0.6 reads it from `connector` and a 0.6 runner from `machine`. The
+folders it holds it reports as `capabilities.folders`, by reference. **A job that names a machine
+(`spec.machine`) goes to that machine's runner and no other**, so a session runs on the machine
+that holds its folder for
 its whole life: its copy is made there from the folder, by clone or overlay (`sessions/<session>`
 in the runner's data folder; copies made before 0.4 stay in `worktrees/job_<id>`), its turns run
 there, and its changes are applied there. A next job of a session goes to the

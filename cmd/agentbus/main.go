@@ -1000,7 +1000,7 @@ func (s *service) startRunner(c config, self, enrollToken string, svcLog *logfil
 	if s.remote != nil {
 		s.remote.Enrolled(rn.ID(), rn.Token())
 	}
-	svcLog.Printf("runner.start id=%s capacity=%d machine=%s folders=%d", rn.ID(), capacity, s.folders.Connector(), len(s.folders.List(queue.MaxFolders)))
+	svcLog.Printf("runner.start id=%s capacity=%d machine=%s folders=%d", rn.ID(), capacity, s.folders.Machine(), len(s.folders.List(queue.MaxFolders)))
 	s.stopRunner = cancel
 	s.runnerDone = make(chan struct{})
 	wg.Add(1)

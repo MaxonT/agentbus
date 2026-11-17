@@ -75,7 +75,7 @@ func (r *Runner) folderWork(ctx context.Context, at *attempt) queue.Finish {
 		}
 		return applyFinish(queue.Failed, queue.ReasonSetup, res)
 	}
-	if r.cfg.FolderSide == nil || sp.Connector != r.cfg.Folders.Connector() {
+	if r.cfg.FolderSide == nil || sp.Machine != r.cfg.Folders.Machine() {
 		return refuse("this runner is not on the machine of the job's folder", nil)
 	}
 	if at.job.Kind == queue.KindFolder {

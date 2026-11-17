@@ -589,7 +589,7 @@ func TestFoldersTypedAtOnceAllListed(t *testing.T) {
 			if err := os.MkdirAll(fmt.Sprintf("%s-%d", p, round), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			j, err := w.q.RegisterFolder(queue.DefaultTeam, w.r.cfg.Folders.Connector(), fmt.Sprintf("%s-%d", p, round))
+			j, err := w.q.RegisterFolder(queue.DefaultTeam, w.r.cfg.Folders.Machine(), fmt.Sprintf("%s-%d", p, round))
 			if err != nil {
 				t.Fatal(err)
 			}

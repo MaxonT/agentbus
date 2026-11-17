@@ -222,7 +222,7 @@ func changesQueue(t *testing.T) (e *env, q *queue.Queue, r queue.Runner, session
 		t.Fatal(err)
 	}
 	j, _, err := q.Create(queue.DefaultTeam, queue.KindTurn, "", queue.Spec{Harness: "claude", FolderRef: "fld_0123456789abcdef",
-		Connector: con, Isolate: true, Prompt: "hi"}, queue.Links{})
+		Machine: con, Isolate: true, Prompt: "hi"}, queue.Links{})
 	if err != nil {
 		t.Fatal(err)
 	}

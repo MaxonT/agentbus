@@ -20,7 +20,7 @@ func TestFolderJob(t *testing.T) {
 		t.Fatalf("machines %v %v", got, err)
 	}
 	j, err := q.RegisterFolder(DefaultTeam, conA, "/home/me/code")
-	if err != nil || j.Kind != KindFolder || j.Spec.Folder != "" || j.Spec.Connector != conA || j.Turn != "" || j.Session != "" {
+	if err != nil || j.Kind != KindFolder || j.Spec.Folder != "" || j.Spec.Machine != conA || j.Turn != "" || j.Session != "" {
 		t.Fatalf("folder job %+v %v", j, err)
 	}
 	for _, r := range []Runner{plain, connB} {
@@ -120,7 +120,7 @@ func TestHomeJob(t *testing.T) {
 	connB := capsRunner(t, q, nil, &Capabilities{Connector: conB})
 	connA := capsRunner(t, q, nil, &Capabilities{Connector: conA})
 	j, err := q.AskHome(DefaultTeam, conA)
-	if err != nil || j.Kind != KindHome || j.Spec.Connector != conA || j.Session != "" {
+	if err != nil || j.Kind != KindHome || j.Spec.Machine != conA || j.Session != "" {
 		t.Fatalf("home job %+v %v", j, err)
 	}
 	if got := takesFolder(t, q, connB); got != "" {

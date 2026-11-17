@@ -82,10 +82,10 @@ func TestTypedFolderOnServer(t *testing.T) {
 	// Listed from now on, with the machine that holds it; the missing and
 	// refused paths were never registered.
 	var fs struct {
-		Folders []struct{ Ref, Name, Connector string }
+		Folders []struct{ Ref, Name, Machine string }
 	}
 	c.call("GET", "/api/v0/folders", nil, &fs)
-	if len(fs.Folders) != 1 || fs.Folders[0].Name != filepath.Base(folder) || !queue.ConnectorShape.MatchString(fs.Folders[0].Connector) {
+	if len(fs.Folders) != 1 || fs.Folders[0].Name != filepath.Base(folder) || !queue.ConnectorShape.MatchString(fs.Folders[0].Machine) {
 		t.Fatalf("folders after a typed path: %+v", fs.Folders)
 	}
 	if s := fileText(t, filepath.Join(connHome, "folders.json")); !strings.Contains(s, folder) || strings.Contains(s, missing) {
@@ -122,7 +122,7 @@ func TestTypedFolderOnServer(t *testing.T) {
 	startProc(t, bin, run2, bins, "runner", "-server", c.base, "-name", "run2", "-replay=false")
 	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
 		code, msg := post(missing)
-		if code == http.StatusBadRequest && msg == "2 machines are online; name the folder's machine as connector, from GET /api/v0/runners" {
+		if code == http.StatusBadRequest && msg == "2 machines are online; name the folder's machine as machine, from GET /api/v0/runners" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -130,7 +130,7 @@ func TestTypedFolderOnServer(t *testing.T) {
 		}
 	}
 	named := c.turn(map[string]any{"agent": "claude", "folder": folder, "prompt": "named", "isolate": true,
-		"connector": fs.Folders[0].Connector})
+		"machine": fs.Folders[0].Machine})
 	if named.Turn == "" {
 		t.Fatal("a turn naming its machine did not start")
 	}

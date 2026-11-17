@@ -284,9 +284,9 @@ func (x *xproc) do(method, path string, body any) (int, []byte) {
 
 // xFolder is one folder in GET /api/v0/folders.
 type xFolder struct {
-	Ref       string `json:"ref"`
-	Connector string `json:"connector"`
-	Name      string `json:"name"`
+	Ref     string `json:"ref"`
+	Machine string `json:"machine"`
+	Name    string `json:"name"`
 }
 
 func (x *xproc) folders() []xFolder {
@@ -382,7 +382,7 @@ func TestXProcRunnerForwardsRecord(t *testing.T) {
 	}
 
 	code, st := x.startTurnX(map[string]any{"agent": "claude", "folder_ref": fs[0].Ref,
-		"connector": fs[0].Connector, "prompt": "hello", "isolate": false})
+		"machine": fs[0].Machine, "prompt": "hello", "isolate": false})
 	if code/100 != 2 || st.Session == "" {
 		t.Fatalf("POST /api/v0/turns: %d %+v", code, st)
 	}
@@ -447,7 +447,7 @@ func TestXProcRunnerAgentAsksAnother(t *testing.T) {
 	fs := x.folders()
 
 	code, st := x.startTurnX(map[string]any{"agent": "claude", "folder_ref": fs[0].Ref,
-		"connector": fs[0].Connector, "prompt": "ask someone", "isolate": false})
+		"machine": fs[0].Machine, "prompt": "ask someone", "isolate": false})
 	if code/100 != 2 || st.Session == "" {
 		t.Fatalf("POST /api/v0/turns: %d %+v", code, st)
 	}
@@ -510,7 +510,7 @@ func TestXProcApprovalFromRunnerReachesControl(t *testing.T) {
 	fs := x.folders()
 
 	code, st := x.startTurnX(map[string]any{"agent": "claude", "folder_ref": fs[0].Ref,
-		"connector": fs[0].Connector, "prompt": "do a thing", "isolate": false})
+		"machine": fs[0].Machine, "prompt": "do a thing", "isolate": false})
 	if code/100 != 2 || st.Session == "" {
 		t.Fatalf("POST /api/v0/turns: %d %+v", code, st)
 	}
@@ -594,7 +594,7 @@ func TestXProcEachVendorPathReachesOnlyItsVendor(t *testing.T) {
 	fs := x.folders()
 	run := func(agent string) {
 		code, st := x.startTurnX(map[string]any{"agent": agent, "folder_ref": fs[0].Ref,
-			"connector": fs[0].Connector, "prompt": "hi", "isolate": false})
+			"machine": fs[0].Machine, "prompt": "hi", "isolate": false})
 		if code/100 != 2 || st.Session == "" {
 			t.Fatalf("%s turn: %d %+v", agent, code, st)
 		}
