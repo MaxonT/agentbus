@@ -36,7 +36,7 @@ import (
 	"github.com/staysup/agentbus/sandbox"
 )
 
-const loginUsage = "usage: agentbus login URL [agentbus runner's flags: -name NAME -folder DIR -labels a,b -capacity 4 -gateway server|local]\n" +
+const loginUsage = "usage: agentbus login URL [agentbus runner's flags: -name NAME -folder DIR -labels a,b -capacity 4]\n" +
 	"  URL is control's address, such as http://192.168.1.10:8787"
 
 // loginDeps is what agentbus login reaches outside itself, so a test can

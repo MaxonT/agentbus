@@ -151,6 +151,16 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		}
 		c.upstream = tu
 	}
+	// The same for codex's ChatGPT upstream, so a two-process test can point
+	// both vendors at fakes and prove each call reaches only its own.
+	if u := getenv("AGENTBUS_TEST_CHATGPT_UPSTREAM"); u != "" {
+		tu, err := url.Parse(u)
+		if err != nil || (tu.Scheme != "http" && tu.Scheme != "https") || tu.Host == "" || !loopbackHost(tu.Hostname()) {
+			own.Printf("AGENTBUS_TEST_CHATGPT_UPSTREAM must be a loopback http address")
+			return 1
+		}
+		c.chatgpt = tu
+	}
 	svc, err := start(c)
 	if err != nil {
 		own.Print(err)
@@ -236,7 +246,7 @@ type config struct {
 	mode string
 	// A runner's: the server's URL, the runner's name, and where its agents
 	// send model calls.
-	server, runnerName, gatewayMode string
+	server, runnerName string
 	// A runner's folders it owns (-folder), and its labels (-labels).
 	folders, labels []string
 }
@@ -774,17 +784,6 @@ func start(c config) (*service, error) {
 		// for a person, or run.
 		if eng != nil {
 			g.SetGuard(eng)
-		}
-	}
-	// A -gateway local runner's calls carry none of control's sign-ins, so a
-	// reply's plan-usage headers would otherwise be dropped. Attribute them to
-	// this machine's own sign-in, keyed by its connector so control can tell
-	// them from a subscription it holds (jobs/record.go guards it). Only the
-	// machine's own subscription gateways (anth, oai, gem) report it: an
-	// OpenRouter or API-key gateway is not a subscription sign-in.
-	if c.mode == modeRunner && c.gatewayMode == gatewayLocal && fr != nil {
-		for _, g := range []*gateway.Gateway{anth, oai, gem} {
-			g.SetPlanSignin(gateway.Signin{Subscription: g.Vendor(), Connection: fr.Connector()})
 		}
 	}
 	if claudeReplay != nil {

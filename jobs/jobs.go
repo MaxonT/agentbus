@@ -67,8 +67,13 @@ const (
 // of different builds never both record a call, or both leave it out. 4: one
 // runner per machine holds that machine's folders, takes their folder jobs
 // with take's folders, and is the only runner of a job that names its
-// machine; agentbus connector is retired.
-const ProtocolVersion = 4
+// machine; agentbus connector is retired. 5: -gateway local is retired, so
+// every runner holds no secret and gets its agents' credentials from control;
+// the runner sends no model calls of its own (the relay records every call),
+// and POST /api/v0/runner/attempts/{id}/calls is gone. A runner of protocol 4
+// (which an old -gateway local binary speaks) is refused at register and take,
+// before any turn, not with a 404 when it tries to send calls mid-turn.
+const ProtocolVersion = 5
 
 // Config is what the server needs.
 type Config struct {
@@ -166,7 +171,6 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/v0/runner/attempts/{id}/events", s.runner(s.events))
 	s.mux.HandleFunc("POST /api/v0/runner/attempts/{id}/finish", s.runner(s.finish))
 	s.mux.HandleFunc("POST /api/v0/runner/attempts/{id}/record", s.runner(s.record))
-	s.mux.HandleFunc("POST /api/v0/runner/attempts/{id}/calls", s.runner(s.calls))
 	s.mux.HandleFunc("POST /api/v0/runner/blobs", s.runner(s.blobsMissing))
 	s.mux.HandleFunc("POST /api/v0/runner/packs", s.runner(s.blobPack))
 	s.mux.HandleFunc("POST /api/v0/runner/packs/fetch", s.runner(s.blobFetch))

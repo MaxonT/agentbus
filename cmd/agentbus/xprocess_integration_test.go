@@ -35,6 +35,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/staysup/agentbus/jobs"
 )
 
 // agentbusBinary builds the real agentbus binary once per test run and returns
@@ -137,6 +139,22 @@ func startServerUpstream(t *testing.T, upstream string, harnesses ...string) *xp
 	return x
 }
 
+// startServerTwoUpstreams is startServerUpstream with both vendor upstreams
+// pointed at loopback fakes (AGENTBUS_TEST_UPSTREAM for Anthropic,
+// AGENTBUS_TEST_CHATGPT_UPSTREAM for ChatGPT), so a two-process test can prove
+// each vendor's calls reach only that vendor.
+func startServerTwoUpstreams(t *testing.T, anthropic, chatgpt string, harnesses ...string) *xproc {
+	t.Helper()
+	x := &xproc{t: t, bin: agentbusBinary(t), serverHome: t.TempDir()}
+	connectFake(t, x.serverHome, harnesses...)
+	env := append(os.Environ(), "AGENTBUS_HOME="+x.serverHome,
+		"AGENTBUS_TEST_UPSTREAM="+anthropic, "AGENTBUS_TEST_CHATGPT_UPSTREAM="+chatgpt)
+	addr := x.spawn(t, "server", []string{"server", "-listen", "127.0.0.1:0"}, env, reListening)
+	x.base = "http://" + addr
+	x.tok = readToken(t, x.serverHome)
+	return x
+}
+
 // addRunner signs a runner in to control (as agentbus login and the Runners
 // page do) and starts agentbus runner in its own process, owning folders and
 // running the fake agent off its PATH. It waits until the runner is listening,
@@ -159,36 +177,6 @@ func (x *xproc) addRunner(name string, folders ...string) {
 	)
 	env = append(env, x.agentEnv...)
 	args := []string{"runner", "-server", x.base, "-name", name}
-	for _, f := range folders {
-		args = append(args, "-folder", f)
-	}
-	x.spawn(t, "runner:"+name, args, env, reListening)
-	if len(folders) > 0 {
-		x.waitFolders(len(folders))
-	}
-}
-
-// addLocalRunner is addRunner for a -gateway local runner: its own gateway
-// reads the machine's sign-in and sends model calls to upstream (a loopback
-// fake vendor, via the hidden AGENTBUS_TEST_UPSTREAM), so its plan usage is the
-// machine's own, not control's.
-func (x *xproc) addLocalRunner(name, upstream string, folders ...string) {
-	t := x.t
-	t.Helper()
-	home := t.TempDir()
-	signInRunner(t, x.base, x.tok, home, name)
-	bin := fakeAgentDir(t)
-	env := append(os.Environ(),
-		"AGENTBUS_HOME="+home,
-		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"AGENTBUS_FAKE_AGENT=1",
-		"ANTHROPIC_BASE_URL=",
-		"OPENAI_BASE_URL=",
-		"CODEX_HOME="+t.TempDir(),
-		"AGENTBUS_TEST_UPSTREAM="+upstream,
-	)
-	env = append(env, x.agentEnv...)
-	args := []string{"runner", "-server", x.base, "-name", name, "-gateway", "local"}
 	for _, f := range folders {
 		args = append(args, "-folder", f)
 	}
@@ -565,59 +553,67 @@ func TestXProcApprovalFromRunnerReachesControl(t *testing.T) {
 	}
 }
 
-// A -gateway local runner reads its own machine's plan usage from a model
-// reply and forwards it to control's record, keyed to the runner's connector
-// so control can tell it from a subscription it holds (audit #6, rule 3:
-// across processes). The fake upstream on the runner (AGENTBUS_TEST_UPSTREAM)
-// returns a reply carrying claude's 7-day utilization header.
-func TestXProcLocalRunnerPlanUsageReachesControl(t *testing.T) {
+// Vendor isolation end to end across processes (rule 3): an agent's call
+// carries a stand-in the relay swaps for control's own sign-in and sends to
+// the one vendor the path names. A claude turn's model call reaches only the
+// Anthropic upstream and a codex turn's only the ChatGPT upstream, each with
+// control's credential (never the stand-in abs_ or the turn token abr_), and
+// neither reaches the other. Covers the isolation the retired -gateway local
+// codex tests checked, now on the one gateway path.
+func TestXProcEachVendorPathReachesOnlyItsVendor(t *testing.T) {
+	var mu sync.Mutex
+	var anthHits, cgHits []string // "path auth" per request
+	rec := func(dst *[]string, reply string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.ReadAll(r.Body)
+			mu.Lock()
+			*dst = append(*dst, r.URL.Path+" "+r.Header.Get("Authorization"))
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, reply)
+		}))
+	}
+	anth := rec(&anthHits, claudeReply)
+	cg := rec(&cgHits, codexReply)
+	defer anth.Close()
+	defer cg.Close()
+	snap := func(dst *[]string) []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), *dst...) }
+
 	folder := t.TempDir()
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.ReadAll(r.Body)
-		w.Header().Set("Anthropic-Ratelimit-Unified-7d-Utilization", "0.42")
-		w.Header().Set("Anthropic-Ratelimit-Unified-7d-Status", "allowed")
-		w.Header().Set("Anthropic-Ratelimit-Unified-7d-Reset", "1794762000")
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-x",`+
-			`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":1}}`)
-	}))
-	defer upstream.Close()
-
-	x := startServer(t, "claude")         // control; the local runner uses its own upstream
-	x.setAgentEnv("AGENTBUS_FAKE_CALL=1") // the agent makes one model call
-	x.addLocalRunner("local1", upstream.URL, folder)
+	x := startServerTwoUpstreams(t, anth.URL, cg.URL, "claude", "codex")
+	// A claude turn's agent makes one claude call (AGENTBUS_FAKE_CALL), a codex
+	// turn's one codex call (AGENTBUS_FAKE_CODEX_BODY). Each knob fires only for
+	// the harness whose vendor base URL the runner set, so neither agent makes
+	// the other's call.
+	x.setAgentEnv("AGENTBUS_FAKE_CALL=1",
+		`AGENTBUS_FAKE_CODEX_BODY={"model":"gpt-x","input":[{"type":"message","role":"user","content":"hi"}]}`)
+	x.addRunner("r", folder)
 	fs := x.folders()
-
-	code, st := x.startTurnX(map[string]any{"agent": "claude", "folder_ref": fs[0].Ref,
-		"connector": fs[0].Connector, "prompt": "do a thing", "isolate": false})
-	if code/100 != 2 || st.Session == "" {
-		t.Fatalf("POST /api/v0/turns: %d %+v", code, st)
+	run := func(agent string) {
+		code, st := x.startTurnX(map[string]any{"agent": agent, "folder_ref": fs[0].Ref,
+			"connector": fs[0].Connector, "prompt": "hi", "isolate": false})
+		if code/100 != 2 || st.Session == "" {
+			t.Fatalf("%s turn: %d %+v", agent, code, st)
+		}
 	}
 
-	waitFor(t, "the runner's plan usage on control, keyed to its connector", func() bool {
-		code, b := x.get("/api/v0/sessions/" + st.Session + "/events?kind=plan.usage")
-		if code != 200 {
-			return false
+	run("claude")
+	waitFor(t, "the claude call reached the Anthropic upstream", func() bool { return len(snap(&anthHits)) >= 1 })
+	run("codex")
+	waitFor(t, "the codex call reached the ChatGPT upstream", func() bool { return len(snap(&cgHits)) >= 1 })
+
+	a, c := snap(&anthHits), snap(&cgHits)
+	if len(a) != 1 || !strings.HasPrefix(a[0], "/v1/messages ") {
+		t.Fatalf("Anthropic upstream saw %v, want one /v1/messages", a)
+	}
+	if len(c) != 1 || !strings.Contains(c[0], "/backend-api/codex/responses") {
+		t.Fatalf("ChatGPT upstream saw %v, want one codex call", c)
+	}
+	// Each carried control's credential, never the stand-in or the turn token.
+	for _, got := range []string{a[0], c[0]} {
+		auth := strings.TrimPrefix(strings.Fields(got + " ")[1], "Bearer ")
+		if strings.HasPrefix(auth, jobs.StandInPrefix) || strings.HasPrefix(auth, "abr_") || auth == "" {
+			t.Fatalf("vendor saw %q: want control's credential, not a stand-in or turn token", got)
 		}
-		var page struct {
-			Events []struct {
-				Kind string `json:"kind"`
-				Plan *struct {
-					Subscription string  `json:"subscription"`
-					Connection   string  `json:"connection"`
-					UsedPercent  float64 `json:"used_percent"`
-				} `json:"plan"`
-			} `json:"events"`
-		}
-		if json.Unmarshal(b, &page) != nil {
-			return false
-		}
-		for _, e := range page.Events {
-			if e.Kind == "plan.usage" && e.Plan != nil && e.Plan.Connection == fs[0].Connector &&
-				e.Plan.Subscription == "anthropic" && e.Plan.UsedPercent == 42 {
-				return true
-			}
-		}
-		return false
-	})
+	}
 }
