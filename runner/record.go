@@ -50,6 +50,31 @@ const callBudget = jobs.MaxBody - 128<<10
 var relayOnly = map[event.Kind]bool{event.ReplayFailed: true, event.ToolRefused: true,
 	event.ApprovalRequested: true, event.CallRefused: true}
 
+// relayedCall is true for a call's event that control's relay records itself, so
+// a runner that holds no secret leaves it out of what it writes to control's
+// record: it carries an exchange and is not one of the few only a gateway makes
+// (relayOnly). The forwarding (forward, below) and agentbus up's built-in-runner
+// sink (SuppressRelayed) share this one rule, so it cannot drift between them.
+func relayedCall(kind event.Kind, hasExchange bool) bool {
+	return hasExchange && !relayOnly[kind]
+}
+
+// SuppressRelayed wraps next so it drops the call events control's relay records
+// (relayedCall), keeping only the few a gateway alone makes. agentbus up's
+// built-in runner shares control's record with the relay; without this, both
+// would record each call. A runner on another machine does the same by not
+// forwarding those events.
+func SuppressRelayed(next event.Sink) event.Sink { return relaySuppress{next} }
+
+type relaySuppress struct{ next event.Sink }
+
+func (r relaySuppress) Emit(e event.Event) {
+	if relayedCall(e.Kind, e.Exchange != "") {
+		return
+	}
+	r.next.Emit(e)
+}
+
 // LiveEvery is how often a running turn's new record goes to control, at
 // most.
 const LiveEvery = 300 * time.Millisecond
@@ -118,7 +143,7 @@ func (at *attempt) forward(ctx context.Context, session string, final bool) {
 		size, last, taken := 0, s.after, 0
 		var exch []string
 		for _, rec := range recs {
-			if at.r.cfg.NoSecrets && !relayOnly[rec.Kind] && hasExchange(rec.Data) {
+			if at.r.cfg.NoSecrets && relayedCall(rec.Kind, hasExchange(rec.Data)) {
 				// The relay recorded it.
 				last, taken = rec.Seq, taken+1
 				continue

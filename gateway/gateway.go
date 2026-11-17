@@ -151,10 +151,15 @@ func New(upstream *url.URL, a adapter.Adapter, sink event.Sink) *Gateway {
 			ex, ok := r.In.Context().Value(exchangeKey{}).(*exchange)
 			switch {
 			case ok && ex.call.NoCredential:
-				// A call that goes with no credential: control adds none,
-				// and the agent's placeholder goes too.
-				for _, h := range credentialHeaders {
-					r.Out.Header.Del(h)
+				// A call that goes with no credential: control adds none, and
+				// the agent's placeholder goes too — unless the next hop is
+				// control's relay (this gateway sends the exchange to it), which
+				// needs the turn's token to know the turn and strips it before
+				// the vendor itself.
+				if !(g.sendExchange && rl == nil) {
+					for _, h := range credentialHeaders {
+						r.Out.Header.Del(h)
+					}
 				}
 			default:
 				if rl != nil && rl.Header != nil {

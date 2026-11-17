@@ -138,6 +138,19 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	c.home, c.logf, c.self = home, own.Printf, self()
 	c.upstream, _ = url.Parse(upstream)
 	c.chatgpt, _ = url.Parse(chatgpt)
+	// A test points control's model upstream at a fake vendor on loopback, so a
+	// two-process test can make the gateway guard fire on a real reply. Read
+	// only from the environment, never a flag or in any help, usage or doc, and
+	// only a loopback address is taken: any other refuses the start, so a real
+	// sign-in or key can never be sent to another host.
+	if u := getenv("AGENTBUS_TEST_UPSTREAM"); u != "" {
+		tu, err := url.Parse(u)
+		if err != nil || (tu.Scheme != "http" && tu.Scheme != "https") || tu.Host == "" || !loopbackHost(tu.Hostname()) {
+			own.Printf("AGENTBUS_TEST_UPSTREAM must be a loopback http address")
+			return 1
+		}
+		c.upstream = tu
+	}
 	svc, err := start(c)
 	if err != nil {
 		own.Print(err)
@@ -638,34 +651,52 @@ func start(c config) (*service, error) {
 	if orURL == nil {
 		orURL, _ = url.Parse(openrouter)
 	}
-	// A runner that holds no secret sends each call on to the server's
-	// relay, which adds the credential and records the call in control's
-	// record (jobs/relay.go). It records the call here too, for its own
-	// record, and names each call's exchange to the relay. agentbus up's
-	// gateways go to the vendors themselves, and get each call's credential
-	// in this process, from the same answer the relay gives (below).
-	if c.mode == modeRunner && c.noSecrets() {
-		srv := strings.TrimSuffix(c.server, "/") + jobs.RelayPrefix
+	// A runner that holds no secret — agentbus up's built-in one too — sends
+	// each call to the relay, which adds the credential and records the call
+	// in control's record (jobs/relay.go), and names each call's exchange to
+	// the relay. The relay is control's: the server for a runner on another
+	// machine, and this process itself, on loopback, for up. One gateway path,
+	// so what works in up works across machines.
+	relayBase := ""
+	if c.noSecrets() {
+		switch c.mode {
+		case modeRunner:
+			relayBase = strings.TrimSuffix(c.server, "/")
+		case modeUp:
+			if runnerJobs != nil {
+				relayBase = baseURL
+			}
+		}
+	}
+	if relayBase != "" {
+		srv := relayBase + jobs.RelayPrefix
 		anthURL, orURL = mustParse(srv+relayAnthropic), mustParse(srv+relayOpenRouter)
 		chatURL, ccURL = mustParse(srv+relayChatGPT), mustParse(srv+relayCloudCode)
 	}
-	anth := gateway.New(anthURL, anthropic.Adapter{}, sink)
-	oai := gateway.New(chatURL, openai.Adapter{}, sink)
+	// up's built-in runner shares control's record with the relay. The relay
+	// records every call it carries, so up's own gateways must not record it a
+	// second time: they write through a sink that drops the call events the
+	// relay records, keeping only the few a gateway alone makes (the guard's
+	// and refusals). A runner on another machine, with a record of its own,
+	// keeps the full call and suppresses those events when it forwards.
+	var gwSink event.Sink = sink
+	if c.mode == modeUp && relayBase != "" {
+		gwSink = runner.SuppressRelayed(sink)
+	}
+	anth := gateway.New(anthURL, anthropic.Adapter{}, gwSink)
+	oai := gateway.New(chatURL, openai.Adapter{}, gwSink)
 	// agy's Code Assist calls, on its own Google sign-in: on this machine's
 	// sign-in, or, on a runner that holds no secret, the one connected on
 	// control, which the relay adds.
-	gem := gateway.New(ccURL, gemini.Adapter{}, sink)
+	gem := gateway.New(ccURL, gemini.Adapter{}, gwSink)
 	gws := []*gateway.Gateway{anth, oai, gem}
 	// An OpenRouter agent's calls, under /openrouter of its base URL: one
 	// gateway per API format, both to OpenRouter.
-	orAnth := gateway.New(orURL, anthropic.Adapter{}, sink)
-	orOAI := gateway.New(orURL, openai.Adapter{}, sink)
+	orAnth := gateway.New(orURL, anthropic.Adapter{}, gwSink)
+	orOAI := gateway.New(orURL, openai.Adapter{}, gwSink)
 	orAnth.SetPrefix(openRouterPrefix)
 	orOAI.SetPrefix(openRouterPrefix)
 	gws = append(gws, orAnth, orOAI)
-	// Each gateway's relay name: where control finds its calls' credential.
-	relayOf := map[*gateway.Gateway]string{anth: relayAnthropic, oai: relayChatGPT, gem: relayCloudCode,
-		orAnth: relayOpenRouter, orOAI: relayOpenRouter}
 	// An agent on its vendor's API key, under /key/<harness> of its base
 	// URL: to the vendor's API, or, on a runner that holds no secret, to
 	// control's relay, which adds the key set in Settings.
@@ -676,13 +707,12 @@ func start(c config) (*service, error) {
 			continue
 		}
 		u := c.apiKeyURL(h.Info())
-		if c.mode == modeRunner && c.noSecrets() {
-			u = mustParse(strings.TrimSuffix(c.server, "/") + jobs.RelayPrefix + relayAPIKey(h.Info().Name))
+		if relayBase != "" {
+			u = mustParse(relayBase + jobs.RelayPrefix + relayAPIKey(h.Info().Name))
 		}
-		g := gateway.New(u, formatAdapter(k.Format), sink)
+		g := gateway.New(u, formatAdapter(k.Format), gwSink)
 		g.SetPrefix(apiKeyPrefix(h.Info().Name))
 		gws = append(gws, g)
-		relayOf[g] = relayAPIKey(h.Info().Name)
 		keyed[apiKeyPrefix(h.Info().Name)] = g
 		if claudeReplay != nil {
 			switch k.Format {
@@ -705,6 +735,16 @@ func start(c config) (*service, error) {
 					settled = false
 				}
 			}
+			// up's built-in runner records its calls through the relay, which
+			// writes them off the reply's path too (gwSink drops them here): so
+			// its turn's end waits on the relay, as control's record handler
+			// waits for a runner on another machine (jobs/record.go).
+			if relayBase != "" && runnerJobs != nil {
+				if !runnerJobs.Settle(session, turn) {
+					svcLog.Printf("settle.relay_unconfirmed session=%s turn=%s", session, turn)
+					settled = false
+				}
+			}
 			return settled
 		})
 	}
@@ -718,11 +758,16 @@ func start(c config) (*service, error) {
 	for _, g := range gws {
 		g.KeepBodies(keep)
 		g.SetLog(svcLog.Printf)
-		if c.noSecrets() && c.mode == modeRunner {
+		if relayBase != "" {
 			g.SendExchange()
 		}
-		if c.mode == modeUp && c.noSecrets() && runnerJobs != nil {
-			g.SetCredential(runnerJobs.Local(relayOf[g]))
+		// up's built-in runner checks each call's turn at the gateway entrance,
+		// before it is processed or recorded: a token used on another turn's
+		// path is refused here (TurnGate). The relay adds the credential for the
+		// calls that pass; a runner on another machine sends the call to
+		// control's relay, which binds it to the token's turn and credentials it.
+		if c.mode == modeUp && relayBase != "" {
+			g.SetCredential(runnerJobs.TurnGate())
 		}
 		// The command rules of permissions.toml (allow, ask, forbid and the
 		// unlisted default), applied to each run turn's replies: refuse, hold
