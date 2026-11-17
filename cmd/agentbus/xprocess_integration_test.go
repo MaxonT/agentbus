@@ -180,7 +180,7 @@ func (x *xproc) addRunner(name string, folders ...string) {
 	for _, f := range folders {
 		args = append(args, "-folder", f)
 	}
-	x.spawn(t, "runner:"+name, args, env, reListening)
+	x.spawn(t, "runner:"+name, args, env, reRunnerReady)
 	if len(folders) > 0 {
 		x.waitFolders(len(folders))
 	}
@@ -191,6 +191,9 @@ func (x *xproc) addRunner(name string, folders ...string) {
 func (x *xproc) setAgentEnv(kv ...string) { x.agentEnv = append(x.agentEnv, kv...) }
 
 var reListening = regexp.MustCompile(`listening on http://([^,\s]+)`)
+
+// reRunnerReady is a runner's one start line.
+var reRunnerReady = regexp.MustCompile(`runner ready, taking jobs from (\S+)`)
 
 // spawn starts the binary in a mode, streams its stderr to the test log with a
 // tag, and waits until a line matches ready, returning its first capture. It
