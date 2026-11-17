@@ -168,6 +168,36 @@ func (x *xproc) addRunner(name string, folders ...string) {
 	}
 }
 
+// addLocalRunner is addRunner for a -gateway local runner: its own gateway
+// reads the machine's sign-in and sends model calls to upstream (a loopback
+// fake vendor, via the hidden AGENTBUS_TEST_UPSTREAM), so its plan usage is the
+// machine's own, not control's.
+func (x *xproc) addLocalRunner(name, upstream string, folders ...string) {
+	t := x.t
+	t.Helper()
+	home := t.TempDir()
+	signInRunner(t, x.base, x.tok, home, name)
+	bin := fakeAgentDir(t)
+	env := append(os.Environ(),
+		"AGENTBUS_HOME="+home,
+		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGENTBUS_FAKE_AGENT=1",
+		"ANTHROPIC_BASE_URL=",
+		"OPENAI_BASE_URL=",
+		"CODEX_HOME="+t.TempDir(),
+		"AGENTBUS_TEST_UPSTREAM="+upstream,
+	)
+	env = append(env, x.agentEnv...)
+	args := []string{"runner", "-server", x.base, "-name", name, "-gateway", "local"}
+	for _, f := range folders {
+		args = append(args, "-folder", f)
+	}
+	x.spawn(t, "runner:"+name, args, env, reListening)
+	if len(folders) > 0 {
+		x.waitFolders(len(folders))
+	}
+}
+
 // setAgentEnv adds AGENTBUS_FAKE_* knobs that each later runner passes to its
 // agent. Call it before addRunner.
 func (x *xproc) setAgentEnv(kv ...string) { x.agentEnv = append(x.agentEnv, kv...) }
@@ -533,4 +563,61 @@ func TestXProcApprovalFromRunnerReachesControl(t *testing.T) {
 	if _, b := x.get("/api/v0/approvals"); strings.Contains(string(b), id) {
 		t.Fatalf("the answered approval still lists:\n%s", b)
 	}
+}
+
+// A -gateway local runner reads its own machine's plan usage from a model
+// reply and forwards it to control's record, keyed to the runner's connector
+// so control can tell it from a subscription it holds (audit #6, rule 3:
+// across processes). The fake upstream on the runner (AGENTBUS_TEST_UPSTREAM)
+// returns a reply carrying claude's 7-day utilization header.
+func TestXProcLocalRunnerPlanUsageReachesControl(t *testing.T) {
+	folder := t.TempDir()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.ReadAll(r.Body)
+		w.Header().Set("Anthropic-Ratelimit-Unified-7d-Utilization", "0.42")
+		w.Header().Set("Anthropic-Ratelimit-Unified-7d-Status", "allowed")
+		w.Header().Set("Anthropic-Ratelimit-Unified-7d-Reset", "1794762000")
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-x",`+
+			`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	x := startServer(t, "claude")         // control; the local runner uses its own upstream
+	x.setAgentEnv("AGENTBUS_FAKE_CALL=1") // the agent makes one model call
+	x.addLocalRunner("local1", upstream.URL, folder)
+	fs := x.folders()
+
+	code, st := x.startTurnX(map[string]any{"agent": "claude", "folder_ref": fs[0].Ref,
+		"connector": fs[0].Connector, "prompt": "do a thing", "isolate": false})
+	if code/100 != 2 || st.Session == "" {
+		t.Fatalf("POST /api/v0/turns: %d %+v", code, st)
+	}
+
+	waitFor(t, "the runner's plan usage on control, keyed to its connector", func() bool {
+		code, b := x.get("/api/v0/sessions/" + st.Session + "/events?kind=plan.usage")
+		if code != 200 {
+			return false
+		}
+		var page struct {
+			Events []struct {
+				Kind string `json:"kind"`
+				Plan *struct {
+					Subscription string  `json:"subscription"`
+					Connection   string  `json:"connection"`
+					UsedPercent  float64 `json:"used_percent"`
+				} `json:"plan"`
+			} `json:"events"`
+		}
+		if json.Unmarshal(b, &page) != nil {
+			return false
+		}
+		for _, e := range page.Events {
+			if e.Kind == "plan.usage" && e.Plan != nil && e.Plan.Connection == fs[0].Connector &&
+				e.Plan.Subscription == "anthropic" && e.Plan.UsedPercent == 42 {
+				return true
+			}
+		}
+		return false
+	})
 }

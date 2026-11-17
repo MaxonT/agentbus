@@ -139,15 +139,36 @@ func samePlan(a, b event.Plan) bool {
 	return a.UsedPercent == b.UsedPercent && a.WindowMinutes == b.WindowMinutes && a.Status == b.Status
 }
 
-// readPlan stores the plan usage a reply to ex carries, when ex's call used
-// a subscription of control's. The event names the call it came from and
-// no session: the plan is the sign-in's, not a session's.
-func (g *Gateway) readPlan(ex *exchange, h http.Header) {
-	if ex.signin.Subscription == "" {
+// readPlan stores the plan usage a reply to ex carries, when the call used a
+// subscription of control's, or, on a -gateway local runner, the machine's
+// own sign-in (planSignin). A control reading names the call it came from and
+// no session: the plan is the sign-in's, not a session's. A local runner's
+// names the call's session and turn too, so the runner's turn-scoped
+// forwarding carries it to control; a call with no turn reads nothing.
+func (g *Gateway) readPlan(ex *exchange, runTurn string, h http.Header) {
+	si := ex.signin
+	// On a -gateway local runner the call carries none of control's sign-ins,
+	// so the reading is the machine's own (planSignin). Such a reading reaches
+	// control only inside the run turn whose forwarding carries it, so it names
+	// the call's session and that turn. runTurn is the run turn the call
+	// arrived on (/t/<turn>), before any synthesized id and "" for a probe or a
+	// call with no run turn — never ex.turn. With no run turn the reading is
+	// neither emitted nor cached, so a probe or non-turn call cannot leave an
+	// event the runner could not forward, nor fill the dedup cache and so lose
+	// the turn's own later reading. Control's own reading (relayed, up) is
+	// stored there directly and names neither session nor turn.
+	var session, turn string
+	if si.Subscription == "" {
+		if runTurn == "" {
+			return
+		}
+		si, session, turn = g.planSignin, ex.session, runTurn
+	}
+	if si.Subscription == "" {
 		return
 	}
 	now := g.now()
-	for _, p := range planReadings(h, ex.signin) {
+	for _, p := range planReadings(h, si) {
 		if !g.plans.changed(p, now) {
 			continue
 		}
@@ -155,6 +176,8 @@ func (g *Gateway) readPlan(ex *exchange, h http.Header) {
 			ID:       "e-" + g.run + "-" + strconv.FormatUint(g.seq.Add(1), 10),
 			Kind:     event.PlanUsage,
 			Time:     now,
+			Session:  session,
+			Turn:     turn,
 			Exchange: ex.id,
 			Vendor:   g.adapter.Vendor(),
 			Plan:     &p,

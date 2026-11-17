@@ -125,7 +125,9 @@ const (
 	// PlanUsage: how much of a subscription's plan is used in one of its
 	// windows, as the vendor said in a model reply's headers (gateway/plan.go).
 	// Plan holds the reading. Stored when the reading changes, and again
-	// at most every few minutes while it holds. No session.
+	// at most every few minutes while it holds. Control's own reading has no
+	// session; a -gateway local runner's own reading names the session and turn
+	// whose reply carried it, so the runner can forward it.
 	PlanUsage Kind = "plan.usage"
 )
 
@@ -179,7 +181,7 @@ var Kinds = []KindInfo{
 	{TurnApplied, "An apply of the session's turns to the person's folder ended (POST /api/v0/turns/{id}/apply): turn is the turn asked for, and applied holds every turn whose changes it carried, who asked (by: the person or an agent, never a token), the result (applied, refused or failed), the files written or removed, and on a refusal the files that refused it, each with why. Stored once per apply. Show a refusal as a warning.", []string{"session", "turn", "applied"}},
 	{PlanUsage, "How much of a subscription's plan is used in one of its windows, as the vendor said in the headers of a model reply that carried control's credential for that subscription: plan holds the subscription (the harness, such as claude), the connect its credential came from, the window, its length in minutes, the percent used, when it resets and the vendor's status word. " +
 		"exchange names the call it was read from. Stored when the reading changes, and again every 10 minutes at most while calls keep it the same. " +
-		"The latest per subscription, connect and window is kept; GET /api/v0/subscriptions shows those of the subscription's current connect. Only control's own gateway stores it: a runner's record is refused it. Read from a fixed list of the vendor's usage headers only; no other header. No session.", []string{"plan"}},
+		"The latest per subscription, connect and window is kept; GET /api/v0/subscriptions shows those of the subscription's current connect. Control's own gateway stores it from a call that carried control's credential; a -gateway local runner reports its own machine's, keyed by its connector so control can tell it from a subscription control holds (the runner's record is refused any other). Read from a fixed list of the vendor's usage headers only; no other header. On a runner's own, the session and turn whose reply carried it; otherwise no session.", []string{"plan"}},
 	{SessionRenamed, "The session was given a name with PATCH /api/v0/sessions/{id}: title is the new name, old_title the one it had before (absent when it had none). The latest names the session in GET /api/v0/sessions; earlier names stay in the record.", []string{"session", "title"}},
 }
 
@@ -466,8 +468,8 @@ type ChangedFile struct {
 // Plan is one reading of a subscription's plan usage in one window, from a
 // model reply's headers.
 type Plan struct {
-	Subscription string `json:"subscription" doc:"The subscription the call used: the harness whose sign-in control added, such as claude or codex."`
-	Connection   string `json:"connection,omitempty" doc:"Names the connect of the subscription the call's credential came from: its connected_at. A reading is shown only while that connect is current, so a reply on an earlier sign-in never shows under a newer one."`
+	Subscription string `json:"subscription" doc:"The subscription the call used: the harness whose sign-in control added, such as claude or codex. On a -gateway local runner, which reads its own machine's sign-in, it is that gateway's vendor, such as anthropic."`
+	Connection   string `json:"connection,omitempty" doc:"Names the connect of the subscription the call's credential came from: its connected_at. A reading is shown only while that connect is current, so a reply on an earlier sign-in never shows under a newer one. On a -gateway local runner it is the runner's connector, so control can tell a machine's own reading from a subscription control holds."`
 	Window       string `json:"window" doc:"The vendor's name for the window: 5h or 7d for claude, primary or secondary for codex."`
 	// WindowMinutes is the window's length: fixed for claude's named
 	// windows, as codex says for its own.

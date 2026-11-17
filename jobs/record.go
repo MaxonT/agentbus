@@ -28,19 +28,21 @@ type RecordBatch struct {
 
 // RunnerKinds are the event kinds a runner may send in a RecordBatch: those
 // its run engine (run/), its gateway and adapters, and its replay write for
-// a turn. Every other kind is control's own and is refused: events.dropped
-// (the store's, marking other sessions'), turn.changed and turn.applied
-// (control's record of a job's end, outcome.go), plan.usage (control's
-// reading of a subscription it holds, gateway/plan.go), tools.listed
-// (control's tool server), session.renamed (the API), control's operations
-// in no session, the retired kinds, and a program's x.* kinds.
+// a turn. plan.usage is taken too, but only a -gateway local runner's own
+// machine reading, and record() guards it (it must name the runner's own
+// connector, so it cannot override a subscription control holds). Every other
+// kind is control's own and is refused: events.dropped (the store's, marking
+// other sessions'), turn.changed and turn.applied (control's record of a job's
+// end, outcome.go), tools.listed (control's tool server), session.renamed (the
+// API), control's operations in no session, the retired kinds, and a program's
+// x.* kinds.
 var RunnerKinds = map[event.Kind]bool{
 	event.TurnStarted: true, event.ModelRequested: true, event.ModelResponded: true,
 	event.ToolRequested: true, event.ToolCompleted: true, event.TurnCompleted: true,
 	event.SessionOpened: true, event.SessionClosed: true, event.ContextAdded: true,
 	event.NetworkRefused: true, event.SchemaUnexpected: true, event.ReplayFailed: true,
 	event.ToolRefused: true, event.CallRefused: true, event.VendorCalled: true,
-	event.ApprovalRequested: true,
+	event.ApprovalRequested: true, event.PlanUsage: true,
 }
 
 // RecordAck answers a RecordBatch: how many events were new.
@@ -227,6 +229,17 @@ func (s *Server) record(w http.ResponseWriter, r *http.Request, rn queue.Runner)
 		if !RunnerKinds[e.Kind] {
 			fail(w, http.StatusBadRequest, string(e.Kind)+" is not an event a runner sends")
 			return
+		}
+		// A runner's plan.usage is its own machine's subscription only: it must
+		// name the runner's connector as its connect, so it can never override a
+		// subscription control holds (those name a cockpit connect, never a
+		// connector). A forged reading for another subscription carries no such
+		// connect, so the batch is refused whole.
+		if e.Kind == event.PlanUsage {
+			if e.Plan == nil || rn.Caps == nil || e.Plan.Connection == "" || e.Plan.Connection != rn.Caps.Connector {
+				fail(w, http.StatusBadRequest, "a runner's plan.usage must be its own machine's: plan.connection is the runner's connector")
+				return
+			}
 		}
 		e.Seq, e.Folder = 0, ""
 		evs = append(evs, e)

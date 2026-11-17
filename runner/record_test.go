@@ -258,6 +258,44 @@ func TestForwardLeavesRelayedCallsToControl(t *testing.T) {
 	}
 }
 
+// A -gateway local runner (it holds secrets) forwards its own machine's
+// plan.usage to control: readPlan names the call's session and turn, so
+// forward's turn-scoped paging selects it. A -gateway server runner (no
+// secrets) suppresses it with the other relayed-call events (it carries an
+// exchange and is not in relayOnly), so control's own reading stands alone.
+func TestForwardSendsOwnMachinePlanUsage(t *testing.T) {
+	for _, noSecrets := range []bool{false, true} {
+		st, err := store.Open(filepath.Join(t.TempDir(), "events.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now().UTC()
+		if err := st.KeepCall(body.Call{Exchange: "x-run-9", Session: "s1", Vendor: "anthropic", Time: now, Size: 2,
+			Request: body.Request{Top: json.RawMessage(`{}`), Pieces: []body.Piece{{Kind: body.Message, Label: "user", JSON: json.RawMessage(`{"a":1}`)}}}}); err != nil {
+			t.Fatal(err)
+		}
+		e := event.Event{ID: "plan-own", Kind: event.PlanUsage, Exchange: "x-run-9", Time: now, Session: "s1", Turn: "t_1",
+			Vendor: "anthropic", Plan: &event.Plan{Subscription: "anthropic", Connection: "con_0123456789abcdef", Window: "7d", WindowMinutes: 7 * 24 * 60, UsedPercent: 50}}
+		if _, _, err := st.Append(e); err != nil {
+			t.Fatal(err)
+		}
+		fc := &fakeControl{events: map[string]bool{}, calls: map[string]jobs.SentCall{}, replies: map[string]jobs.ReplyRecord{}}
+		srv := httptest.NewServer(fc)
+		r := &Runner{cfg: Config{Queue: srv.URL, Store: st, Forward: true, NoSecrets: noSecrets, Logf: t.Logf}, short: srv.Client(), token: "tok"}
+		at := &attempt{r: r}
+		at.a.ID, at.a.Number = "t_1", 1
+		at.forward(context.Background(), "s1", true)
+		srv.Close()
+		st.Close()
+		if noSecrets && fc.events["plan-own"] {
+			t.Errorf("no secrets: a -gateway server runner forwarded plan.usage")
+		}
+		if !noSecrets && !fc.events["plan-own"] {
+			t.Errorf("own sign-in: a -gateway local runner did not forward its own plan.usage")
+		}
+	}
+}
+
 // approval.requested carries an exchange, so it is forwarded to control even in
 // no-secrets mode (else a remote runner's ask never reaches control).
 func TestRelayOnlyHasApprovalRequested(t *testing.T) {
