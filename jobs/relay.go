@@ -82,6 +82,12 @@ func gatewayFor(gs []*gateway.Gateway, method, path string) *gateway.Gateway {
 // sent the end. Under the runner's own wait for the answer.
 const SettleWait = 5 * time.Second
 
+// Settle waits until every call of (session, turn) the relay carried is
+// recorded. agentbus up's built-in runner shares this relay, so the end of
+// its turn waits on it, as control's record handler does for a runner on
+// another machine (jobs/record.go).
+func (s *Server) Settle(session, turn string) bool { return s.settle(session, turn) }
+
 // settle waits until every call of (session, turn) the relay carried is
 // recorded, at most SettleWait; false when it could not confirm that.
 func (s *Server) settle(session, turn string) bool {
@@ -226,17 +232,21 @@ func refusal(status int, why string) *gateway.Refusal {
 	return &gateway.Refusal{Status: status, ContentType: "application/json", Body: b}
 }
 
-// Local is the credential for the calls of the relay's upstream name made
-// through a gateway in this process: agentbus up's own runner's agents.
-// It is the relay's own answer (turnCredential) with no hop over HTTP, so
-// the gateway records each call once, as it does every call it carries. A
-// call's session and turn are its token's job's (Turn), never its path's.
-func (s *Server) Local(name string) gateway.Credential {
-	up, ok := s.cfg.Relay[name]
+// TurnGate is agentbus up's gateway entrance check. It refuses a call whose
+// path names another turn than its token's, or whose token is no running
+// turn's, before the gateway processes or records it — so a token used on
+// another turn's path leaves no record and gets no credential. It adds no
+// credential of its own: the agent's placeholder passes through to control's
+// relay over loopback, which swaps it for the real one on the calls that pass
+// (the relay above). It keeps the turn check of the in-process Local credential
+// retired in 0.5.10, without Local's in-process injection, which would have
+// recorded each call a second time beside the relay. The path check runs only
+// here, on up, where the turn is in this process's own queue; a runner on
+// another machine binds a call to its token's turn at the relay instead.
+func (s *Server) TurnGate() gateway.Credential {
 	return gateway.Credential{
-		// A call's session and turn are its token's job's: a path that names
-		// another, or no running turn's token, is refused before the
-		// gateway records anything.
+		// A path that names another turn than the token's, or no running turn's
+		// token, is refused here, before the gateway records anything.
 		Turn: func(r *http.Request, session, turn string) *gateway.Refusal {
 			j, _, found := s.turnJob(callToken(r))
 			switch {
@@ -247,16 +257,11 @@ func (s *Server) Local(name string) gateway.Credential {
 			}
 			return nil
 		},
-		Read: func(r *http.Request) (func(http.Header), gateway.Signin, *gateway.Refusal) {
-			if !ok || !strings.HasPrefix(strings.TrimPrefix(r.URL.Path, "/"), up.Under) {
-				return nil, gateway.Signin{}, refusal(http.StatusNotFound, noRelay)
-			}
-			j, _, found := s.turnJob(callToken(r))
-			if !found {
-				// It ended since Turn let the call through.
-				return nil, gateway.Signin{}, refusal(http.StatusUnauthorized, noTurn)
-			}
-			return s.turnCredential(j, up)
+		// No credential and no refusal: the call passes through to the relay,
+		// which checks the path prefix, adds the credential, and refuses or
+		// records as it does for a runner on another machine.
+		Read: func(*http.Request) (func(http.Header), gateway.Signin, *gateway.Refusal) {
+			return nil, gateway.Signin{}, nil
 		},
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,6 +116,21 @@ func startServer(t *testing.T, harnesses ...string) *xproc {
 	x := &xproc{t: t, bin: agentbusBinary(t), serverHome: t.TempDir()}
 	connectFake(t, x.serverHome, harnesses...)
 	env := append(os.Environ(), "AGENTBUS_HOME="+x.serverHome)
+	addr := x.spawn(t, "server", []string{"server", "-listen", "127.0.0.1:0"}, env, reListening)
+	x.base = "http://" + addr
+	x.tok = readToken(t, x.serverHome)
+	return x
+}
+
+// startServerUpstream is startServer with control's model upstream pointed at a
+// loopback fake vendor (AGENTBUS_TEST_UPSTREAM), so a two-process test can make
+// the gateway guard fire on a real reply — the one thing a server with the real
+// vendor cannot do in a test.
+func startServerUpstream(t *testing.T, upstream string, harnesses ...string) *xproc {
+	t.Helper()
+	x := &xproc{t: t, bin: agentbusBinary(t), serverHome: t.TempDir()}
+	connectFake(t, x.serverHome, harnesses...)
+	env := append(os.Environ(), "AGENTBUS_HOME="+x.serverHome, "AGENTBUS_TEST_UPSTREAM="+upstream)
 	addr := x.spawn(t, "server", []string{"server", "-listen", "127.0.0.1:0"}, env, reListening)
 	x.base = "http://" + addr
 	x.tok = readToken(t, x.serverHome)
@@ -429,4 +445,92 @@ func TestXProcRunnerAgentAsksAnother(t *testing.T) {
 	waitFor(t, "both sessions in control's record", func() bool {
 		return len(x.sessionIDs()) >= 2
 	})
+}
+
+// An ask rule refused on a separate runner process reaches control's record,
+// lists from GET /api/v0/approvals, and answers from POST — control holding no
+// in-memory state for it. This is the 2026-11-16 bug class, across real
+// processes: the guard on the runner's gateway holds the command, records
+// approval.requested, and the runner forwards it to control, which lists and
+// decides it from the record alone. The fake upstream (AGENTBUS_TEST_UPSTREAM)
+// returns a reply whose tool call the policy holds for a person.
+func TestXProcApprovalFromRunnerReachesControl(t *testing.T) {
+	folder := t.TempDir()
+	// A reply that asks to run a Bash command the policy holds (ask).
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-x",`+
+			`"content":[{"type":"text","text":"ok"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"git push"}}],`+
+			`"stop_reason":"tool_use","usage":{"input_tokens":5,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	x := startServerUpstream(t, upstream.URL, "claude")
+	// The policy holds "git push" for a person: the runner's gateway guard
+	// holds the call and records approval.requested.
+	{
+		body, _ := json.Marshal(map[string]any{"ask": []string{"git push"}})
+		req, _ := http.NewRequest("PUT", x.base+"/api/v0/settings/permissions", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+x.tok)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", "*") // replace whatever is there
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("set the ask rule: %d", resp.StatusCode)
+		}
+	}
+	x.setAgentEnv("AGENTBUS_FAKE_CALL=1") // the agent makes one model call
+	x.addRunner("far", folder)
+	fs := x.folders()
+
+	code, st := x.startTurnX(map[string]any{"agent": "claude", "folder_ref": fs[0].Ref,
+		"connector": fs[0].Connector, "prompt": "do a thing", "isolate": false})
+	if code/100 != 2 || st.Session == "" {
+		t.Fatalf("POST /api/v0/turns: %d %+v", code, st)
+	}
+
+	// The approval the runner's guard raised reaches control's record and lists
+	// there, with the command — control held no state for it.
+	var id string
+	waitFor(t, "the runner's approval listed on control", func() bool {
+		code, b := x.get("/api/v0/approvals")
+		if code != 200 {
+			return false
+		}
+		var page struct {
+			Approvals []struct {
+				ID       string   `json:"id"`
+				Commands []string `json:"commands"`
+			} `json:"approvals"`
+		}
+		if json.Unmarshal(b, &page) != nil {
+			return false
+		}
+		for _, a := range page.Approvals {
+			for _, c := range a.Commands {
+				if c == "git push" {
+					id = a.ID
+					return true
+				}
+			}
+		}
+		return false
+	})
+
+	// Answered from control's record; allow moves the command to the allow list.
+	if code, b := x.post("/api/v0/approvals/"+id, map[string]any{"decision": "allow"}); code != 204 {
+		t.Fatalf("decide allow: %d %s", code, b)
+	}
+	if code, b := x.get("/api/v0/settings/permissions"); code != 200 || !strings.Contains(string(b), `"allow":["git push"]`) {
+		t.Fatalf("after allow, permissions: %d %s", code, b)
+	}
+	// The answered approval no longer lists.
+	if _, b := x.get("/api/v0/approvals"); strings.Contains(string(b), id) {
+		t.Fatalf("the answered approval still lists:\n%s", b)
+	}
 }
