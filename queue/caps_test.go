@@ -66,7 +66,7 @@ func TestTakeRoutesByConnector(t *testing.T) {
 	none := capsRunner(t, q, nil, nil)
 	other := capsRunner(t, q, nil, &Capabilities{Connector: conB})
 	owner := capsRunner(t, q, nil, &Capabilities{Connector: conA})
-	j := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA})
+	j := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA})
 	if got := takes(t, q, none); got != "" {
 		t.Fatalf("a runner with no connector took %s", got)
 	}
@@ -172,14 +172,14 @@ func TestFoldersListed(t *testing.T) {
 	capsRunner(t, q, nil, &Capabilities{Connector: conA, Folders: []FolderInfo{{Ref: refX, Name: "proj"}}})
 	capsRunner(t, q, nil, nil)
 	list, err := q.Folders(DefaultTeam)
-	if err != nil || len(list) != 1 || list[0].Ref != refX || list[0].Connector != conA || list[0].Name != "proj" {
+	if err != nil || len(list) != 1 || list[0].Ref != refX || list[0].Machine != conA || list[0].Name != "proj" {
 		t.Fatalf("%+v %v", list, err)
 	}
 }
 
 type fakeIssuer map[string]string
 
-func (f fakeIssuer) Connector() string { return conA }
+func (f fakeIssuer) Machine() string { return conA }
 func (f fakeIssuer) Register(p string) (string, error) {
 	ref := "fld_" + strings.Repeat("0", 15) + string(rune('0'+len(f)))
 	for k, v := range f {
@@ -205,7 +205,7 @@ func (f fakeIssuer) WithinRef(child, ref string) bool {
 func TestResolveFolders(t *testing.T) {
 	f := fakeIssuer{}
 	sp := Spec{Folder: "/a/b", Repo: ""}
-	if msg := ResolveFolders(&sp, f); msg != "" || sp.Folder != "" || sp.FolderRef == "" || sp.Connector != conA || f[sp.FolderRef] != "/a/b" {
+	if msg := ResolveFolders(&sp, f); msg != "" || sp.Folder != "" || sp.FolderRef == "" || sp.Machine != conA || f[sp.FolderRef] != "/a/b" {
 		t.Fatalf("%q %+v", msg, sp)
 	}
 	if msg := ResolveFolders(&Spec{Folder: "/a"}, nil); msg == "" {
@@ -218,7 +218,7 @@ func TestResolveFolders(t *testing.T) {
 	if msg := ResolveFolders(&Spec{Folder: "/a", FolderRef: refX}, f); msg == "" {
 		t.Fatal("both a path and a reference")
 	}
-	if msg := ResolveFolders(&Spec{FolderRef: "/a", Connector: conA}, nil); msg == "" {
+	if msg := ResolveFolders(&Spec{FolderRef: "/a", Machine: conA}, nil); msg == "" {
 		t.Fatal("a path as a reference")
 	}
 }
@@ -258,7 +258,7 @@ func TestMigrateFoldersAndColumns(t *testing.T) {
 		t.Fatalf("migrated %d %v", n, err)
 	}
 	got := state(t, q, j.ID)
-	if got.Spec.Folder != "" || got.Spec.FolderRef == "" || got.Spec.Connector != conA || f[got.Spec.FolderRef] != "/p/q" {
+	if got.Spec.Folder != "" || got.Spec.FolderRef == "" || got.Spec.Machine != conA || f[got.Spec.FolderRef] != "/p/q" {
 		t.Fatalf("%+v", got.Spec)
 	}
 	var raw sql.NullString
@@ -322,7 +322,7 @@ func TestHarnessRuleCountsOnlyEligibleRunners(t *testing.T) {
 	q, _ := open(t)
 	owner := capsRunner(t, q, nil, &Capabilities{Connector: conA, Harnesses: found("claude")})
 	capsRunner(t, q, []string{"gpu"}, &Capabilities{Connector: conB, Harnesses: found("claude", "codex")})
-	j := makeJob(t, q, Spec{Harness: "codex", FolderRef: refX, Connector: conA})
+	j := makeJob(t, q, Spec{Harness: "codex", FolderRef: refX, Machine: conA})
 	if got := takes(t, q, owner); got != j.ID {
 		t.Fatalf("the folder's runner took %q, want %s", got, j.ID)
 	}
@@ -341,7 +341,7 @@ func TestFoldersOfTwoConnectors(t *testing.T) {
 	q, _ := open(t)
 	capsRunner(t, q, nil, &Capabilities{Connector: conA, Folders: []FolderInfo{{Ref: refX, Name: "p"}}})
 	capsRunner(t, q, nil, &Capabilities{Connector: conB, Folders: []FolderInfo{{Ref: refX, Name: "p"}}})
-	if list, err := q.Folders(DefaultTeam); err != nil || len(list) != 2 || list[0].Connector == list[1].Connector {
+	if list, err := q.Folders(DefaultTeam); err != nil || len(list) != 2 || list[0].Machine == list[1].Machine {
 		t.Fatalf("%+v %v", list, err)
 	}
 }
@@ -360,3 +360,128 @@ func TestHeartbeatReplacesLabels(t *testing.T) {
 }
 
 func (f fakeIssuer) WithinDir(p, d string) bool { return p == d || strings.HasPrefix(p, d+"/") }
+
+// compat 0.6: drop connector. Routing reads the machine id under either key
+// on both the job's spec and the runner's caps, so a 0.6 control and a job
+// stored by a build before 0.6 both route. A 0.6 spec names the id under both
+// keys (Spec.MarshalJSON); a runner's caps name it under connector alone
+// (runner/caps.go, for the strict control decode). This covers a 0.6 job
+// against a connector-caps runner, and a pre-0.6 job whose stored spec names
+// the machine under connector only.
+func TestTakeRoutesMachineCrossVersion(t *testing.T) {
+	q, _ := open(t)
+	owner := capsRunner(t, q, nil, &Capabilities{Connector: conA})
+	other := capsRunner(t, q, nil, &Capabilities{Connector: conB})
+	// A 0.6 job: its stored spec names the id under both keys.
+	j := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA})
+	if got := takes(t, q, other); got != "" {
+		t.Fatalf("a runner on another machine took the 0.6 job: %s", got)
+	}
+	if got := takes(t, q, owner); got != j.ID {
+		t.Fatalf("the machine's runner did not take the 0.6 job: %q want %s", got, j.ID)
+	}
+	// A pre-0.6 job: rewrite a fresh job's stored spec to name the machine
+	// under connector only, as a build before 0.6 stored it, then route it.
+	j2 := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conB})
+	if _, err := q.db.Exec(`UPDATE jobs SET spec = ? WHERE id = ?`,
+		`{"harness":"claude","folder_ref":"`+refX+`","connector":"`+conB+`"}`, j2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := takes(t, q, owner); got != "" {
+		t.Fatalf("a runner on another machine took the pre-0.6 job: %s", got)
+	}
+	if got := takes(t, q, other); got != j2.ID {
+		t.Fatalf("the machine's runner did not take the pre-0.6 connector-only job: %q want %s", got, j2.ID)
+	}
+}
+
+// compat 0.6: drop connector. A runner reports its machine id under the old
+// key alone: control's runner-wire decode is strict (jobs.decode calls
+// DisallowUnknownFields), and a control of a build before 0.6 has no "machine"
+// field, so an unknown field there is a 400. This pins that the caps a runner
+// sends carry connector and not machine, so a pre-0.6 control still enrolls it.
+func TestCapabilitiesWireIsConnectorOnlyForStrictOldControl(t *testing.T) {
+	// As runner/caps.go builds them: the id under the old key only.
+	b, err := json.Marshal(Capabilities{OS: "darwin", Connector: conA, Folders: []FolderInfo{{Ref: refX, Name: "p"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"machine"`) {
+		t.Fatalf("caps carry a machine key a strict pre-0.6 control would refuse: %s", b)
+	}
+	// A control of a build before 0.6 has no machine field and decodes strictly.
+	type oldCaps struct {
+		OS        string       `json:"os,omitempty"`
+		Arch      string       `json:"arch,omitempty"`
+		Connector string       `json:"connector,omitempty"`
+		Folders   []FolderInfo `json:"folders,omitempty"`
+		Role      string       `json:"role,omitempty"`
+	}
+	d := json.NewDecoder(strings.NewReader(string(b)))
+	d.DisallowUnknownFields()
+	var oc oldCaps
+	if err := d.Decode(&oc); err != nil {
+		t.Fatalf("a strict pre-0.6 control refused the caps: %v", err)
+	}
+	if oc.Connector != conA {
+		t.Fatalf("pre-0.6 control read connector %q, want %s", oc.Connector, conA)
+	}
+	// And this is why: caps that DO carry a machine key are refused by that
+	// same strict decode, which is what a dual-send would have sent.
+	bad, _ := json.Marshal(Capabilities{OS: "darwin", Machine: conA, Connector: conA})
+	d2 := json.NewDecoder(strings.NewReader(string(bad)))
+	d2.DisallowUnknownFields()
+	if err := d2.Decode(&oldCaps{}); err == nil {
+		t.Fatal("a strict pre-0.6 control accepted a machine key; dual-send would break enroll")
+	}
+}
+
+// compat 0.6: drop connector. A 0.6 control sends the take spec with the
+// machine id under both keys: a runner reads the take leniently, and one of a
+// build before 0.6 takes the id from connector while a 0.6 runner takes it
+// from machine. This pins that the spec a control sends carries both.
+func TestSpecWireCarriesBothKeysForOldRunner(t *testing.T) {
+	b, err := json.Marshal(Spec{Harness: "claude", FolderRef: refX, Machine: conA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"machine":"`+conA+`"`) || !strings.Contains(s, `"connector":"`+conA+`"`) {
+		t.Fatalf("the spec must carry the id under both keys for one release: %s", s)
+	}
+	// A runner of a build before 0.6 reads only connector.
+	var old struct {
+		FolderRef string `json:"folder_ref"`
+		Connector string `json:"connector"`
+	}
+	if json.Unmarshal(b, &old) != nil || old.Connector != conA {
+		t.Fatalf("a pre-0.6 runner could not read the machine from the spec: %q", old.Connector)
+	}
+	// A 0.6 reader takes it from machine; Spec has no connector field to leak
+	// into (the old key lives only inside Marshal/UnmarshalJSON).
+	var sp Spec
+	if json.Unmarshal(b, &sp) != nil || sp.Machine != conA {
+		t.Fatalf("0.6 read: machine %q", sp.Machine)
+	}
+}
+
+// compat 0.6: drop connector. A spec a build before 0.6 stored under the old
+// key survives a read and a re-store: UnmarshalJSON takes the id into Machine,
+// and MarshalJSON writes it back under both keys, so neither a 0.6 reader nor
+// a pre-0.6 runner loses it. Spec has no connector field for a caller to set.
+func TestSpecRoundTripFromConnectorOnly(t *testing.T) {
+	var sp Spec
+	if err := json.Unmarshal([]byte(`{"folder_ref":"`+refX+`","connector":"`+conA+`"}`), &sp); err != nil {
+		t.Fatal(err)
+	}
+	if sp.Machine != conA {
+		t.Fatalf("read connector-only: machine %q, want %s", sp.Machine, conA)
+	}
+	b, err := json.Marshal(sp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(b); !strings.Contains(s, `"machine":"`+conA+`"`) || !strings.Contains(s, `"connector":"`+conA+`"`) {
+		t.Fatalf("re-store dropped a key: %s", s)
+	}
+}

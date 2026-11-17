@@ -20,15 +20,16 @@ type RunnerInfo struct {
 	ID   string `json:"id" doc:"The runner's id, as GET /api/v0/harnesses names it."`
 	Name string `json:"name" doc:"The name it enrolled with, such as its machine's."`
 	Role string `json:"role" doc:"runner: the one program of its machine, which holds its folders and runs its sessions. connector: a connector of a build before 0.5, which takes no work from this build."`
-	// Connector is the runner's machine, which a new session names.
-	Connector string    `json:"connector,omitempty" doc:"The id of the runner's machine (con_ and 16 hex digits): a new session on this machine names it as connector, with a folder typed for that machine. Absent before its first report."`
-	Online    bool      `json:"online" doc:"It asked control for work in the last minute."`
-	LastSeen  time.Time `json:"last_seen" doc:"When it last asked control for work."`
-	Enrolled  time.Time `json:"enrolled" doc:"When it enrolled."`
-	Capacity  int       `json:"capacity" doc:"How many jobs it runs at once."`
-	Labels    []string  `json:"labels" doc:"The labels it enrolled with. Empty when none."`
-	OS        string    `json:"os,omitempty" doc:"Its operating system, as Go names it, such as linux or darwin. Absent before its first report."`
-	Arch      string    `json:"arch,omitempty" doc:"Its processor, as Go names it, such as amd64 or arm64. Absent before its first report."`
+	// Machine is the runner's machine id, which a new session names. The
+	// runner's own (sign-in) id is ID; a client addresses a machine by this.
+	Machine  string    `json:"machine,omitempty" doc:"The id of the runner's machine (con_ and 16 hex digits): a new session on this machine names it as machine, with a folder typed for that machine. A client addresses a machine by this; the runner's own sign-in id is id. Absent before its first report."`
+	Online   bool      `json:"online" doc:"It asked control for work in the last minute."`
+	LastSeen time.Time `json:"last_seen" doc:"When it last asked control for work."`
+	Enrolled time.Time `json:"enrolled" doc:"When it enrolled."`
+	Capacity int       `json:"capacity" doc:"How many jobs it runs at once."`
+	Labels   []string  `json:"labels" doc:"The labels it enrolled with. Empty when none."`
+	OS       string    `json:"os,omitempty" doc:"Its operating system, as Go names it, such as linux or darwin. Absent before its first report."`
+	Arch     string    `json:"arch,omitempty" doc:"Its processor, as Go names it, such as amd64 or arm64. Absent before its first report."`
 	// Harnesses: the runner's last probe of each harness.
 	Harnesses []RunnerProbe `json:"harnesses" doc:"Its last probe of each harness, in the order it reported them. Empty for a connector, and before its first probe ends."`
 	Sandbox   *SandboxInfo  `json:"sandbox,omitempty" doc:"Whether it can build a session's wall (the sandbox setting). Absent from a runner of a build before it reported it."`
@@ -93,12 +94,12 @@ func (a *API) listRunners(w http.ResponseWriter, r *http.Request) {
 		// the queue, and is not listed twice.
 		held := map[string]bool{}
 		for _, rn := range all {
-			if rn.Caps != nil && rn.Caps.Role == "" && rn.Caps.Connector != "" {
-				held[rn.Caps.Connector] = true
+			if rn.Caps != nil && rn.Caps.Role == "" && rn.Caps.MachineID() != "" {
+				held[rn.Caps.MachineID()] = true
 			}
 		}
 		for _, rn := range all {
-			if rn.Caps != nil && rn.Caps.Role == queue.RoleConnector && held[rn.Caps.Connector] {
+			if rn.Caps != nil && rn.Caps.Role == queue.RoleConnector && held[rn.Caps.MachineID()] {
 				continue
 			}
 			list = append(list, runnerInfo(rn, now))
@@ -122,7 +123,7 @@ func runnerInfo(rn queue.Runner, now time.Time) RunnerInfo {
 	if c.Role == queue.RoleConnector {
 		v.Role = queue.RoleConnector
 	}
-	v.OS, v.Arch, v.Connector, v.Sandbox = c.OS, c.Arch, c.Connector, sandboxInfo(c)
+	v.OS, v.Arch, v.Machine, v.Sandbox = c.OS, c.Arch, c.MachineID(), sandboxInfo(c)
 	for _, rep := range c.Harnesses {
 		v.Harnesses = append(v.Harnesses, RunnerProbe{Name: rep.Name, Found: rep.Found, Version: rep.Version, SignedIn: rep.SignedIn})
 	}

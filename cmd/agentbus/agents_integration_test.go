@@ -451,7 +451,7 @@ func TestIsolatedSubfolderKeptAcrossTurnsAndReview(t *testing.T) {
 	}
 	// The queue keeps the folder by its reference, and the session its
 	// snapshot id; the record has the reference too.
-	if j.Spec.Folder != "" || j.Spec.FolderRef != folders.Ref(filepath.Join(repo, "sub")) || j.Spec.Connector == "" ||
+	if j.Spec.Folder != "" || j.Spec.FolderRef != folders.Ref(filepath.Join(repo, "sub")) || j.Spec.Machine == "" ||
 		!queue.SnapshotShape.MatchString(j.Workspace.Snapshot) {
 		t.Fatalf("first job spec %+v, snapshot %q", j.Spec, j.Workspace.Snapshot)
 	}

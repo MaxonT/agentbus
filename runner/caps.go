@@ -35,7 +35,12 @@ func (r *Runner) caps(harnesses []harness.Report) *queue.Capabilities {
 		Sandbox: r.sandbox}
 	if f := r.cfg.Folders; f != nil {
 		// This machine, and the folders the runner holds on it.
-		c.Connector = f.Connector()
+		// compat 0.6: drop connector. The caps go to control, whose decode is
+		// strict (jobs.decode DisallowUnknownFields), so a build before 0.6
+		// refuses an unknown field. Send the id under the old key alone; a 0.6
+		// control reads it through MachineID (machine or connector). The key
+		// retires here when 0.5 runners are no longer served.
+		c.Connector = f.Machine()
 		for _, fo := range f.List(queue.MaxFolders) {
 			c.Folders = append(c.Folders, queue.FolderInfo{Ref: fo.Ref, Name: fo.Name})
 		}
@@ -88,10 +93,10 @@ func (r *Runner) beat(ctx context.Context) {
 // runner's folders; or, for a job stored before references, its path,
 // which the runner registers. ok is false when the reference is not one of
 // this machine's.
-func (r *Runner) folderPath(path, ref, connector string) (string, bool) {
+func (r *Runner) folderPath(path, ref, machine string) (string, bool) {
 	switch {
 	case ref != "":
-		if r.cfg.Folders == nil || connector != r.cfg.Folders.Connector() {
+		if r.cfg.Folders == nil || machine != r.cfg.Folders.Machine() {
 			return "", false
 		}
 		return r.cfg.Folders.Path(ref)

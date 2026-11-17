@@ -15,7 +15,7 @@ import (
 // the next call (0.5.1).
 func TestLostApplyGetsTurnApplied(t *testing.T) {
 	e, rec, clock := newFailingEnv(t)
-	spec := queue.Spec{Session: "s_1", Connector: testConnector, FolderRef: "fld_0123456789abcdef", ApplyTo: "blob2"}
+	spec := queue.Spec{Session: "s_1", Machine: testConnector, FolderRef: "fld_0123456789abcdef", ApplyTo: "blob2"}
 	links := queue.Links{AppliesTurn: "t_1", AppliesTurns: []string{"t_1"}}
 	if _, _, err := e.q.Create(queue.DefaultTeam, queue.KindApply, "a1", spec, links); err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestLostAppliesReadPastFailures(t *testing.T) {
 	e.tok = enrollConnector(t, e.srv)
 	var ids []string
 	for _, key := range []string{"a1", "a2", "a3"} {
-		spec := queue.Spec{Session: "s_1", Connector: testConnector, FolderRef: "fld_0123456789abcdef", ApplyTo: "blob2"}
+		spec := queue.Spec{Session: "s_1", Machine: testConnector, FolderRef: "fld_0123456789abcdef", ApplyTo: "blob2"}
 		if _, _, err := e.q.Create(queue.DefaultTeam, queue.KindApply, key, spec, queue.Links{AppliesTurn: "t_1"}); err != nil {
 			t.Fatal(err)
 		}

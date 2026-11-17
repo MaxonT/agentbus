@@ -428,25 +428,25 @@ func TestSessionRunsOnItsFolderMachine(t *testing.T) {
 	var ref, machineA string
 	waitFor(t, "machine A's folder", func() bool {
 		var fs struct {
-			Folders []struct{ Ref, Name, Connector string }
+			Folders []struct{ Ref, Name, Machine string }
 		}
 		c.call("GET", "/api/v0/folders", nil, &fs)
 		for _, f := range fs.Folders {
 			if f.Name == filepath.Base(folder) {
-				ref, machineA = f.Ref, f.Connector
+				ref, machineA = f.Ref, f.Machine
 			}
 		}
 		return ref != ""
 	})
 	var rl struct {
-		Runners []struct{ Name, Connector, Role string }
+		Runners []struct{ Name, Machine, Role string }
 	}
 	waitFor(t, "both machines", func() bool {
 		c.call("GET", "/api/v0/runners", nil, &rl)
-		return len(rl.Runners) == 2 && rl.Runners[0].Connector != "" && rl.Runners[1].Connector != ""
+		return len(rl.Runners) == 2 && rl.Runners[0].Machine != "" && rl.Runners[1].Machine != ""
 	})
 	for _, r := range rl.Runners {
-		if r.Role != "runner" || (r.Name == "a") != (r.Connector == machineA) {
+		if r.Role != "runner" || (r.Name == "a") != (r.Machine == machineA) {
 			t.Fatalf("runners: %+v, want one row per machine, a on %s", rl.Runners, machineA)
 		}
 	}

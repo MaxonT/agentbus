@@ -27,11 +27,11 @@ func (a *API) typedFolder(ctx context.Context, path, machine string) (ref, conn 
 	// reads the folder on its own thread. The folder's shape is already
 	// checked synchronously before here (api/runs.go), so a bad path got its
 	// 400 without the queue; existence is the runner's, through the job.
-	if own := a.cfg.Folders; own != nil && (machine == "" || machine == own.Connector()) {
-		machine = own.Connector()
+	if own := a.cfg.Folders; own != nil && (machine == "" || machine == own.Machine()) {
+		machine = own.Machine()
 	} else if machine != "" {
 		if !queue.ConnectorShape.MatchString(machine) {
-			return "", "", http.StatusBadRequest, "connector must be con_ and 16 hex digits: a machine's id, from GET /api/v0/runners"
+			return "", "", http.StatusBadRequest, "machine must be con_ and 16 hex digits: a machine's id, from GET /api/v0/runners"
 		}
 		seen, err := a.cfg.Queue.MachineSeen(queue.DefaultTeam, machine)
 		if err != nil {
@@ -52,7 +52,7 @@ func (a *API) typedFolder(ctx context.Context, path, machine string) (ref, conn 
 			machine = all[0]
 		default:
 			return "", "", http.StatusBadRequest, strconv.Itoa(len(all)) +
-				" machines are online; name the folder's machine as connector, from GET /api/v0/runners"
+				" machines are online; name the folder's machine as machine, from GET /api/v0/runners"
 		}
 	}
 	job, err := a.cfg.Queue.RegisterFolder(queue.DefaultTeam, machine, path)

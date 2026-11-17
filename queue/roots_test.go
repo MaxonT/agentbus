@@ -23,7 +23,7 @@ func TestBlobRoots(t *testing.T) {
 	// One session per folder turn, each with a snapshot and a changeset.
 	session := func(cs, tree string) string {
 		t.Helper()
-		j, _, err := q.Create(DefaultTeam, KindTurn, "", Spec{Harness: "claude", FolderRef: ref, Connector: con, Isolate: true, Prompt: "p"}, Links{})
+		j, _, err := q.Create(DefaultTeam, KindTurn, "", Spec{Harness: "claude", FolderRef: ref, Machine: con, Isolate: true, Prompt: "p"}, Links{})
 		if err != nil {
 			t.Fatal(err)
 		}

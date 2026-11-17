@@ -108,7 +108,7 @@ func TestUpRecordsEveryRunnersCallsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref, machine := folders.Ref(folder), fr.Connector()
+	ref, machine := folders.Ref(folder), fr.Machine()
 	// The machine joins up's control the one way there is: signed in and
 	// approved.
 	signInRunner(t, "http://"+up.addr, tok, runnerHome, "far")

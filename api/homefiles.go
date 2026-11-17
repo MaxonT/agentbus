@@ -17,15 +17,15 @@ import (
 
 // HomeFileList is the answer to GET /api/v0/folders/{id}/home-files.
 type HomeFileList struct {
-	Folder    string           `json:"folder" doc:"The folder's reference, as asked."`
-	Connector string           `json:"connector" doc:"The machine whose home was looked in: the folder's."`
-	Files     []queue.HomeFile `json:"files" doc:"Each usual config path that machine's home holds, in a fixed order, as home_files takes it. A path it does not hold is left out. Never a vendor sign-in file."`
+	Folder  string           `json:"folder" doc:"The folder's reference, as asked."`
+	Machine string           `json:"machine" doc:"The machine whose home was looked in: the folder's."`
+	Files   []queue.HomeFile `json:"files" doc:"Each usual config path that machine's home holds, in a fixed order, as home_files takes it. A path it does not hold is left out. Never a vendor sign-in file."`
 }
 
 // Answers of the home-files route, in fixed wording.
 const (
 	homeNoFolder = "no runner holds that folder; GET /api/v0/folders lists them"
-	homeTwo      = "two machines hold a folder of that reference; name one as connector, from GET /api/v0/folders"
+	homeTwo      = "two machines hold a folder of that reference; name one as machine, from GET /api/v0/folders"
 	homeOffline  = "the folder's machine is offline; start agentbus runner there, and ask again"
 	homeSlow     = "the folder's machine did not answer within 15 seconds; ask again"
 	homeFailed   = "the folder's machine could not list its home"
@@ -44,9 +44,12 @@ func (a *API) homeFiles(w http.ResponseWriter, r *http.Request, ref string) {
 		writeError(w, http.StatusNotFound, homeNoFolder)
 		return
 	}
-	want := r.URL.Query().Get("connector")
+	want := r.URL.Query().Get("machine")
+	if want == "" {
+		want = r.URL.Query().Get("connector") // compat 0.6: drop connector
+	}
 	if want != "" && !queue.ConnectorShape.MatchString(want) {
-		writeError(w, http.StatusBadRequest, "connector must be con_ and 16 hex digits: a machine's id, from GET /api/v0/folders")
+		writeError(w, http.StatusBadRequest, "machine must be con_ and 16 hex digits: a machine's id, from GET /api/v0/folders")
 		return
 	}
 	all, err := a.cfg.Queue.Folders(queue.DefaultTeam)
@@ -57,20 +60,20 @@ func (a *API) homeFiles(w http.ResponseWriter, r *http.Request, ref string) {
 	machine := ""
 	// agentbus up's own folders are known at once; the runners report
 	// theirs within a minute.
-	if own := a.cfg.Folders; own != nil && (want == "" || want == own.Connector()) {
+	if own := a.cfg.Folders; own != nil && (want == "" || want == own.Machine()) {
 		if _, ok := own.Path(ref); ok {
-			machine = own.Connector()
+			machine = own.Machine()
 		}
 	}
 	for _, f := range all {
-		if f.Ref != ref || (want != "" && f.Connector != want) || f.Connector == machine {
+		if f.Ref != ref || (want != "" && f.Machine != want) || f.Machine == machine {
 			continue
 		}
 		if machine != "" {
 			writeError(w, http.StatusBadRequest, homeTwo)
 			return
 		}
-		machine = f.Connector
+		machine = f.Machine
 	}
 	if machine == "" {
 		writeError(w, http.StatusNotFound, homeNoFolder)
@@ -123,7 +126,7 @@ func (a *API) homeFiles(w http.ResponseWriter, r *http.Request, ref string) {
 	if files == nil {
 		files = []queue.HomeFile{}
 	}
-	writeJSON(w, http.StatusOK, HomeFileList{Folder: ref, Connector: machine, Files: files})
+	writeJSON(w, http.StatusOK, HomeFileList{Folder: ref, Machine: machine, Files: files})
 }
 
 // awaitHome is the home job once it ended, or as it is after

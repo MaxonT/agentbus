@@ -24,7 +24,7 @@ func (r *Runner) homeWork(at *attempt) queue.Finish {
 		return queue.Finish{Status: queue.Failed, Reason: queue.ReasonSetup,
 			Result: mustJSON(queue.Result{Refused: msg, Status: http.StatusConflict})}
 	}
-	if r.cfg.Folders == nil || at.job.Spec.Connector != r.cfg.Folders.Connector() {
+	if r.cfg.Folders == nil || at.job.Spec.Machine != r.cfg.Folders.Machine() {
 		return refuse("this runner is not on the machine the job names")
 	}
 	home, err := os.UserHomeDir()

@@ -53,7 +53,7 @@ func TestAskChecksRemoteFolderByReference(t *testing.T) {
 	const sessRef = "fld_fedcba9876543210"
 	lim := queue.Limits{MaxDepth: 2, MaxPerTurn: 10, MaxPerTree: 30}
 	j, _, err := q.CreateTurnLinked(queue.DefaultTeam, "",
-		queue.Spec{Harness: "claude", FolderRef: sessRef, Connector: remote, Prompt: "hi", Isolate: true}, queue.Links{}, lim)
+		queue.Spec{Harness: "claude", FolderRef: sessRef, Machine: remote, Prompt: "hi", Isolate: true}, queue.Links{}, lim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,20 +71,20 @@ func TestAskChecksRemoteFolderByReference(t *testing.T) {
 	}
 
 	// The session's own folder by reference, on its machine: allowed, kept.
-	if code, b := check(&TurnRequest{FolderRef: sessRef, Connector: remote, Prompt: "go"}); code != 0 ||
-		b.FolderRef != sessRef || b.Connector != remote {
-		t.Fatalf("same ref on the remote runner refused: %d (ref %q, connector %q)", code, b.FolderRef, b.Connector)
+	if code, b := check(&TurnRequest{FolderRef: sessRef, Machine: remote, Prompt: "go"}); code != 0 ||
+		b.FolderRef != sessRef || b.Machine != remote {
+		t.Fatalf("same ref on the remote runner refused: %d (ref %q, connector %q)", code, b.FolderRef, b.Machine)
 	}
 	// Its reference without a connector: allowed, the folder's machine filled in.
-	if code, b := check(&TurnRequest{FolderRef: sessRef, Prompt: "go"}); code != 0 || b.Connector != remote {
-		t.Fatalf("ref without connector: %d, connector %q, want %q", code, b.Connector, remote)
+	if code, b := check(&TurnRequest{FolderRef: sessRef, Prompt: "go"}); code != 0 || b.Machine != remote {
+		t.Fatalf("ref without connector: %d, connector %q, want %q", code, b.Machine, remote)
 	}
 	// No folder at all: the session's own folder by reference, on its machine.
-	if code, b := check(&TurnRequest{Prompt: "go"}); code != 0 || b.FolderRef != sessRef || b.Connector != remote {
-		t.Fatalf("no folder: %d (ref %q, connector %q)", code, b.FolderRef, b.Connector)
+	if code, b := check(&TurnRequest{Prompt: "go"}); code != 0 || b.FolderRef != sessRef || b.Machine != remote {
+		t.Fatalf("no folder: %d (ref %q, connector %q)", code, b.FolderRef, b.Machine)
 	}
 	// A reference on another machine than the session's: refused.
-	if code, _ := check(&TurnRequest{FolderRef: sessRef, Connector: "con_bbbbbbbbbbbbbbbb", Prompt: "go"}); code != http.StatusForbidden {
+	if code, _ := check(&TurnRequest{FolderRef: sessRef, Machine: "con_bbbbbbbbbbbbbbbb", Prompt: "go"}); code != http.StatusForbidden {
 		t.Fatalf("a folder on another machine was not refused: %d", code)
 	}
 	// A path, which only the folder's machine can check: refused here, since

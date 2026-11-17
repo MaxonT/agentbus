@@ -67,7 +67,7 @@ func TestListRunners(t *testing.T) {
 			c = rn
 		}
 	}
-	if r.Name != "mac" || r.Role != "runner" || r.Connector != machine || !r.Online || r.Capacity != 4 || len(r.Labels) != 1 || r.Labels[0] != "gpu" ||
+	if r.Name != "mac" || r.Role != "runner" || r.Machine != machine || !r.Online || r.Capacity != 4 || len(r.Labels) != 1 || r.Labels[0] != "gpu" ||
 		r.OS != "darwin" || r.Arch != "arm64" || r.LastSeen.IsZero() || r.Enrolled.IsZero() {
 		t.Errorf("runner %+v", r)
 	}
@@ -75,7 +75,7 @@ func TestListRunners(t *testing.T) {
 		r.Harnesses[0].SignedIn == nil || !*r.Harnesses[0].SignedIn || r.Harnesses[1].Name != "codex" || r.Harnesses[1].Found {
 		t.Errorf("runner harnesses %+v", r.Harnesses)
 	}
-	if c.Role != "connector" || c.Connector != gone || c.Labels == nil || c.Harnesses == nil || len(c.Harnesses) != 0 {
+	if c.Role != "connector" || c.Machine != gone || c.Labels == nil || c.Harnesses == nil || len(c.Harnesses) != 0 {
 		t.Errorf("connector %+v, want role connector of the machine with no runner, with empty lists", c)
 	}
 

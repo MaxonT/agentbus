@@ -52,7 +52,7 @@ func TestFolderHomeFiles(t *testing.T) {
 		{Path: "~/.codex/config.toml", Kind: "file", Size: 0},
 		{Path: "~/.gitconfig", Kind: "file", Size: 7},
 	}
-	if got.Folder != ref || got.Connector == "" || len(got.Files) != len(want) {
+	if got.Folder != ref || got.Machine == "" || len(got.Files) != len(want) {
 		t.Fatalf("home-files: %s", out)
 	}
 	for i := range want {

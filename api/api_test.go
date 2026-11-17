@@ -48,7 +48,7 @@ func (e *env) folderRef(t *testing.T, path string) (ref, connector string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ref, e.fr.Connector()
+	return ref, e.fr.Machine()
 }
 
 func newEnvAt(t *testing.T, dbPath string) *env {

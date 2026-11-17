@@ -139,7 +139,7 @@ func startNoSecrets(t *testing.T) *noSecretsSetup {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ns.ref, ns.connector = folders.Ref(folder), fr.Connector()
+	ns.ref, ns.connector = folders.Ref(folder), fr.Machine()
 	// The runner's upstreams name nothing: with no secrets it sends every
 	// call to the server's relay.
 	signInRunner(t, "http://"+ns.server.addr, ns.tok, runnerHome, "far")

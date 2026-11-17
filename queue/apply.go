@@ -157,7 +157,7 @@ func (q *Queue) ApplyAs(team, turn string, by *By) (job Job, created bool, err e
 	if has {
 		return done, false, nil
 	}
-	if ok, err := q.MachineSeen(team, p.spec.Connector); err != nil {
+	if ok, err := q.MachineSeen(team, p.spec.Machine); err != nil {
 		return Job{}, false, err
 	} else if !ok {
 		return Job{}, false, ErrMachineOffline
@@ -201,7 +201,7 @@ func (q *Queue) planApply(team, turn string, by *By) (plan applyPlan, done Job, 
 	if err != nil {
 		return plan, Job{}, false, err
 	}
-	if first.FolderRef == "" || first.Connector == "" {
+	if first.FolderRef == "" || first.Machine == "" {
 		return plan, Job{}, false, ErrNotApplicable
 	}
 	turns, err := q.appliableTurns(team, j.Session)
@@ -236,7 +236,7 @@ func (q *Queue) planApply(team, turn string, by *By) (plan applyPlan, done Job, 
 	if mark >= 0 {
 		from = turns[mark].changeset
 	}
-	plan.spec = Spec{Session: j.Session, FolderRef: first.FolderRef, Connector: first.Connector, ApplyFrom: from, ApplyTo: r.Changeset}
+	plan.spec = Spec{Session: j.Session, FolderRef: first.FolderRef, Machine: first.Machine, ApplyFrom: from, ApplyTo: r.Changeset}
 	carried := make([]string, 0, at-mark)
 	for _, t := range turns[mark+1 : at+1] {
 		carried = append(carried, t.turn)
@@ -319,7 +319,7 @@ func (q *Queue) Preview(team, session string) (job Job, turn string, err error) 
 	case has:
 		return Job{}, turn, ErrAllApplied
 	}
-	if ok, err := q.MachineSeen(team, p.spec.Connector); err != nil {
+	if ok, err := q.MachineSeen(team, p.spec.Machine); err != nil {
 		return Job{}, turn, err
 	} else if !ok {
 		return Job{}, turn, ErrMachineOffline

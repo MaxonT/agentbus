@@ -17,7 +17,7 @@ func TestRemovedRunnerEndsItsSessionsWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := capsRunner(t, q, nil, nil)
-	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA, Isolate: true})
+	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
 	j, a, ok, _, err := q.Take(r.ID, lease, false)
 	if err != nil || !ok || j.ID != first.ID {
 		t.Fatalf("take: %v %v", ok, err)
@@ -83,7 +83,7 @@ func TestRemovedRunnerEndsWorkQueuedLater(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA, Isolate: true})
+		first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
 		j, a, ok, _, err := q.Take(r.ID, lease, false)
 		if err != nil || !ok || j.ID != first.ID {
 			t.Fatalf("take: %v %v", ok, err)

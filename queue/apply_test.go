@@ -116,7 +116,7 @@ func TestApplyUpToATurn(t *testing.T) {
 	q, _ := open(t)
 	rn := capsRunner(t, q, nil, &Capabilities{Connector: conA})
 	conn := rn
-	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA, Isolate: true})
+	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
 	t1 := run(t, q, rn, Result{Changeset: hexOf('1')})
 	if t1.ID != first.ID {
 		t.Fatalf("ran %s", t1.ID)
@@ -128,7 +128,7 @@ func TestApplyUpToATurn(t *testing.T) {
 		turns = append(turns, run(t, q, rn, Result{Changeset: hexOf(c)}))
 	}
 	a2, created, err := q.Apply(DefaultTeam, turns[1].Turn)
-	if err != nil || !created || a2.Spec.ApplyFrom != "" || a2.Spec.ApplyTo != hexOf('2') || a2.Spec.Connector != conA || a2.Spec.FolderRef != refX {
+	if err != nil || !created || a2.Spec.ApplyFrom != "" || a2.Spec.ApplyTo != hexOf('2') || a2.Spec.Machine != conA || a2.Spec.FolderRef != refX {
 		t.Fatalf("apply up to turn 2: %+v %v %v", a2.Spec, created, err)
 	}
 	// Only a folder place takes it; a turn place never does.
@@ -170,7 +170,7 @@ func TestTakeRoutesByMachine(t *testing.T) {
 	onB := capsRunner(t, q, nil, &Capabilities{Connector: conB})
 	legacy := capsRunner(t, q, nil, &Capabilities{Role: RoleConnector, Connector: conA})
 	onA := capsRunner(t, q, nil, &Capabilities{Connector: conA})
-	turn := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA, Isolate: true})
+	turn := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
 	for _, r := range []Runner{plain, onB, legacy} {
 		if got := takes(t, q, r); got != "" {
 			t.Fatalf("a runner off the folder's machine took the turn %s", got)
@@ -201,7 +201,7 @@ func TestSessionFromBeforeKeepsItsRunner(t *testing.T) {
 	q, _ := open(t)
 	far := capsRunner(t, q, nil, &Capabilities{Connector: conB})
 	home := capsRunner(t, q, nil, &Capabilities{Connector: conA})
-	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA, Isolate: true})
+	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
 	// As 0.4 took it: bound to the far runner.
 	j, a, ok, _, err := q.Take(home.ID, lease, false)
 	if err != nil || !ok || j.ID != first.ID {
@@ -244,8 +244,8 @@ func TestFolderPlacesBesideTurns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA})
-	makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA})
+	makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA})
+	makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA})
 	if takes(t, q, r) == "" || takes(t, q, r) != "" {
 		t.Fatal("a runner of capacity 1 did not take exactly one turn")
 	}
@@ -278,7 +278,7 @@ func mustAttempt(t *testing.T, q *Queue, job string) string {
 func TestApplyAtOnce(t *testing.T) {
 	q, _ := open(t)
 	rn := capsRunner(t, q, nil, &Capabilities{Connector: conA})
-	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA, Isolate: true})
+	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
 	turns := []Job{run(t, q, rn, Result{Changeset: hexOf('1')})}
 	for _, c := range []byte{'2', '3'} {
 		makeJob(t, q, Spec{Session: first.Session})
@@ -318,7 +318,7 @@ func TestTakeIsolatedStaysOnItsMachine(t *testing.T) {
 	found := func(name string) []harness.Report { return []harness.Report{{Name: name, Found: true}} }
 	here := capsRunner(t, q, nil, &Capabilities{Connector: conA, Harnesses: found("claude")})
 	away := capsRunner(t, q, nil, &Capabilities{Connector: conB, Harnesses: found("codex")})
-	j := makeJob(t, q, Spec{Harness: "codex", FolderRef: refX, Connector: conA, Isolate: true})
+	j := makeJob(t, q, Spec{Harness: "codex", FolderRef: refX, Machine: conA, Isolate: true})
 	if got := takes(t, q, away); got != "" {
 		t.Fatalf("the runner of another machine took %s", got)
 	}
@@ -333,7 +333,7 @@ func TestTakeIsolatedStaysOnItsMachine(t *testing.T) {
 func TestApplyNeedsItsMachine(t *testing.T) {
 	q, c := open(t)
 	rn := capsRunner(t, q, nil, &Capabilities{Connector: conA})
-	turn := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Connector: conA, Isolate: true})
+	turn := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
 	j, a := take(t, q, rn)
 	if j.ID != turn.ID {
 		t.Fatalf("took %s", j.ID)

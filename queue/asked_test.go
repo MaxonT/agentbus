@@ -362,7 +362,7 @@ func TestResultPromptBounded(t *testing.T) {
 // A worktree's session names its repo as its folder.
 func TestSessionFolderOfARepo(t *testing.T) {
 	q, _ := open(t)
-	j := makeJob(t, q, Spec{Harness: "claude", RepoRef: refX, Connector: conA, Base: "main"})
+	j := makeJob(t, q, Spec{Harness: "claude", RepoRef: refX, Machine: conA, Base: "main"})
 	if ref, con, repo, err := q.SessionFolder(DefaultTeam, j.Session); err != nil || ref != refX || con != conA || !repo {
 		t.Fatalf("%q %q %v", ref, con, err)
 	}

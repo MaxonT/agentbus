@@ -142,7 +142,7 @@ func TestTurnAppliedKept(t *testing.T) {
 	e := newOutcomeEnv(t)
 	by := &queue.By{Kind: event.ByAgent, Session: "s_asker", Turn: "t_asker"}
 	links := queue.Links{AppliesTurn: "t_2", AppliesJob: "job_x", AppliesTurns: []string{"t_1", "t_2"}, ApplyBy: by}
-	spec := queue.Spec{Session: "s_1", Connector: testConnector, FolderRef: "fld_0123456789abcdef", ApplyTo: "blob2"}
+	spec := queue.Spec{Session: "s_1", Machine: testConnector, FolderRef: "fld_0123456789abcdef", ApplyTo: "blob2"}
 	if _, _, err := e.q.Create(queue.DefaultTeam, queue.KindApply, "a1", spec, links); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestOutcomeBeforeFinish(t *testing.T) {
 						}
 						res = queue.Result{Changes: turnChanges("cp2")}
 					case queue.KindApply:
-						spec := queue.Spec{Session: "s_1", Connector: testConnector, FolderRef: "fld_0123456789abcdef", ApplyTo: "blob2"}
+						spec := queue.Spec{Session: "s_1", Machine: testConnector, FolderRef: "fld_0123456789abcdef", ApplyTo: "blob2"}
 						if _, _, err := e.q.Create(queue.DefaultTeam, queue.KindApply, "a1", spec, queue.Links{AppliesTurn: "t_1"}); err != nil {
 							t.Fatal(err)
 						}

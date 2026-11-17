@@ -843,7 +843,7 @@ func (r *Runner) prepare(ctx context.Context, at *attempt) *queue.Result {
 			return nil // the engine refuses it, in its own words
 		}
 	case sp.Repo != "" || sp.RepoRef != "":
-		repo, ok := r.folderPath(sp.Repo, sp.RepoRef, sp.Connector)
+		repo, ok := r.folderPath(sp.Repo, sp.RepoRef, sp.Machine)
 		if !ok {
 			return &queue.Result{Refused: folderUnknown, Status: http.StatusBadRequest}
 		}
@@ -852,7 +852,7 @@ func (r *Runner) prepare(ctx context.Context, at *attempt) *queue.Result {
 		return r.isolate(at, b, isolation.Request{Repo: repo, Base: sp.Base, Ref: sp.RepoRef})
 	case sp.Folder != "" || sp.FolderRef != "":
 		// A session runs on the machine that holds its folder: this one.
-		folder, ok := r.folderPath(sp.Folder, sp.FolderRef, sp.Connector)
+		folder, ok := r.folderPath(sp.Folder, sp.FolderRef, sp.Machine)
 		if !ok {
 			return &queue.Result{Refused: folderUnknown, Status: http.StatusBadRequest}
 		}

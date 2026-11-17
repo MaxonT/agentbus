@@ -151,7 +151,7 @@ var routes = slices.Concat([]route{
 			"With session, agent and prompt are required and the turn continues that session, in its folder, on the agent named; " +
 			"a folder sent that differs from the session's is refused with 400. Only the main token continues a session: a turn token is refused with 403. " +
 			"The turn's turn.started, with the prompt, is stored before the reply.\n\n" +
-			"A session runs on one machine, the one that holds its folder, for its whole life: pick the machine (connector, from GET /api/v0/runners), " +
+			"A session runs on one machine, the one that holds its folder, for its whole life: pick the machine (its machine id, from GET /api/v0/runners), " +
 			"then type a folder on it (folder) or name one it holds (folder_ref, from GET /api/v0/folders). Only that machine's runner takes the session's work.\n\n" +
 			"The reply waits up to 30 seconds for a runner to start the turn. A turn no runner starts by then answers 202 with state queued: " +
 			"it runs when a runner is free, and GET /api/v0/turns/{id} follows it.\n\n" +
@@ -450,7 +450,7 @@ var routes = slices.Concat([]route{
 	{method: "GET", path: "/api/v0/runners", op: "listRunners",
 		tag:     "Agents",
 		summary: "List runners",
-		doc: "The runners control knows, one per machine, for a person: each one's name, id, machine (connector), role, labels, whether it is online, " +
+		doc: "The runners control knows, one per machine, for a person: each one's name, id, machine, role, labels, whether it is online, " +
 			"when it was last seen, its last probe of each harness with its version, and whether it can build a session's wall (sandbox). Online means it asked for work in the last minute. " +
 			"pending lists the machines that ran agentbus login and wait for the person's approval. " +
 			"A runner that stopped stays listed, offline, until removed. A connector of a build before 0.5 is listed only while no runner reports its machine. No token is in the answer. Takes the main token only. No body is read.",
@@ -488,7 +488,7 @@ var routes = slices.Concat([]route{
 	{method: "GET", path: "/api/v0/folders", op: "listFolders",
 		tag:     "Agents",
 		summary: "List folders",
-		doc: "The folders the runners hold, each by its reference: a turn names one as folder_ref, with its machine as connector, and runs on that machine. " +
+		doc: "The folders the runners hold, each by its reference: a turn names one as folder_ref, with its machine as machine, and runs on that machine. " +
 			"A folder's path stays on the machine that owns it; the answer has only the last part of it. " +
 			"In agentbus up every folder a turn was started in is listed, newest first, within a minute of its first turn. " +
 			"A session's copy is never listed, though a turn may run in one. No body is read.",
@@ -505,7 +505,7 @@ var routes = slices.Concat([]route{
 			"~/.aws/config, ~/.aws/credentials, ~/.config/gh/, ~/.gitconfig and ~/.ssh/config. A path the home does not hold is left out. " +
 			"A vendor sign-in file (claude's .credentials.json, codex's auth.json, agy's token) is never listed or counted, and home_files refuses one. " +
 			"Nothing is stored. The reply waits up to 15 seconds for the folder's machine. No body is read.",
-		query: []param{{name: "connector", doc: "The folder's machine (con_ and 16 hex digits), from GET /api/v0/folders: needed only when two machines hold a folder of that reference."}},
+		query: []param{{name: "machine", doc: "The folder's machine (con_ and 16 hex digits), from GET /api/v0/folders: needed only when two machines hold a folder of that reference. The old name connector is read for one release."}},
 		replies: []reply{ok(200, HomeFileList{}, "The config files that machine's home holds."), badRequest,
 			fail(404, "No runner holds that folder."), fail(409, "The machine's runner could not list its home: error says why."), tooMany,
 			fail(503, "The folder's machine is offline."), fail(504, "The folder's machine did not answer within 15 seconds."), storeFailed},

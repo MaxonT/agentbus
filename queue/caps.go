@@ -26,12 +26,19 @@ type Capabilities struct {
 	// Harnesses: each harness's program on the runner's machine. Nil until
 	// the runner's first probe has ended.
 	Harnesses []harness.Report `json:"harnesses,omitempty"`
-	// Connector: the id of the runner's machine (con_ and 16 hex digits),
-	// the id of the folders it holds. A job that names it goes to this
-	// runner only. Folders are those folders, at most MaxFolders. The field
-	// keeps its name from when a separate connector held the folders.
-	Connector string       `json:"connector,omitempty"`
-	Folders   []FolderInfo `json:"folders,omitempty"`
+	// Connector: the id of the runner's machine (con_ and 16 hex digits), the
+	// id of the folders it holds. A job that names it goes to this runner
+	// only. Folders are those folders, at most MaxFolders. compat 0.6: drop
+	// connector. A runner reports the id under this old key alone, because
+	// control's runner-wire decode is strict and a control of a build before
+	// 0.6 refuses an unknown field. Control reads it through MachineID.
+	Connector string `json:"connector,omitempty"`
+	// Machine is the id under its new key, which control prefers when present.
+	// compat 0.6: drop connector. No runner sends it yet (it would break a
+	// strict pre-0.6 control); it carries the id once pre-0.6 runners are no
+	// longer served. Read through MachineID, never directly.
+	Machine string       `json:"machine,omitempty"`
+	Folders []FolderInfo `json:"folders,omitempty"`
 	// Sandbox: whether the runner can build a session's wall (package
 	// sandbox), and why not. Nil from a runner of a build before it reported
 	// it.
@@ -39,6 +46,15 @@ type Capabilities struct {
 	// Role was RoleConnector for a connector of a build before 0.5. A
 	// runner stored with it is listed as such; none may report it now.
 	Role string `json:"role,omitempty"`
+}
+
+// MachineID is the machine's id, read from the current key or, for a runner
+// of a build before 0.6, the old one. compat 0.6: drop connector.
+func (c *Capabilities) MachineID() string {
+	if c.Machine != "" {
+		return c.Machine
+	}
+	return c.Connector
 }
 
 // SandboxReport is whether a runner can build a session's wall: the system's
@@ -94,8 +110,9 @@ func LabelOK(l string) bool { return labelShape.MatchString(l) }
 
 // Check says what is wrong with c, or "".
 func (c Capabilities) Check() string {
-	if c.Connector != "" && !ConnectorShape.MatchString(c.Connector) {
-		return "capabilities.connector must be con_ and 16 hex digits"
+	mid := c.MachineID()
+	if mid != "" && !ConnectorShape.MatchString(mid) {
+		return "capabilities.machine must be con_ and 16 hex digits"
 	}
 	if c.Role != "" {
 		return "agentbus connector was retired in 0.5: run agentbus runner on the folder's machine, with the same data folder"
@@ -103,8 +120,8 @@ func (c Capabilities) Check() string {
 	if len(c.Folders) > MaxFolders || len(c.Harnesses) > 64 || len(c.Isolation) > 16 || len(c.OS) > 32 || len(c.Arch) > 32 {
 		return "capabilities lists too much"
 	}
-	if len(c.Folders) > 0 && c.Connector == "" {
-		return "capabilities.folders need capabilities.connector"
+	if len(c.Folders) > 0 && mid == "" {
+		return "capabilities.folders need capabilities.machine"
 	}
 	for _, f := range c.Folders {
 		if !FolderRefShape.MatchString(f.Ref) || len(f.Name) > 255 {
@@ -145,17 +162,19 @@ const harnessTake = `(j.session IS NOT NULL AND EXISTS (SELECT 1 FROM sessions s
 		WHERE json_extract(h.value, '$.name') = json_extract(j.spec, '$.agent') AND json_extract(h.value, '$.found'))
 	OR NOT EXISTS (SELECT 1 FROM runners o, json_each(o.caps, '$.harnesses') h WHERE o.team = j.team AND o.seen >= ? AND o.removed IS NULL
 		AND json_extract(h.value, '$.name') = json_extract(j.spec, '$.agent') AND json_extract(h.value, '$.found')
-		AND (COALESCE(json_extract(j.spec, '$.connector'), '') = '' OR json_extract(j.spec, '$.connector') = json_extract(o.caps, '$.connector'))
+		AND (COALESCE(json_extract(j.spec, '$.machine'), json_extract(j.spec, '$.connector'), '') = '' OR COALESCE(json_extract(j.spec, '$.machine'), json_extract(j.spec, '$.connector')) = COALESCE(json_extract(o.caps, '$.machine'), json_extract(o.caps, '$.connector')))
 		AND NOT EXISTS (SELECT 1 FROM json_each(j.spec, '$.labels') l WHERE l.value NOT IN (SELECT value FROM json_each(o.labels))))`
 
-// machineTake: a job that names a machine (spec.connector) goes to the
-// runner on that machine and no other. A session runs on the machine that
-// holds its folder. One exception keeps a session made before 0.5 going: a
-// next job of a session another machine's runner already holds (its first
-// turn was built there from a snapshot) stays with that runner. Folder jobs
-// never take it: an apply is always the folder's own machine's.
-const machineTake = `COALESCE(json_extract(j.spec, '$.connector'), '') = ''
-	OR json_extract(j.spec, '$.connector') = json_extract(r.caps, '$.connector')
+// machineTake: a job that names a machine (spec.machine) goes to the runner
+// on that machine and no other. A session runs on the machine that holds its
+// folder. One exception keeps a session made before 0.5 going: a next job of
+// a session another machine's runner already holds (its first turn was built
+// there from a snapshot) stays with that runner. Folder jobs never take it:
+// an apply is always the folder's own machine's.
+// compat 0.6: drop connector. A job or a runner of a build before 0.6 names
+// the machine under the old key, so each side reads machine then connector.
+const machineTake = `COALESCE(json_extract(j.spec, '$.machine'), json_extract(j.spec, '$.connector'), '') = ''
+	OR COALESCE(json_extract(j.spec, '$.machine'), json_extract(j.spec, '$.connector')) = COALESCE(json_extract(r.caps, '$.machine'), json_extract(r.caps, '$.connector'))
 	OR (j.kind NOT IN ` + folderKinds + ` AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = j.session AND s.team = j.team AND s.runner = r.id))`
 
 // folderKinds are the jobs a runner does to its machine's folders, not in a
@@ -197,13 +216,14 @@ func (q *Queue) Folders(team string) ([]RunnerFolder, error) {
 		if json.Unmarshal([]byte(raw.String), &c) != nil {
 			continue
 		}
+		mid := c.MachineID()
 		for _, f := range c.Folders {
-			key := c.Connector + "/" + f.Ref
+			key := mid + "/" + f.Ref
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
-			out = append(out, RunnerFolder{Ref: f.Ref, Name: f.Name, Connector: c.Connector, Runner: id})
+			out = append(out, RunnerFolder{Ref: f.Ref, Name: f.Name, Machine: mid, Runner: id})
 		}
 	}
 	return out, rows.Err()
@@ -211,20 +231,22 @@ func (q *Queue) Folders(team string) ([]RunnerFolder, error) {
 
 // RunnerFolder is one folder in Folders.
 type RunnerFolder struct {
-	Ref       string `json:"ref" doc:"The folder's reference: name it as folder_ref."`
-	Name      string `json:"name" doc:"The last part of the folder's path, for a screen. The path stays on the folder's machine."`
-	Connector string `json:"connector" doc:"The machine that holds the folder (con_ and 16 hex digits): a session in it names it as connector, and runs there."`
-	Runner    string `json:"runner" doc:"The runner that reported it: the one on that machine."`
+	Ref     string `json:"ref" doc:"The folder's reference: name it as folder_ref."`
+	Name    string `json:"name" doc:"The last part of the folder's path, for a screen. The path stays on the folder's machine."`
+	Machine string `json:"machine" doc:"The machine that holds the folder (con_ and 16 hex digits): a session in it names it as machine, and runs there."`
+	Runner  string `json:"runner" doc:"The runner that reported it: the one on that machine."`
 }
 
 // MachineSeen says whether a runner on the machine of this id (one that
-// reports it as its connector) asked for work within RunnerFresh. A
+// reports it as its machine) asked for work within RunnerFresh. A
 // connected one asks about once a second, so one not seen that long is
 // gone: its folders' applies and checks wait for nothing.
+// compat 0.6: drop connector. A runner of a build before 0.6 reports the id
+// under the old key, so the match reads machine then connector.
 func (q *Queue) MachineSeen(team, machine string) (bool, error) {
 	var n int
 	err := q.db.QueryRow(`SELECT COUNT(*) FROM runners WHERE team = ? AND seen >= ? AND removed IS NULL
-		AND COALESCE(json_extract(caps, '$.role'), '') = '' AND json_extract(caps, '$.connector') = ?`,
+		AND COALESCE(json_extract(caps, '$.role'), '') = '' AND COALESCE(json_extract(caps, '$.machine'), json_extract(caps, '$.connector')) = ?`,
 		team, nanos(q.now().Add(-RunnerFresh)), machine).Scan(&n)
 	if err != nil {
 		return false, fmt.Errorf("queue: read runners: %w", err)
@@ -301,7 +323,7 @@ var SnapshotShape = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // another, so a check that needs the path (a turn token's folder) runs where
 // the folder is. agentbus server has none, and takes references only.
 type FolderIssuer interface {
-	Connector() string
+	Machine() string
 	// Register keeps a path and answers its reference, by shape alone: a
 	// folder a person typed is checked for existence only on its own machine,
 	// through the folder job, so the control plane never reads a folder.
@@ -326,11 +348,11 @@ func ResolveFolders(spec *Spec, f FolderIssuer) string {
 				(spec.RepoRef != "" && !FolderRefShape.MatchString(spec.RepoRef)) {
 				return "folder_ref and repo_ref are fld_ and 16 hex digits, from GET /api/v0/folders"
 			}
-			if spec.Connector == "" && f != nil {
-				spec.Connector = f.Connector()
+			if spec.Machine == "" && f != nil {
+				spec.Machine = f.Machine()
 			}
-			if !ConnectorShape.MatchString(spec.Connector) {
-				return "a folder_ref needs connector, its machine, from GET /api/v0/folders"
+			if !ConnectorShape.MatchString(spec.Machine) {
+				return "a folder_ref needs machine, from GET /api/v0/folders"
 			}
 		}
 		return ""
@@ -339,7 +361,7 @@ func ResolveFolders(spec *Spec, f FolderIssuer) string {
 		return "name a folder by its path or by its reference, not both"
 	}
 	if f == nil {
-		return "this server has no folders of its own: name folder_ref and connector from GET /api/v0/folders, which lists the folders its runners own"
+		return "this server has no folders of its own: name folder_ref and machine from GET /api/v0/folders, which lists the folders its runners own"
 	}
 	for _, p := range []struct{ path, ref *string }{{&spec.Folder, &spec.FolderRef}, {&spec.Repo, &spec.RepoRef}} {
 		if *p.path == "" {
@@ -351,7 +373,7 @@ func ResolveFolders(spec *Spec, f FolderIssuer) string {
 		}
 		*p.ref, *p.path = ref, ""
 	}
-	spec.Connector = f.Connector()
+	spec.Machine = f.Machine()
 	return ""
 }
 

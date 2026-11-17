@@ -228,7 +228,7 @@ func TestServerAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref, connector := folders.Ref(folder), fr.Connector()
+	ref, connector := folders.Ref(folder), fr.Machine()
 
 	// With no runner yet, a turn waits in the server's queue.
 	code, queued := startTurn(t, server, tok, map[string]any{"agent": "claude", "folder_ref": ref, "connector": connector,
@@ -291,7 +291,7 @@ func TestServerAndRunner(t *testing.T) {
 		Folders []queue.RunnerFolder `json:"folders"`
 	}
 	if code, raw := getAPI(t, server, tok, "/api/v0/folders"); code != 200 || json.Unmarshal([]byte(raw), &fl) != nil ||
-		len(fl.Folders) != 1 || fl.Folders[0].Ref != ref || fl.Folders[0].Connector != connector ||
+		len(fl.Folders) != 1 || fl.Folders[0].Ref != ref || fl.Folders[0].Machine != connector ||
 		fl.Folders[0].Name != filepath.Base(folder) || strings.Contains(raw, folder) {
 		t.Fatalf("GET /api/v0/folders: %d %s", code, raw)
 	}

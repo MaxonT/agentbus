@@ -5,8 +5,8 @@
 // this machine: the file folders.json in the data folder maps each
 // reference back to it.
 //
-// The machine itself has an id (con_ and 16 hex digits, still named
-// connector), made once and kept in the same file. A job that names it goes
+// The machine itself has an id (con_ and 16 hex digits), made once and kept
+// in the same file, written under the key "machine". A job that names it goes
 // only to the runner that reports it (queue.Take), so a session runs on its
 // folder's machine. A runner that keeps its data folder keeps the id.
 //
@@ -96,10 +96,10 @@ func (r *Registry) Add(path string) (string, error) {
 type Registry struct {
 	path string
 
-	mu        sync.Mutex
-	connector string
-	folders   map[string]entry
-	copies    []string // the folders that hold session copies (CopiesIn)
+	mu      sync.Mutex
+	machine string
+	folders map[string]entry
+	copies  []string // the folders that hold session copies (CopiesIn)
 }
 
 type entry struct {
@@ -109,7 +109,10 @@ type entry struct {
 }
 
 type file struct {
-	Connector string           `json:"connector"`
+	Machine string `json:"machine"`
+	// compat 0.6: drop connector. Read a file a 0.5 runner wrote under the
+	// old key; Open prefers Machine and save never writes this one.
+	Connector string           `json:"connector,omitempty"`
 	Folders   map[string]entry `json:"folders"`
 }
 
@@ -120,10 +123,17 @@ func Open(path string) (*Registry, error) {
 	switch {
 	case err == nil:
 		var f file
-		if json.Unmarshal(b, &f) != nil || !connectorShape(f.Connector) {
+		if json.Unmarshal(b, &f) != nil {
 			return nil, errors.New("folders: " + filepath.Base(path) + " cannot be read")
 		}
-		r.connector = f.Connector
+		id := f.Machine
+		if id == "" {
+			id = f.Connector // compat 0.6: drop connector (old key)
+		}
+		if !connectorShape(id) {
+			return nil, errors.New("folders: " + filepath.Base(path) + " cannot be read")
+		}
+		r.machine = id
 		for k, v := range f.Folders {
 			r.folders[k] = v
 		}
@@ -135,15 +145,15 @@ func Open(path string) (*Registry, error) {
 	if _, err := rand.Read(raw[:]); err != nil {
 		return nil, err
 	}
-	r.connector = "con_" + hex.EncodeToString(raw[:])
+	r.machine = "con_" + hex.EncodeToString(raw[:])
 	if err := r.save(); err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-// Connector is this machine's id.
-func (r *Registry) Connector() string { return r.connector }
+// Machine is this machine's id.
+func (r *Registry) Machine() string { return r.machine }
 
 // Ref is the reference of the folder at path. It does not register it.
 func Ref(path string) string {
@@ -311,7 +321,7 @@ func (r *Registry) List(max int) []Folder {
 // save writes the file with mode 0600, by rename. The lock is held, or the
 // registry is not shared yet.
 func (r *Registry) save() error {
-	b, _ := json.Marshal(file{Connector: r.connector, Folders: r.folders})
+	b, _ := json.Marshal(file{Machine: r.machine, Folders: r.folders})
 	tmp := r.path + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return errors.New("folders: " + filepath.Base(r.path) + " could not be written")
