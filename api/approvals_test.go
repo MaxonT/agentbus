@@ -101,6 +101,23 @@ func TestApprovalsListShowsHarnessNotTool(t *testing.T) {
 	}
 }
 
+// A held call carries its commands once, as the commands array; it no longer
+// also sends them joined in a command string (one fact, one place).
+func TestApprovalsListCommandsOnly(t *testing.T) {
+	e := askStack(t)
+	seedApproval(t, e, "ap1", "s1", "t_1", []string{"git push", "rm -rf x"}, []string{"git push"})
+	resp, out := send(t, e, "GET", "/api/v0/approvals", "", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("list: %d", resp.StatusCode)
+	}
+	if !strings.Contains(out, `"commands":["git push","rm -rf x"]`) {
+		t.Fatalf("the approval did not carry its commands array:\n%s", out)
+	}
+	if strings.Contains(out, `"command":`) {
+		t.Fatalf("the approval still carries the joined command string:\n%s", out)
+	}
+}
+
 // Allow moves each approved command from ask to allow in the settings (so the
 // runner allows it from the next turn) and records the answer. The continuation
 // turn is skipped here because the turn that asked is gone.
