@@ -22,6 +22,7 @@
 package jobs
 
 import (
+	"crypto/cipher"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -109,7 +110,8 @@ type Config struct {
 type Server struct {
 	cfg          Config
 	token, enrol [32]byte
-	tokenKey     [32]byte // signs runners' turn tokens (tokens.go)
+	tokenKey     [32]byte    // signs runners' turn tokens (tokens.go)
+	sealer       cipher.AEAD // seals their stand-in credentials (tokens.go)
 	mux          *http.ServeMux
 	reads        readScopes // what each runner may read (blobscope.go)
 	fin          *finisher  // control's one ender of jobs, with a record (finisher.go)
@@ -148,7 +150,7 @@ func New(cfg Config) (*Server, error) {
 		})
 	}
 	s := &Server{cfg: cfg, token: sha256.Sum256([]byte(cfg.Token)), enrol: sha256.Sum256([]byte(cfg.EnrollToken)), mux: http.NewServeMux(),
-		tokenKey: sha256.Sum256([]byte("agentbus runner turn tokens\x00" + cfg.Token))}
+		tokenKey: sha256.Sum256([]byte("agentbus runner turn tokens\x00" + cfg.Token)), sealer: standInSealer(cfg.Token)}
 	if cfg.Record != nil {
 		s.fin = newFinisher(cfg.Queue, cfg.Record)
 	}
@@ -531,9 +533,15 @@ type AttemptStarted struct {
 	// Cancel: the job was asked to stop. Finish it as cancelled.
 	Cancel bool `json:"cancel"`
 	// Token is the attempt's turn token, minted by control (tokens.go): the
-	// agent's token for control's API, and the placeholder credential of its
-	// model calls. It works while the attempt is current.
+	// agent's token for control's API, and nothing else. It works while the
+	// attempt is current.
 	Token string `json:"token"`
+	// StandIn is the credential the agent's model calls carry in place of
+	// its sign-in or key (tokens.go): control's relay swaps it for the real
+	// one, and it is good nowhere else. It works while the attempt is
+	// current. A runner that holds no secret gives its agent this, never
+	// Token, as its sign-in.
+	StandIn string `json:"stand_in"`
 	// Signin, when set, is why the turn's agent can get no credential from
 	// control now, such as "connect your claude subscription in Settings"
 	// (signin). A runner whose agents' credentials come from control
@@ -554,7 +562,11 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request, rn queue.Runner) 
 		s.queueError(w, err)
 		return
 	}
-	st := AttemptStarted{Attempt: a, Cancel: c, Token: s.mint(rn.ID, a.ID, a.Number)}
+	st := AttemptStarted{Attempt: a, Cancel: c, Token: s.mint(rn.ID, a.ID, a.Number), StandIn: s.standIn(rn.ID, a.ID, a.Number)}
+	if st.StandIn == "" {
+		fail(w, http.StatusInternalServerError, "control could not make the turn's stand-in credential")
+		return
+	}
 	if j, err := s.cfg.Queue.Current(rn.ID, a.ID, a.Number); err == nil {
 		st.Signin = s.signin(j)
 	}

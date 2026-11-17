@@ -201,12 +201,12 @@ func (g *Gateway) holdThenRead(session, turn string, read func()) (release func(
 // Credential is where a gateway's calls get their credential when the
 // gateway runs in control's own process (agentbus up): the same answer
 // control's relay gives a runner's call, without a hop over HTTP. One rule:
-// a call's session and turn come from its token's job, never from its path.
+// a call's session and turn come from its stand-in's job, never from its path.
 // Neither func puts a value in an event or a log.
 type Credential struct {
-	// Turn says whether the call's placeholder (its turn's token) is the
-	// token of a running turn, and that turn is the session and turn the
-	// call's path names. When not (no such token, or another turn's), it is
+	// Turn says whether the call's placeholder (its turn's stand-in) is
+	// the stand-in of a running turn, and that turn is the session and turn
+	// the call's path names. When not (no such stand-in, or another turn's), it is
 	// the refusal: the gateway answers it before anything is held, recorded
 	// or rewritten, and the call is recorded nowhere.
 	Turn func(r *http.Request, session, turn string) *Refusal

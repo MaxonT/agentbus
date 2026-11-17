@@ -1294,7 +1294,7 @@ type vendors struct {
 	anthropic, openai               http.Handler // the vendors' own, for a subscription
 	openrouterAnth, openrouterResps http.Handler // OpenRouter's, under /openrouter
 	// relay takes runners' model calls and adds their credential, under
-	// jobs.RelayPrefix; nil without a queue. A runner's turn token guards
+	// jobs.RelayPrefix; nil without a queue. A running turn's stand-in guards
 	// it, so it answers callers on other machines.
 	relay http.Handler
 	// gemini is agy's Code Assist gateway: to Google, or on a runner that

@@ -313,11 +313,14 @@ type Request struct {
 	Depth int
 	// Token is the turn's own token when control minted it, for a runner of
 	// a server: the child calls control's API at APIURL with it, and with
-	// Placeholder its model calls carry it as their credential, which
-	// control's gateway swaps for the real one. Empty Token mints one here,
-	// for this service's API.
+	// nothing else. Empty Token mints one here, for this service's API.
 	Token, APIURL string
-	Placeholder   bool
+	// StandIn, when set, is the child's model credential in place of a
+	// sign-in or key of this machine's: control minted it with Token
+	// (jobs.AttemptStarted.StandIn), and control's gateway swaps it for the
+	// real one. It is never Token: an agent sends its sign-in to its vendor
+	// directly too, and the turn token opens control's API.
+	StandIn string
 	// Signin, when set, is why control can give this turn's agent no
 	// credential now, such as "connect your claude subscription in
 	// Settings": the turn is refused with it, after a missing program and
@@ -425,7 +428,7 @@ func (e *Engine) Start(req Request) (*Turn, error) {
 	return e.start(turn{harness: req.Harness, folder: req.Folder, folderRef: req.FolderRef, session: id, id: req.Turn,
 		model: req.Model, readOnly: req.ReadOnly, prompt: req.Prompt, key: req.IdempotencyKey,
 		agentID: req.AgentID, access: req.Access, keyEnv: req.KeyEnv, origin: req.Origin, root: req.Root, depth: req.Depth,
-		token: req.Token, apiURL: req.APIURL, placeholder: req.Placeholder, signin: req.Signin, allowOnce: req.AllowOnce})
+		token: req.Token, apiURL: req.APIURL, standIn: req.StandIn, signin: req.Signin, allowOnce: req.AllowOnce})
 }
 
 // next starts the next turn of req.Session, in its own agent and folder.
@@ -557,7 +560,7 @@ func (e *Engine) next(req Request) (*Turn, error) {
 		recoveredFrom: recovered, recoveredWhy: recoveredWhy, continuity: continuity, model: model,
 		readOnly: req.ReadOnly, prompt: req.Prompt, context: context, key: req.IdempotencyKey,
 		agentID: agentID, access: access, keyEnv: keyEnv, origin: req.Origin, root: req.Root, depth: req.Depth,
-		token: req.Token, apiURL: req.APIURL, placeholder: req.Placeholder, signin: req.Signin, allowOnce: req.AllowOnce}
+		token: req.Token, apiURL: req.APIURL, standIn: req.StandIn, signin: req.Signin, allowOnce: req.AllowOnce}
 	if from != "" || continuity == ByTranscript {
 		// A fresh child: the history comes from the gateway, or from the
 		// transcript in its prompt.
@@ -633,7 +636,7 @@ type turn struct {
 	root                     string // the request tree's root session; "" for this one
 	depth                    int
 	token, apiURL            string   // control's token for the turn and its API (Request.Token)
-	placeholder              bool     // the token is the child's model credential
+	standIn                  string   // the child's model credential (Request.StandIn); "" for its own
 	signin                   string   // why control has no credential for the agent now
 	allowOnce                []string // command lines allowed once for this turn, from an earlier card
 }
@@ -677,9 +680,7 @@ func (e *Engine) start(t turn) (*Turn, error) {
 		return nil, refuse(http.StatusNotFound, "this service starts no turns")
 	}
 	acc := Access{Kind: t.access, KeyEnv: t.keyEnv, Model: t.model}
-	if t.placeholder {
-		acc.Placeholder = t.token
-	}
+	acc.Placeholder = t.standIn
 	l, err := e.cfg.Wire(t.harness, baseURL, acc)
 	var refusal *Refusal
 	switch {

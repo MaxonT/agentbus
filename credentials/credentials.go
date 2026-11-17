@@ -1,6 +1,6 @@
 // Package credentials is where control's gateway gets the credential it adds
 // to a runner's model call. Runners hold no secrets: an agent on a runner
-// gets a placeholder (its turn's token), and control swaps the real
+// gets a placeholder (its turn's stand-in), and control swaps the real
 // credential in on the way out (jobs/relay.go).
 //
 // Where a credential comes from is a plug (Source), one per kind of access:

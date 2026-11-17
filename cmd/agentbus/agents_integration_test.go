@@ -117,7 +117,7 @@ func TestOpenRouterAgentTurnGoesThroughTheGateway(t *testing.T) {
 		}
 	}
 	for _, k := range []string{"ANTHROPIC_AUTH_TOKEN", "AB_TEST_OR_KEY"} {
-		if v, _ := envValue(r.Env, k); !strings.HasPrefix(v, jobs.TokenPrefix) {
+		if v, _ := envValue(r.Env, k); !strings.HasPrefix(v, jobs.StandInPrefix) {
 			t.Errorf("child %s is not the placeholder", k)
 		}
 	}
