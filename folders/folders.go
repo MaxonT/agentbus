@@ -44,11 +44,23 @@ var (
 	ErrUnreadable = errors.New("the folder cannot be read by the user the machine's runner runs as")
 )
 
+// CheckShape says why path cannot name a folder by its shape alone, or nil:
+// it must be an absolute path of at most MaxPath bytes. It touches no
+// filesystem, so the control plane may call it on its own thread (the
+// synchronous 400 for a bad path); existence and readability are Check's,
+// run on the folder's own machine through the folder job.
+func CheckShape(path string) error {
+	if len(path) > MaxPath || !filepath.IsAbs(path) {
+		return ErrNotAbsolute
+	}
+	return nil
+}
+
 // Check says why the folder at path cannot be used, or nil: it must be an
 // absolute path to an existing directory this user can read.
 func Check(path string) error {
-	if len(path) > MaxPath || !filepath.IsAbs(path) {
-		return ErrNotAbsolute
+	if err := CheckShape(path); err != nil {
+		return err
 	}
 	fi, err := os.Stat(path)
 	switch {
@@ -141,8 +153,8 @@ func Ref(path string) string {
 // Register keeps path and answers its reference. The folder need not exist
 // yet: the turn that names it says so in its own words.
 func (r *Registry) Register(path string) (string, error) {
-	if len(path) > MaxPath || !filepath.IsAbs(path) {
-		return "", ErrNotAbsolute
+	if err := CheckShape(path); err != nil {
+		return "", err
 	}
 	path = filepath.Clean(path)
 	ref := Ref(path)

@@ -1,11 +1,11 @@
 package api
 
 // A folder a person typed for a new session, on the machine they chose.
-// Control never reads a folder, so the runner of that machine checks it:
-// agentbus up's own folders directly (queue.FolderIssuer), any other through
-// a folder job that the machine's runner takes (queue.KindFolder). Either way
-// the folder is registered there, the session goes on by its reference, and
-// runs on that machine. GET /api/v0/folders lists it from then on.
+// Control never reads a folder, so the runner of that machine checks it
+// through a folder job it takes (queue.KindFolder): agentbus up's own machine
+// through its built-in runner, any other through that machine's runner. The
+// folder is registered there, the session goes on by its reference, and runs
+// on that machine. GET /api/v0/folders lists it from then on.
 
 import (
 	"context"
@@ -22,14 +22,14 @@ import (
 // own; else the only one online. status and msg say why not, when msg is not
 // empty; status 0 means the caller went away.
 func (a *API) typedFolder(ctx context.Context, path, machine string) (ref, conn string, status int, msg string) {
+	// agentbus up's own machine takes the folder job through its built-in
+	// runner, the same KindFolder job a remote runner takes: control never
+	// reads the folder on its own thread. The folder's shape is already
+	// checked synchronously before here (api/runs.go), so a bad path got its
+	// 400 without the queue; existence is the runner's, through the job.
 	if own := a.cfg.Folders; own != nil && (machine == "" || machine == own.Connector()) {
-		ref, err := own.Add(path)
-		if err != nil {
-			return "", "", http.StatusBadRequest, err.Error()
-		}
-		return ref, own.Connector(), 0, ""
-	}
-	if machine != "" {
+		machine = own.Connector()
+	} else if machine != "" {
 		if !queue.ConnectorShape.MatchString(machine) {
 			return "", "", http.StatusBadRequest, "connector must be con_ and 16 hex digits: a machine's id, from GET /api/v0/runners"
 		}

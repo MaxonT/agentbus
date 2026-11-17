@@ -30,7 +30,8 @@ func getJSON(t *testing.T, e *env, path string, v any) int {
 // GET /turns lists it first, and a stop makes it read stopped at once.
 func TestQueuedTurnIsKnownAndStops(t *testing.T) {
 	e := newJobsEnv(t)
-	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder":"/tmp","prompt":"wait for a runner"}`)))
+	ref, conn := e.folderRef(t, "/tmp")
+	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder_ref":"`+ref+`","connector":"`+conn+`","prompt":"wait for a runner"}`)))
 	var st Started
 	if resp.StatusCode != 202 || json.Unmarshal([]byte(raw), &st) != nil || st.State != "queued" || st.Turn == "" || st.Session == "" || st.BaseURL != "" {
 		t.Fatalf("POST /turns: %d %s", resp.StatusCode, raw)
@@ -78,7 +79,8 @@ func TestQueuedTurnIsKnownAndStops(t *testing.T) {
 // exactly one page.
 func TestStoppedQueuedTurnIsListed(t *testing.T) {
 	e := newJobsEnv(t)
-	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder":"/tmp","prompt":"stop me"}`)))
+	ref, conn := e.folderRef(t, "/tmp")
+	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder_ref":"`+ref+`","connector":"`+conn+`","prompt":"stop me"}`)))
 	var st Started
 	if resp.StatusCode != 202 || json.Unmarshal([]byte(raw), &st) != nil || st.State != "queued" {
 		t.Fatalf("POST /turns: %d %s", resp.StatusCode, raw)
@@ -134,7 +136,8 @@ func TestStoppedQueuedTurnIsListed(t *testing.T) {
 // page of the unfiltered list (agy review round 2, 2026-11-11).
 func TestNeverStartedOnOnePageAcrossClocks(t *testing.T) {
 	e := newJobsEnv(t)
-	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder":"/tmp","prompt":"stop me"}`)))
+	ref, conn := e.folderRef(t, "/tmp")
+	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder_ref":"`+ref+`","connector":"`+conn+`","prompt":"stop me"}`)))
 	var st Started
 	if resp.StatusCode != 202 || json.Unmarshal([]byte(raw), &st) != nil {
 		t.Fatalf("POST /turns: %d %s", resp.StatusCode, raw)
@@ -231,7 +234,8 @@ func TestTurnNumber(t *testing.T) {
 // turn this service does not know, and a turn that has not ended.
 func TestReviewRefusals(t *testing.T) {
 	e := newJobsEnv(t)
-	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder":"/tmp","prompt":"x"}`)))
+	ref, conn := e.folderRef(t, "/tmp")
+	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder_ref":"`+ref+`","connector":"`+conn+`","prompt":"x"}`)))
 	var st Started
 	if resp.StatusCode != 202 || json.Unmarshal([]byte(raw), &st) != nil {
 		t.Fatalf("POST /turns: %d %s", resp.StatusCode, raw)
