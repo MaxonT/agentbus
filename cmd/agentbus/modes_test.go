@@ -100,6 +100,25 @@ func TestConnectRemoved(t *testing.T) {
 	}
 }
 
+// The -gateway local refusal points to how a sign-in is connected today: the
+// cockpit's Connect step, the same phrasing connectRemoved uses, and not the
+// removed "agentbus connect".
+func TestGatewayLocalRemovedNamesConnect(t *testing.T) {
+	const connectStep = "the cockpit (Agents, the agent's Connect step)"
+	if strings.Contains(gatewayLocalRemoved, "agentbus connect") {
+		t.Errorf("gatewayLocalRemoved still names the removed agentbus connect: %q", gatewayLocalRemoved)
+	}
+	if !strings.Contains(gatewayLocalRemoved, connectStep) {
+		t.Errorf("gatewayLocalRemoved does not name the cockpit Connect step: %q", gatewayLocalRemoved)
+	}
+	// connectRemoved is the vetted connect guidance (TestConnectRemoved locks
+	// its exact text), and the connect route exists (api.TestConnectRouteExists);
+	// the refusal shares connectRemoved's wording so the two cannot drift.
+	if !strings.Contains(connectRemoved, connectStep) {
+		t.Errorf("connectRemoved no longer uses %q; update gatewayLocalRemoved to match", connectStep)
+	}
+}
+
 // agentbus api works from the top-level command as before: the call goes to
 // AGENTBUS_URL with the turn's token, and a bad line prints its own usage.
 func TestAPICommandUnchanged(t *testing.T) {

@@ -481,7 +481,7 @@ replay_base claude
 refused 400 access must be subscription, openrouter or api
 === claude api key, not relayed
 --- turn t_1 harness="claude" access="api" model="" read_only=false
-refused 400 an agent on an API key runs only where control adds its key; run it on agentbus up or a runner, without -gateway local
+refused 400 an agent on an API key runs only where control adds its key; run it on agentbus up or a runner
 log run.refused agent=claude access=api reason=wire
 === claude api key, relayed, then resume
 --- turn t_1 harness="claude" access="api" model="" read_only=false
@@ -1506,7 +1506,7 @@ session.closed resume_id="tid-1"
 refused 400 access must be subscription, openrouter or api
 === codex api key, not relayed
 --- turn t_1 harness="codex" access="api" model="" read_only=false
-refused 400 an agent on an API key runs only where control adds its key; run it on agentbus up or a runner, without -gateway local
+refused 400 an agent on an API key runs only where control adds its key; run it on agentbus up or a runner
 log run.refused agent=codex access=api reason=wire
 === codex api key, relayed, then resume
 --- turn t_1 harness="codex" access="api" model="" read_only=false
@@ -2638,7 +2638,7 @@ session.closed resume_id="cid-0"
 log run.hint session=s1 turn=t_1 left_out=agy_no_instruction_flag
 === agy api key, not relayed
 --- turn t_1 harness="agy" access="api" model="" read_only=false
-refused 400 an agent on an API key runs only where control adds its key; run it on agentbus up or a runner, without -gateway local
+refused 400 an agent on an API key runs only where control adds its key; run it on agentbus up or a runner
 log run.refused agent=agy access=api reason=wire
 === agy api key, relayed, with a model
 --- turn t_1 harness="agy" access="api" model="gemini-3.1-pro-preview" read_only=false

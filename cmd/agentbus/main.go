@@ -610,11 +610,10 @@ func start(c config) (*service, error) {
 		}
 		// A runner that holds no secrets, agentbus up's built-in one too,
 		// runs each session in a home of its own: its agents' credentials
-		// come from control, so nothing of this user's home is needed.
-		homes := ""
-		if c.noSecrets() {
-			homes = filepath.Join(c.home, homesDir)
-		}
+		// come from control, so nothing of this user's home is needed. Every
+		// runner with an engine is such a runner now (noSecrets == hasEngine),
+		// so this block, inside hasEngine, always makes the homes dir.
+		homes := filepath.Join(c.home, homesDir)
 		eng, err = engine.New(engine.Config{Store: st, BaseURL: baseURL, MaxRuns: c.maxRuns, ReplayBase: replayBase, AgentName: agentName, Homes: homes,
 			Settings: cfgStore, Protect: protect, APIDir: apiLink(c.home, c.self, svcLog), Wire: runWire(c.getenv, c.environ, c.lookPath), RunGrace: c.runGrace, Logf: svcLog.Printf,
 			RunLog: func(session string, data []byte) {

@@ -825,9 +825,9 @@ func (e *Engine) start(t turn) (*Turn, error) {
 		if why != "" {
 			e.cfg.Logf("run.refused agent=%s reason=sandbox auto=%t", t.harness, autoWall)
 			if autoWall {
-				return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn Network contain off in the cockpit's Settings (Isolation, Network).")
+				return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Grant a folder the agent needs under read_folders in the cockpit's Settings (Isolation), fix it on this runner, or turn Network contain off in the cockpit's Settings (Isolation, Network).")
 			}
-			return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn Sandbox off in the cockpit's Settings (Isolation).")
+			return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Grant a folder the agent needs under read_folders in the cockpit's Settings (Isolation), fix it on this runner, or turn Sandbox off in the cockpit's Settings (Isolation).")
 		}
 		jail = box
 		cmd.Env = setEnv(cmd.Env, box.Env())
