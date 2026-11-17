@@ -101,7 +101,7 @@ func New(s Spec) (*Box, error) {
 	for _, r := range s.Read {
 		p, err := readable(r)
 		if err != nil {
-			return nil, &Error{Why: "a path the agent needs to read is not there: " + filepath.Base(r) + " — a contained turn reads a folder only when it is listed under read_folders in Settings"}
+			return nil, &Error{Why: "a path the agent needs to read is not there: " + filepath.Base(r) + " — a folder is granted to a contained turn under read_folders in Settings, and must exist on this runner"}
 		}
 		b.read = append(b.read, p)
 	}
