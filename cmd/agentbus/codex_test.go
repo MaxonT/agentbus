@@ -38,9 +38,8 @@ func (r *recorder) seen() []string {
 
 func startTwoVendors(t *testing.T, home, anthropicURL, chatgptURL string) *service {
 	t.Helper()
-	// The gateway passing each call on with the agent's own sign-in, as a
-	// runner with -gateway local does: agentbus up sends every call to its
-	// relay since 0.5.1 (nosecrets and up_signin tests).
+	// agentbus up sends every call to its relay, which adds the credential
+	// and records the call, since 0.5.1 (nosecrets and up_signin tests).
 	svc, err := start(config{listen: "127.0.0.1:0", home: home, upstream: mustURL(anthropicURL),
 		chatgpt: mustURL(chatgptURL), logf: t.Logf})
 	if err != nil {

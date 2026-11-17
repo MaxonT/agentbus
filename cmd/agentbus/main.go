@@ -449,8 +449,7 @@ func start(c config) (*service, error) {
 		// Each records the calls it carries in this record, as a runner's
 		// own gateway does (jobs/relay.go). It records every call it
 		// carries: in up too, where only other machines' runners use it,
-		// since up's own gateways get the credential in this process
-		// (jobs.Server.Local).
+		// since up's own gateways get the credential in this process.
 		relayed := func(up jobs.Upstream, as ...adapter.Adapter) jobs.Upstream {
 			for _, a := range as {
 				g := gateway.New(up.URL, a, sink)
@@ -611,9 +610,7 @@ func start(c config) (*service, error) {
 		}
 		// A runner that holds no secrets, agentbus up's built-in one too,
 		// runs each session in a home of its own: its agents' credentials
-		// come from control, so nothing of this user's home is needed. A
-		// runner with -gateway local uses the harness's own sign-in, which
-		// lives in this user's home, so its turns run there.
+		// come from control, so nothing of this user's home is needed.
 		homes := ""
 		if c.noSecrets() {
 			homes = filepath.Join(c.home, homesDir)
