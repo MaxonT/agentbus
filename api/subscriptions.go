@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/staysup/agentbus/agents"
 	"github.com/staysup/agentbus/credentials"
 	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/harness"
@@ -29,7 +30,7 @@ type SubscriptionList struct {
 	// EnvKeys answers "is a key available from the environment" for the
 	// variables saved agents name in key_env, so a cockpit can show a key-set
 	// dot without the agent carrying its own copy.
-	EnvKeys map[string]bool `json:"env_keys" doc:"For each environment variable a saved openrouter agent names in key_env (such as OPENROUTER_API_KEY), whether it is set where control runs, read at request time. Names only, never values. A key set in Settings (api_keys.openrouter) covers every openrouter agent regardless of this."`
+	EnvKeys map[string]bool `json:"env_keys" doc:"For each environment variable an openrouter agent reads its key from in key_env, whether it is set where control runs, read at request time: always the default OPENROUTER_API_KEY, plus every other key_env a saved openrouter agent names. Names only, never values. A key set in Settings (api_keys.openrouter) covers every openrouter agent regardless of this."`
 }
 
 // KeyInput is the body of PUT /api/v0/subscriptions/<name>/key.
@@ -236,27 +237,6 @@ func (a *API) removeKey(w http.ResponseWriter, r *http.Request, name string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// keptKeySet says an OpenRouter key is set in Settings.
-func (a *API) keptKeySet() bool { return a.keyIsSet(credentials.AccessOpenRouter) }
-
-// apiKeySet says the key of harness's access "api" is set in Settings.
-func (a *API) apiKeySet(name string) bool {
-	h, ok := harness.Get(name)
-	if !ok || h.Info().APIKey == nil {
-		return false
-	}
-	return a.keyIsSet(h.Info().APIKey.Name)
-}
-
-// keyIsSet says the key named name is set in Settings.
-func (a *API) keyIsSet(name string) bool {
-	if a.cfg.Subscriptions == nil || a.cfg.Subscriptions.Store == nil {
-		return false
-	}
-	st, err := a.cfg.Subscriptions.Store.KeyStatus(name)
-	return err == nil && st.Set
-}
-
 func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 	m := a.cfg.Subscriptions
 	if m == nil {
@@ -295,6 +275,9 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 	// whether control's own environment holds each, read now. So the one
 	// place "is a key available" is answered is here, not a copy on each agent.
 	out.EnvKeys = map[string]bool{}
+	// The default variable a new openrouter agent reads is always reported, so
+	// the new-agent form can say whether it is set before any agent names it.
+	out.EnvKeys[agents.DefaultKeyEnv] = a.envSet(agents.DefaultKeyEnv)
 	if a.cfg.Agents != nil {
 		for _, ag := range a.cfg.Agents.List() {
 			if ag.Access == harness.OpenRouter && ag.KeyEnv != "" {
