@@ -23,7 +23,7 @@ import (
 	engine "github.com/staysup/agentbus/run"
 )
 
-const apiUsage = `usage: agentbus-api METHOD PATH [BODY]   (or agentbus api METHOD PATH [BODY])
+const apiUsage = `usage: agentbus-api METHOD PATH [BODY]
   Calls this AgentBus service from inside a turn, with $AGENTBUS_URL and $AGENTBUS_TOKEN.
   PATH starts with /api/ or /docs/. BODY is JSON; "-" reads it from stdin.
   Prints the reply; exits 1 when its status is 400 or more.`

@@ -26,17 +26,18 @@ Your folder is usually your session's own copy of the person's folder. Your edit
 {tools}
 `
 
-// ToolsText is what {tools} becomes for a turn with the agentbus MCP
-// tools. apply is [agent_api] apply: whether the turn may apply turns. Off,
-// the text says the person applies them, so an agent does not try and get
-// 403. On, it is the text of builds before 0.5.1, byte for byte.
+// ToolsText is what {tools} becomes for a turn with the agentbus MCP tools.
+// B11 removed the write-side route copies, so the tools now cover reads, ask
+// and search; review, apply and stop go through agentbus-api. apply is
+// [agent_api] apply: whether the turn may apply turns.
 func ToolsText(apply bool) string {
+	write := `To review or stop a turn, use agentbus-api (POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).
+The person applies turns to their folder; you cannot.`
 	if apply {
-		return `Use the tools of the agentbus MCP server for AgentBus: list and ask other agents, review, read, apply and stop turns, search this session. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.
-Work you ask for comes back to you as a later turn: do not wait for it.`
+		write = `To review, apply or stop a turn, use agentbus-api (POST /api/v0/turns/T/review, POST /api/v0/turns/T/apply, POST /api/v0/turns/T/stop).`
 	}
-	return `Use the tools of the agentbus MCP server for AgentBus: list and ask other agents, review, read and stop turns, search this session. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.
-The person applies turns to their folder; you cannot.
+	return `Use the tools of the agentbus MCP server to list and ask other agents, read turns and search this session. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.
+` + write + `
 Work you ask for comes back to you as a later turn: do not wait for it.`
 }
 
@@ -58,16 +59,16 @@ Work you ask for comes back to you as a later turn: do not wait for it. More: ag
 
 // ToolServerInstructions is the tool server's own instructions (POST
 // /api/v0/mcp, initialize), which a harness may show its model. apply says
-// whether the caller may apply turns (apply_turn is listed).
+// whether the caller may apply turns ([agent_api] apply, and not read-only).
+// B11 removed the write route copies, so review, apply and stop go through
+// agentbus-api; the tools cover reads, ask and search.
 func ToolServerInstructions(apply bool) string {
+	write := "To review or stop a turn, use agentbus-api. The person applies turns to their folder."
 	if apply {
-		return "AgentBus tools: ask other saved agents (any vendor) for work and reviews, " +
-			"read, stop and apply turns, and search this session's history. Your folder is your session's own copy; " +
-			"apply_turn puts a turn's changes in the person's folder. Work you ask for comes back to your session as a later turn."
+		write = "To review, apply or stop a turn, use agentbus-api."
 	}
-	return "AgentBus tools: ask other saved agents (any vendor) for work and reviews, " +
-		"read and stop turns, and search this session's history. Your folder is your session's own copy; " +
-		"the person applies turns to their folder. Work you ask for comes back to your session as a later turn."
+	return "AgentBus tools: ask other saved agents (any vendor) for work, read turns, and search this session's history. " +
+		"Your folder is your session's own copy. " + write + " Work you ask for comes back to your session as a later turn."
 }
 
 // CheckInstructions refuses text a turn cannot carry.

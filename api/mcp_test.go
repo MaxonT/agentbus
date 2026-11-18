@@ -124,16 +124,15 @@ func TestMCPToolListFollowsTheToken(t *testing.T) {
 		t.Error("continue_session is listed: a turn token never continues a session")
 	}
 	for _, want := range []string{"list_agents", "ask_agent", "list_turns",
-		"get_turn", "stop_turn", "turn_diff", "apply_turn", "review_turn",
-		"search_history", "rename_session"} {
+		"get_turn", "turn_diff", "search_history"} {
 		if !slices.Contains(all, want) {
 			t.Errorf("main token: %s missing from %v", want, all)
 		}
 	}
-	// apply is off for a turn token by default.
-	allButApply := slices.DeleteFunc(slices.Clone(all), func(n string) bool { return n == "apply_turn" })
-	if w := toolNames(t, e, mcpWriteTok); !slices.Equal(w, allButApply) {
-		t.Errorf("write turn: %v, want %v", w, allButApply)
+	// B11 removed the write route copies, so a write turn sees the same read and
+	// ask tools as the main token (no apply_turn to gate off).
+	if w := toolNames(t, e, mcpWriteTok); !slices.Equal(w, all) {
+		t.Errorf("write turn: %v, want %v", w, all)
 	}
 	ro := toolNames(t, e, mcpReadTok)
 	want := []string{"list_turns", "get_turn", "turn_diff", "turn_changes", "turn_calls", "turn_tools", "turn_context", "search_history", "session_context", "list_agents"}
@@ -142,9 +141,9 @@ func TestMCPToolListFollowsTheToken(t *testing.T) {
 	}
 }
 
-// apply off takes apply_turn out of a turn token's list, as the route
-// refuses it. Every other tool is listed: within its request tree a turn
-// token may always read, list agents, start, review, stop and rename.
+// Every remaining tool is listed to a turn token within its tree; tools =
+// false refuses the tool server, naming the switch as Settings shows it. (B11
+// removed the write route copies, so there is no apply_turn to gate off.)
 func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 	e := mcpEnv(t)
 	g := &run.Grant{Session: "s1", Root: "s1"}
@@ -170,7 +169,6 @@ func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 		gone []string
 	}{
 		{off(func(a *settings.AgentAPI) {}), nil},
-		{off(func(a *settings.AgentAPI) { a.Apply = &no }), []string{"apply_turn"}},
 	} {
 		got := names(tc.api)
 		for _, n := range tc.gone {
@@ -195,9 +193,7 @@ func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 func TestMCPCallOutsideTheGrantIsRefused(t *testing.T) {
 	e := mcpEnv(t)
 	for _, call := range []string{
-		`{"name":"apply_turn","arguments":{"turn":"t_1"}}`,
 		`{"name":"ask_agent","arguments":{"agent":"claude","prompt":"x"}}`,
-		`{"name":"stop_turn","arguments":{"turn":"t_1"}}`,
 	} {
 		code, v := rpc(t, e, mcpReadTok, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":`+call+`}`)
 		text, _ := dig(v, "result", "content").([]any)[0].(map[string]any)["text"].(string)
@@ -269,15 +265,13 @@ func TestMCPToolSchemas(t *testing.T) {
 		return st.def.Inputs
 	}
 	req := func(name string) []string { return schemaRequired(schemaOf(name)) }
-	if r := req("review_turn"); !slices.Contains(r, "turn") || !slices.Contains(r, "agent") {
-		t.Errorf("review requires %v", r)
-	}
 	if r := req("search_history"); slices.Contains(r, "session") || !slices.Contains(r, "q") {
 		t.Errorf("search requires %v", r)
 	}
 	// A turn input says it takes the id, not the turn's number: agents
-	// passed "3" in 5 of 6 MCP runs (2026-11-11).
-	for _, name := range []string{"get_turn", "stop_turn", "turn_diff", "apply_turn", "review_turn"} {
+	// passed "3" in 5 of 6 MCP runs (2026-11-11). (B11 removed the write-side
+	// turn tools; the kept read tools carry the same turn-id input doc.)
+	for _, name := range []string{"get_turn", "turn_diff"} {
 		props, _ := schemaOf(name)["properties"].(map[string]any)
 		turn, _ := props["turn"].(map[string]any)
 		if d, _ := turn["description"].(string); !strings.Contains(d, "never the turn's number") {
@@ -290,13 +284,19 @@ func TestMCPToolSchemas(t *testing.T) {
 // no effect since 0.6).
 func TestOpenAPINamesTools(t *testing.T) {
 	doc := loadSpec(t)
-	op := doc.Paths.Value("/api/v0/turns/{id}/apply").Post
+	op := doc.Paths.Value("/api/v0/turns/{id}/diff").Get
 	b, _ := json.Marshal(op.Extensions["x-agentbus-tools"])
-	if !strings.Contains(string(b), `"apply_turn"`) {
-		t.Errorf("apply's tools: %s", b)
+	if !strings.Contains(string(b), `"turn_diff"`) {
+		t.Errorf("diff's tools: %s", b)
 	}
 	if strings.Contains(string(b), "effect") {
 		t.Errorf("x-agentbus-tools still carries an effect: %s", b)
+	}
+	// The removed write route copies no longer name a tool.
+	op = doc.Paths.Value("/api/v0/turns/{id}/apply").Post
+	b, _ = json.Marshal(op.Extensions["x-agentbus-tools"])
+	if strings.Contains(string(b), "apply_turn") {
+		t.Errorf("apply still names apply_turn: %s", b)
 	}
 }
 
@@ -310,10 +310,10 @@ func TestToolQueryValue(t *testing.T) {
 }
 
 // A request whose id is not a string or an integer is refused before it runs:
-// the rename never happens. A notification never runs either.
+// the tool never runs. A notification never runs either.
 func TestMCPRefusesABadID(t *testing.T) {
 	e := mcpEnv(t)
-	call := `"method":"tools/call","params":{"name":"rename_session","arguments":{"title":"renamed"}}}`
+	call := `"method":"tools/call","params":{"name":"ask_agent","arguments":{"agent":"a_x","prompt":"renamed"}}}`
 	for _, id := range []string{`{}`, `[]`, `true`, `null`, `1.5`} {
 		code, v := rpc(t, e, mcpWriteTok, `{"jsonrpc":"2.0","id":`+id+`,`+call)
 		if code != 200 || dig(v, "error", "code") != float64(rpcInvalid) || dig(v, "result") != nil {
@@ -329,7 +329,7 @@ func TestMCPRefusesABadID(t *testing.T) {
 	}
 	for _, ev := range evs {
 		if strings.Contains(string(ev.Data), `"renamed"`) {
-			t.Errorf("a refused request renamed the session: %s", ev.Data)
+			t.Errorf("a refused request ran the tool: %s", ev.Data)
 		}
 	}
 	// A string id and an integer id are taken.
