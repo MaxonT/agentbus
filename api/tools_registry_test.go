@@ -55,9 +55,10 @@ func listToolDefs(t *testing.T, e *env) []toolreg.Tool {
 // result are byte-identical before removing it and after re-adding it.
 func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 	e := mcpEnv(t)
-	// The 13 built-ins are served to the main token.
-	if got := len(listToolDefs(t, e)); got != 13 {
-		t.Fatalf("%d built-in tools, want 13", got)
+	// The built-ins are served to the main token: the 13 of B3 plus the two
+	// context-view reads, turn_context and session_context.
+	if got := len(listToolDefs(t, e)); got != 15 {
+		t.Fatalf("%d built-in tools, want 15", got)
 	}
 	before := toolEntry(t, e, token, "apply_turn")
 	if before == nil {

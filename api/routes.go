@@ -293,6 +293,19 @@ var routes = slices.Concat([]route{
 			doc: "The tool calls one AgentBus turn made, a page at a time: each call's name, input, whether it errored, and the commands it ran."}},
 		turns: true,
 		serve: (*API).turnTools},
+	{method: "GET", path: "/api/v0/turns/{id}/context", op: "turnContext",
+		idDoc:   turnIDDoc,
+		tag:     "Turns",
+		summary: "Read a turn's context",
+		doc: "How big the turn's context got, how much of it came from the prompt cache, and what its largest prompt was made of. Nothing is stored: the turn's model.responded events and that call's stored request pieces are read now.\n\n" +
+			"context_tokens is the largest prompt the turn sent, the most one of its calls read: input + cache_read + cache_write, the vendor's own count. cache_read_tokens and fresh_tokens (input + cache_write) are summed over the turn's calls: how much was re-read from the cache against processed afresh, which drives the cost. made_of breaks that largest prompt into its parts from the request's own pieces (system, tools, messages), largest first; its note says what a vendor's request does not separate, such as a file read inside a tool result. made_of is null when no call carried usage or no request body is kept.",
+		query:   []param{{name: "session", doc: turnSessionDoc}},
+		replies: []reply{ok(200, TurnContext{}, "The turn's context."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
+		turn:    treeTurn,
+		tools: []tool{{name: "turn_context", effect: effectNone, id: "turn",
+			doc: "How big one AgentBus turn's context got, how much came from the prompt cache, and what its largest prompt was made of."}},
+		turns: true,
+		serve: (*API).turnContext},
 	{method: "POST", path: "/api/v0/turns/{id}/apply", op: "applyTurn",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",
@@ -444,6 +457,20 @@ var routes = slices.Concat([]route{
 			doc: "Search an AgentBus session's stored history for a piece of text, newest first: your own session when session is absent. " +
 				"It finds what earlier turns said and did, including turns you no longer hold in context."}},
 		serve: (*API).search},
+	{method: "GET", path: "/api/v0/sessions/{id}/context", op: "sessionContext",
+		tag:     "Sessions",
+		summary: "Read a session's context",
+		doc: "A session's context: its token totals and a page of its turns, newest first, so the context's growth across the session is visible. Nothing is stored: the session's model.responded events are read now.\n\n" +
+			"peak_context_tokens is the largest context any of the session's turns carried. cache_read_tokens and fresh_tokens (input + cache_write) are the session's calls summed. growth is a page of the turns, each with how big its context got (context_tokens) and its own cache split; later turns carry the earlier ones, so the context grows. Page older turns with before set to the previous page's next_before. For one turn's parts, see GET /api/v0/turns/{id}/context.",
+		query: []param{
+			{name: "before", doc: "Only turns before this position: the next_before of the previous page.", integer: true, min: 1},
+			{name: "limit", doc: "Turns per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
+		replies: []reply{ok(200, SessionContext{}, "The session's context."), badRequest, storeFailed},
+		turn:    treeSessionPath,
+		tools: []tool{{name: "session_context", effect: effectNone, id: "session", ownSession: true,
+			doc: "An AgentBus session's context: its token totals and how big each turn's context got, newest first. " +
+				"Your own session when session is absent."}},
+		serve: (*API).sessionContext},
 
 	{method: "GET", path: "/api/v0/agents", op: "listAgents",
 		tag:     "Agents",

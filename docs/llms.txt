@@ -62,8 +62,10 @@ those by its id alone.
 | `GET /api/v0/turns/{id}/calls` | A page of the turn's model calls: model, status, cost, latency. Pages like changes. |
 | `GET /api/v0/turns/{id}/tools` | A page of the turn's tool calls, each with the commands it ran. Pages like changes. |
 | `GET /api/v0/turns/{id}/calls/{call}` | One model call of the turn, piece by piece. |
+| `GET /api/v0/turns/{id}/context` | How big the turn's context got, how much came from the prompt cache, and what its largest prompt was made of (`made_of`). |
 | `GET /api/v0/sessions/{id}/events?turn=` | A session's events, oldest first; `turn` keeps one turn's. |
 | `GET /api/v0/sessions/{id}/search?q=` | Search a session's history. Each hit's `read` is a path to GET. Your own turn is left out. |
+| `GET /api/v0/sessions/{id}/context` | A session's context: its token totals and how big each turn's context got, newest first — how the context grows. |
 
 ## Asking other agents
 
