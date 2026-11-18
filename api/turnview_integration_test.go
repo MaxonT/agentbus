@@ -150,19 +150,19 @@ func TestCloseSession(t *testing.T) {
 	release(dir, "hold")
 	waitEnded(t, e, s.Turn)
 	var one OneSession
-	if code := getJSON(t, e, "/api/v0/sessions/"+s.Session, &one); code != 200 || one.Session.ID != s.Session || one.Copy == nil ||
-		one.Copy.Kind != queue.WorkspaceCopy || one.Copy.Name != s.Session || one.Copy.Closed != nil ||
+	if code := getJSON(t, e, "/api/v0/sessions/"+s.Session, &one); code != 200 || one.Session.ID != s.Session || one.Session.Copy == nil ||
+		one.Session.Copy.Kind != queue.WorkspaceCopy || one.Session.Copy.Name != s.Session || one.Session.Copy.Closed != nil ||
 		one.Session.Closed != nil || !one.Session.Resumable {
-		t.Fatalf("GET the open session: %d %+v %+v", code, one.Session, one.Copy)
+		t.Fatalf("GET the open session: %d %+v %+v", code, one.Session, one.Session.Copy)
 	}
 	if code, out := as(t, e, token, "PATCH", "/api/v0/sessions/"+s.Session, `{"closed":true,"title":"Done"}`); code != 200 ||
 		!strings.Contains(out, `"closed":true`) || !strings.Contains(out, `"title":"Done"`) {
 		t.Fatalf("close: %d %s", code, out)
 	}
 	// A closed session says so, in the list too, and is not resumable.
-	if code := getJSON(t, e, "/api/v0/sessions/"+s.Session, &one); code != 200 || one.Copy == nil || one.Copy.Closed == nil ||
-		one.Session.Closed == nil || !one.Session.Closed.Equal(*one.Copy.Closed) || one.Session.Resumable {
-		t.Fatalf("GET the closed session: %d %+v %+v", code, one.Session, one.Copy)
+	if code := getJSON(t, e, "/api/v0/sessions/"+s.Session, &one); code != 200 || one.Session.Copy == nil || one.Session.Copy.Closed == nil ||
+		one.Session.Closed == nil || !one.Session.Closed.Equal(*one.Session.Copy.Closed) || one.Session.Resumable {
+		t.Fatalf("GET the closed session: %d %+v %+v", code, one.Session, one.Session.Copy)
 	}
 	var snap Snapshot
 	if code := getJSON(t, e, "/api/v0/sessions", &snap); code != 200 || len(snap.Sessions) != 1 || snap.Sessions[0].ID != s.Session ||

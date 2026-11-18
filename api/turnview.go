@@ -372,12 +372,12 @@ func callOfTurn(h func(*API, http.ResponseWriter, *http.Request, string)) func(*
 	}
 }
 
-// OneSession is the answer to GET /api/v0/sessions/<id>.
+// OneSession is the answer to GET /api/v0/sessions/<id>. Its detail, the copy,
+// is inside the session, as a turn's detail is inside the turn.
 type OneSession struct {
-	Store   string       `json:"store" doc:"The store id. Send it back as store."`
-	Seq     int64        `json:"seq" doc:"The seq the session was computed at."`
-	Session Session      `json:"session"`
-	Copy    *SessionCopy `json:"copy" doc:"Where the session's turns run, on its runner. Null until the session's first turn on this service has ended."`
+	Store   string  `json:"store" doc:"The store id. Send it back as store."`
+	Seq     int64   `json:"seq" doc:"The seq the session was computed at."`
+	Session Session `json:"session"`
 }
 
 // SessionCopy is where a session's turns run: for debugging, and to know
@@ -409,6 +409,7 @@ func (a *API) getSession(w http.ResponseWriter, _ *http.Request, id string) {
 		}
 	}
 	closed := map[string]time.Time{}
+	var cp *SessionCopy
 	if a.cfg.Queue != nil {
 		ws, ok, err := a.cfg.Queue.Workspace(queue.DefaultTeam, id)
 		if err != nil {
@@ -416,7 +417,7 @@ func (a *API) getSession(w http.ResponseWriter, _ *http.Request, id string) {
 			return
 		}
 		if ok {
-			out.Copy = &SessionCopy{Runner: ws.Runner, Kind: ws.Kind, Name: ws.Space, Folder: ws.FolderRef,
+			cp = &SessionCopy{Runner: ws.Runner, Kind: ws.Kind, Name: ws.Space, Folder: ws.FolderRef,
 				Closed: ws.Closed, Removed: ws.Removed, Error: ws.RemovalError}
 			if ws.Closed != nil {
 				closed[id] = *ws.Closed
@@ -426,10 +427,11 @@ func (a *API) getSession(w http.ResponseWriter, _ *http.Request, id string) {
 			}
 		}
 	}
-	out.Session = a.withClosed(rec, closed)
 	if !found {
 		writeError(w, http.StatusNotFound, "no such session")
 		return
 	}
+	out.Session = a.withClosed(rec, closed)
+	out.Session.Copy = cp
 	writeJSON(w, http.StatusOK, out)
 }

@@ -501,10 +501,15 @@ type Snapshot struct {
 	NextBefore *int64 `json:"next_before" doc:"The before for the next, older page, or null when there are no older sessions."`
 }
 
-// Session is one session: the record's, and when it was closed.
+// Session is one session: the record's, when it was closed, and -- only on the
+// single GET /api/v0/sessions/{id} -- where its turns run.
 type Session struct {
 	store.Session
 	Closed *time.Time `json:"closed,omitempty" doc:"When the session was closed with PATCH /api/v0/sessions/{id}. It takes no more turns, and resumable is false."`
+	// Copy is where the session's turns run, filled only by the single
+	// GET /api/v0/sessions/{id}; the list leaves it absent, as a turn's prompt
+	// and reply are absent on the turn list.
+	Copy *SessionCopy `json:"copy,omitempty" doc:"Only on GET /api/v0/sessions/{id}: where the session's turns run, on its runner. Absent on the sessions list, and absent until the session's first turn on this service has ended."`
 }
 
 // snapshot is every session, each with closed set from the queue. A closed
