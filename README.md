@@ -95,6 +95,7 @@ installed, and a Claude and a ChatGPT subscription.
    "what do you think about the answer above?". Codex reads Claude's answer and gives its own.
 
 Every turn and every model call is now in the record, with its cost.
+By default (`-replay`), `agentbus up`, `server` and `runner` continue Claude and Codex sessions by sending the earlier turns' history through the gateway. Pass `-replay=false` when you want to use the vendor's own session resume instead.
 
 ### Sign-ins and keys
 
