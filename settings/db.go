@@ -39,6 +39,7 @@ const (
 	SettingPermissions  = "permissions"
 	SettingInstructions = "instructions"
 	SettingAgents       = "agents"
+	SettingCompaction   = "compaction"
 )
 
 // What a turn's refusal says of a stored setting that cannot be used.
@@ -47,6 +48,8 @@ const (
 	dbPolicyFix         = "Change them with PUT /api/v0/settings/permissions"
 	dbInstructionsWhere = "the instructions in the settings database"
 	dbInstructionsFix   = "Change them with PUT /api/v0/settings/instructions"
+	dbCompactionWhere   = "the compaction points in the settings database"
+	dbCompactionFix     = "Change them with PUT /api/v0/settings/compaction"
 )
 
 // Change is one change of the settings, as the record keeps it
@@ -171,7 +174,9 @@ func (d *DB) Close() error {
 type state struct {
 	version      int64
 	overlay      flat
-	instructions *string // nil: the default text
+	instructions *string     // nil: the default text
+	compaction   *Compaction // nil: the built-in defaults; non-nil holds the person's overrides
+	compOK       bool        // false: a stored compaction that could not be read
 	created      time.Time
 }
 
@@ -227,6 +232,19 @@ func readState(q querier) (state, error) {
 			s.instructions = body.Text
 		}
 	}
+	s.compOK = true
+	switch err := q.QueryRow(`SELECT value FROM settings WHERE name = ?`, SettingCompaction).Scan(&raw); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return s, err
+	default:
+		var c Compaction
+		if json.Unmarshal([]byte(raw), &c) == nil {
+			s.compaction = &c
+		} else {
+			s.compOK = false // read as broken by compactionOf
+		}
+	}
 	return s, nil
 }
 
@@ -259,6 +277,23 @@ func (s state) instructionsOf() (string, Version, error) {
 		return "", v, &Error{Setting: SettingInstructions, Where: dbInstructionsWhere, Why: err.Error(), Fix: dbInstructionsFix, Version: v}
 	}
 	return text, v, nil
+}
+
+// compactionOf is the compaction points s holds, and their version: the
+// built-in defaults with the person's overrides on top. A stored compaction
+// that cannot be read is an *Error whose version a writer can replace.
+func (s state) compactionOf() (Compaction, Version, error) {
+	if !s.compOK {
+		v := Version("broken")
+		return Compaction{}, v, &Error{Setting: SettingCompaction, Where: dbCompactionWhere, Why: errCompaction.Error(), Fix: dbCompactionFix, Version: v}
+	}
+	over := Compaction{}
+	if s.compaction != nil {
+		over = *s.compaction
+	}
+	c := over.overCompaction(DefaultCompaction())
+	b, _ := json.Marshal(c)
+	return c, versionOf(b), nil
 }
 
 func (d *DB) read() (state, error) {
@@ -444,6 +479,49 @@ func (d *DB) SetInstructions(text string, match Version) (Version, error) {
 		return "", err
 	}
 	return v, nil
+}
+
+// Compaction are the compaction points: the built-in defaults with the
+// person's overrides on top, every field filled.
+func (d *DB) Compaction() (Compaction, Version, error) {
+	s, err := d.read()
+	if err != nil {
+		return Compaction{}, "", err
+	}
+	return s.compactionOf()
+}
+
+// SetCompaction stores c as the person's compaction points when they are
+// still at match. Only the fields that differ from the built-in defaults are
+// kept, so a later build that changes a default reaches a field the person
+// never set.
+func (d *DB) SetCompaction(c Compaction, match Version) (Compaction, Version, error) {
+	if err := c.Check(); err != nil {
+		return Compaction{}, "", &Invalid{Why: err.Error()}
+	}
+	c.fill()
+	cb, _ := json.Marshal(c)
+	v := versionOf(cb)
+	err := d.change(func(tx *sql.Tx, s state) ([]Change, error) {
+		cur, curV, err := s.compactionOf()
+		if err != nil {
+			cur = DefaultCompaction()
+		}
+		if match != Any && match != curV {
+			return nil, ErrChanged
+		}
+		if err == nil && curV == v {
+			return nil, nil // nothing changes
+		}
+		if err := putSetting(tx, SettingCompaction, c.onlyChanged(), d.now()); err != nil {
+			return nil, err
+		}
+		return []Change{{Setting: SettingCompaction, Keys: changedCompaction(cur, c)}}, nil
+	})
+	if err != nil {
+		return Compaction{}, "", err
+	}
+	return c, v, nil
 }
 
 // Agents are the saved agents the person added, changed or removed, in the

@@ -265,9 +265,11 @@ func TestOneEndpointStartsEveryTurn(t *testing.T) {
 	// /api/v0/turns/{id}/context and GET /api/v0/sessions/{id}/context, the
 	// context view: how big a turn's or a session's context is, how much came
 	// from the prompt cache, and what a prompt is made of. Both read the
-	// record and start no turn.
-	if len(ops) != 65 {
-		t.Errorf("%d endpoints, want 65: %v", len(ops), ops)
+	// record and start no turn. 67 with GET and PUT
+	// /api/v0/settings/compaction, which read and change the per-vendor
+	// compaction points the context view shows ("compacts at ~Y%").
+	if len(ops) != 67 {
+		t.Errorf("%d endpoints, want 67: %v", len(ops), ops)
 	}
 	for _, want := range []string{"POST /api/v0/turns", "GET /api/v0/turns", "GET /api/v0/turns/{id}", "POST /api/v0/turns/{id}/stop",
 		"GET /api/v0/turns/{id}/diff", "POST /api/v0/turns/{id}/apply", "POST /api/v0/turns/{id}/review",
