@@ -61,7 +61,19 @@ type Gateway struct {
 	guard   Guard      // nil unless SetGuard was called
 	refused refusals   // the refusal text of each refused call (guard.go)
 	plans   planSeen   // the plan usage last stored (plan.go)
-	prefix  string     // cut from the vendor path before anything reads it (SetPrefix)
+	// decider, when set, is how a held Ask reply learns its decision from
+	// control's record (SetDecider, hold.go); nil refuses Ask calls inline.
+	decider Decider
+	// approvalScope, when set, scopes a raised approval's id to the attempt that
+	// raised it, as <attempt>.<id> (SetApprovalScope, guard.go), so control can
+	// bind every approval to one attempt and no runner can name another's.
+	approvalScope func(turn, localID string) string
+	// holdTimeout, pingInterval and pollInterval override the hold's gaps for
+	// tests (SetHoldTiming); zero takes the measured defaults.
+	holdTimeout  time.Duration
+	pingInterval time.Duration
+	pollInterval time.Duration
+	prefix       string // cut from the vendor path before anything reads it (SetPrefix)
 	// sendExchange: each call's exchange goes upstream in ExchangeHeader
 	// (SendExchange).
 	sendExchange bool
@@ -734,7 +746,7 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	if guarded {
 		// The agent gets the reply with each refused call renamed; the
 		// adapter reads the tee, so it sees the calls as the model wrote them.
-		resp.Body = g.guardReply(ex, ex.rules, ex.allowOnce, resp.Body, guardEnd)
+		resp.Body = g.guardReply(resp.Request.Context(), ex, ex.rules, ex.allowOnce, resp.Body, guardEnd)
 		resp.Header.Del("Content-Length")
 		resp.ContentLength = -1
 	}

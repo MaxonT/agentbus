@@ -3,7 +3,6 @@ package api
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -152,9 +151,11 @@ func TestDecideApprovalRefuseRecordsOnly(t *testing.T) {
 	}
 }
 
-// findContinuation returns the continuation turn job of a session, the one with
-// the approval prompt, or fails.
-func findContinuation(t *testing.T, e *env) queue.Job {
+// assertNoContinuation fails if any job in the session is a continuation turn:
+// H1 starts none — an allow releases the held reply in the turn already open, a
+// refuse or a timeout ends it, and neither costs an extra turn (the review-loop
+// case the earlier design suffered). It also fails if a stray turn was queued.
+func assertNoContinuation(t *testing.T, e *env) {
 	t.Helper()
 	jobs, err := e.q.List(queue.DefaultTeam, queue.Filter{Session: "s1"}, 50)
 	if err != nil {
@@ -162,18 +163,42 @@ func findContinuation(t *testing.T, e *env) queue.Job {
 	}
 	for _, j := range jobs {
 		if strings.HasPrefix(j.Spec.Prompt, "A person approved:") {
-			return j
+			t.Fatalf("a continuation turn was started: %q", j.Spec.Prompt)
 		}
 	}
-	t.Fatalf("no continuation turn was started in the session; jobs: %d", len(jobs))
-	return queue.Job{}
 }
 
-// Allow starts a continuation turn in the same session, on the agent of the turn
-// that asked, with the approval prompt naming the commands.
-func TestDecideApprovalAllowStartsContinuation(t *testing.T) {
+// The review-loop case the brief names: the earlier hold design started an
+// automatic next turn on an approval, so a reviewing agent that kept proposing
+// gated commands spawned a turn per approval. H1 starts NONE — for every
+// decision, once, always and refuse alike. An allow runs in the turn the gateway
+// already holds; a refuse or a timeout ends it.
+func TestDecideApprovalNoContinuationTurn(t *testing.T) {
+	for _, decision := range []string{"once", "always", "refuse"} {
+		e := askStack(t)
+		// The turn that asked, so there would be an agent to continue on if H1
+		// still continued.
+		orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
+			queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "do a thing"},
+			queue.Links{}, queue.Limits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seedApproval(t, e, "ap1", "s1", orig.Turn, []string{"git push"}, []string{"git push"})
+		if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"`+decision+`"}`); resp.StatusCode != 204 {
+			t.Fatalf("%s: %d %s", decision, resp.StatusCode, out)
+		}
+		assertNoContinuation(t, e)
+		if _, ok := decidedText(t, e, "ap1"); !ok {
+			t.Fatalf("%s: the answer was not recorded", decision)
+		}
+	}
+}
+
+// Allow moves the command to allow in the settings, for later turns, and starts
+// no continuation (the held reply runs in the turn already open).
+func TestDecideApprovalAllowMovesAndDoesNotContinue(t *testing.T) {
 	e := askStack(t)
-	// The turn that asked, so there is an agent to continue on.
 	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
 		queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "do a thing"},
 		queue.Links{}, queue.Limits{})
@@ -184,21 +209,14 @@ func TestDecideApprovalAllowStartsContinuation(t *testing.T) {
 	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"allow"}`); resp.StatusCode != 204 {
 		t.Fatalf("allow: %d %s", resp.StatusCode, out)
 	}
-	c := findContinuation(t, e)
-	if c.Spec.Harness != "claude" || c.Spec.AgentID != "a1" || c.Spec.Session != "s1" {
-		t.Fatalf("the continuation did not run on the asking turn's agent: %+v", c.Spec)
-	}
-	if !strings.Contains(c.Spec.Prompt, "git push") {
-		t.Fatalf("the continuation prompt did not name the commands: %q", c.Spec.Prompt)
-	}
+	assertNoContinuation(t, e)
 	if _, out := send(t, e, "GET", "/api/v0/settings/permissions", "", ""); !strings.Contains(out, `"allow":["git push"]`) {
 		t.Fatalf("the command was not moved to allow:\n%s", out)
 	}
 }
 
-// Allow once starts a continuation turn that may run exactly the approved
-// commands, this turn only, and writes nothing to the settings: the commands
-// are carried on the continuation job (Spec.AllowOnce), not moved to allow.
+// Once writes nothing to the settings and starts no continuation; it records the
+// answer so the held reply is released.
 func TestDecideApprovalOnce(t *testing.T) {
 	e := askStack(t)
 	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
@@ -211,11 +229,7 @@ func TestDecideApprovalOnce(t *testing.T) {
 	if resp, out := send(t, e, "POST", "/api/v0/approvals/ap1", "", `{"decision":"once"}`); resp.StatusCode != 204 {
 		t.Fatalf("once: %d %s", resp.StatusCode, out)
 	}
-	c := findContinuation(t, e)
-	if !slices.Equal(c.Spec.AllowOnce, []string{"make deploy"}) {
-		t.Fatalf("the continuation did not carry the once-allowed command: %+v", c.Spec.AllowOnce)
-	}
-	// Nothing written to the settings: the command is not on allow.
+	assertNoContinuation(t, e)
 	if _, out := send(t, e, "GET", "/api/v0/settings/permissions", "", ""); strings.Contains(out, `"allow":["make deploy"]`) {
 		t.Fatalf("allow once wrote to the settings:\n%s", out)
 	}
@@ -224,8 +238,8 @@ func TestDecideApprovalOnce(t *testing.T) {
 	}
 }
 
-// Two Allows at once (two tabs, a retry) start exactly one continuation: one
-// wins (204), the other is refused (409).
+// Two Allows at once (two tabs, a retry) are answered once: one wins (204), the
+// other is refused (409), and neither starts a continuation.
 func TestDecideApprovalConcurrentAllow(t *testing.T) {
 	e := askStack(t)
 	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
@@ -253,16 +267,7 @@ func TestDecideApprovalConcurrentAllow(t *testing.T) {
 	if got[204] != 1 || got[409] != 1 {
 		t.Fatalf("want one 204 and one 409, got %v", codes)
 	}
-	n := 0
-	jobs, _ := e.q.List(queue.DefaultTeam, queue.Filter{Session: "s1"}, 50)
-	for _, j := range jobs {
-		if strings.HasPrefix(j.Spec.Prompt, "A person approved:") {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Fatalf("want exactly one continuation, got %d", n)
-	}
+	assertNoContinuation(t, e)
 }
 
 // Two Allows on DIFFERENT commands at once both succeed: the settings write

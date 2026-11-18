@@ -131,6 +131,15 @@ var runnerRoutes = []route{
 		body:    jobs.RecordBatch{},
 		replies: []reply{ok(200, jobs.RecordAck{}, "Stored."), badRequest, noAttempt, staleReply, storeFailed},
 		self:    true, serve: jobsRoute},
+	{method: "GET", path: "/api/v0/runner/attempts/{id}/decision", op: "attemptDecision",
+		idDoc:   "The attempt id, from take. Another shape gets 404.",
+		tag:     "Attempts",
+		summary: "Read a held approval's decision",
+		doc: "The decision read a holding gateway polls for H1 (0.6.1): with number (the current attempt) and approval (the held reply's id), " +
+			"it answers {\"state\": pending | allowed | refused} from control's record. Scoped to the runner's own current attempt: an approval " +
+			"not scoped to this attempt reads pending, never another turn's answer. An allow releases the held call so the agent runs it in the same turn.",
+		replies: []reply{ok(200, jobs.AttemptDecision{}, "The approval's state."), badRequest, noAttempt, staleReply, storeFailed},
+		self:    true, serve: jobsRoute},
 	{method: "POST", path: "/api/v0/runner/blobs", op: "missingBlobs",
 		tag:     "Blobs",
 		summary: "Ask which blobs are missing",

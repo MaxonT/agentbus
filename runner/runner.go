@@ -140,6 +140,11 @@ type Runner struct {
 	beatMu sync.Mutex
 	// sandbox is Config.Sandbox's answer, nil without one.
 	sandbox *queue.SandboxReport
+	// attempts are the running attempts by their turn, under attemptsMu, so the
+	// gateway's hold can find the attempt a held reply's turn runs in and poll
+	// its decision (decide.go). A turn runs one attempt at a time.
+	attemptsMu sync.Mutex
+	attempts   map[string]*attempt
 }
 
 // state is what StateFile keeps.
@@ -782,6 +787,11 @@ func (r *Runner) work(ctx context.Context, job queue.Job, a queue.Attempt) {
 	done := make(chan struct{})
 	defer close(done)
 	go at.heartbeats(ctx, done)
+
+	// The attempt is current on control now: the gateway's hold can find it by
+	// turn and poll its decision while it holds an Ask (decide.go).
+	r.registerAttempt(at)
+	defer r.unregisterAttempt(at)
 
 	at.event("attempt.started", map[string]any{"runner": r.id})
 	if st.Cancel {

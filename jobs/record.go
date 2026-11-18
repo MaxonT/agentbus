@@ -39,7 +39,12 @@ var RunnerKinds = map[event.Kind]bool{
 	event.SessionOpened: true, event.SessionClosed: true, event.ContextAdded: true,
 	event.NetworkRefused: true, event.SchemaUnexpected: true, event.ReplayFailed: true,
 	event.ToolRefused: true, event.CallRefused: true, event.VendorCalled: true,
-	event.ApprovalRequested: true,
+	// A runner's gateway raises approval.requested when it holds an Ask, and
+	// records approval.decided itself when the hold times out or the agent
+	// disconnects (gateway/hold.go); both must reach control's record, so the
+	// approval lists and then stops listing. A person's answer is control's own
+	// approval.decided (api/approvals.go), written directly.
+	event.ApprovalRequested: true, event.ApprovalDecided: true,
 }
 
 // RecordAck answers a RecordBatch: how many events were new.
@@ -54,6 +59,10 @@ type Recorder interface {
 	OtherTurns(exchange, session, turn string) (bool, error)
 	Continuation(session string) (store.Continuation, error)
 	TurnText(session, turn string) (prompt, reply string, found bool, err error)
+	// ApprovalEvents are every approval.requested and approval.decided, oldest
+	// first: the decision read (decision.go) derives a held approval's state
+	// from them.
+	ApprovalEvents() ([]event.Event, error)
 	Finder
 }
 
@@ -101,6 +110,29 @@ func (s *Server) record(w http.ResponseWriter, r *http.Request, rn queue.Runner)
 			fail(w, http.StatusBadRequest, "every event must be of the session control assigned the attempt's job")
 			return
 		}
+	}
+	// One rule binds every runner-written approval to the attempt that raised it:
+	// control rewrites its id to <attempt>-<id> scoped to THIS authenticated
+	// attempt (the path value, not anything in the event), whatever the runner
+	// sent. So a forged or foreign id lands owned by the sender's own attempt,
+	// not the one it named, and two attempts never share an id — cross-turn
+	// allow or refuse, and duplicate-id reuse, are impossible by construction,
+	// with no ownership lookup and no uniqueness check. Binding (not rejecting)
+	// also keeps a legacy protocol-5 runner working: its raw ids are scoped
+	// rather than refused, so its batch — the approval AND its session.closed —
+	// is stored. A runner still never records an allow: a person's allow is
+	// control's own, through the client API.
+	attemptID := r.PathValue("id")
+	for i := range evs {
+		e := &evs[i]
+		if e.Kind != event.ApprovalRequested && e.Kind != event.ApprovalDecided {
+			continue
+		}
+		if e.Kind == event.ApprovalDecided && approvalAllowed(e.Text) {
+			fail(w, http.StatusBadRequest, "a runner may not record an allow decision; a person allows through the approvals API")
+			return
+		}
+		e.Approval = scopeToAttempt(attemptID, e.Approval)
 	}
 	n := 0
 	for _, e := range evs {

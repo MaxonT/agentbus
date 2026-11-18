@@ -1,24 +1,26 @@
 package api
 
 // GET /api/v0/approvals and POST /api/v0/approvals/{id}: the commands a person
-// must answer. The gateway refuses a tool call whose command matches an ask
-// entry of permissions.toml (gateway/approvals.go) and records it as an
-// approval.requested event; the turn ends. Control derives the pending list
-// from the record — a requested with no approval.decided for the same id — so
-// the gateway that refused may run on a separate runner, as long as its event
-// reached control's store. Allow means "allow from now on": the matched ask
-// entries move to allow in the settings, control writes approval.decided, and a
-// continuation turn runs in the same session so the agent can carry on. Refuse
-// writes approval.decided only. No token or header value is in the answer.
+// must answer. The gateway sees a tool call whose command matches an ask entry
+// of permissions.toml (gateway/guard.go) and records it as an approval.requested
+// event; it then HOLDS the model's reply at that call (H1) and polls this
+// decision, releasing the call on an allow so the agent runs it in the SAME
+// turn, or refusing it on a refuse or a 60 s timeout. Control derives the
+// pending list from the record — a requested with no approval.decided for the
+// same id — so the gateway that holds it may run on a separate runner, which
+// reads the decision back through the runner protocol. Allow and once both
+// release the held call; always additionally moves the matched ask entries to
+// allow in the settings, for later turns; refuse records the decision only.
+// There is NO continuation turn (his call, 2026-11-17: an allow runs in the
+// turn already held, and a refusal must not cost an extra turn). No token or
+// header value is in the answer.
 
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/staysup/agentbus/event"
-	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/settings"
 )
 
@@ -26,7 +28,7 @@ import (
 type HeldCall struct {
 	ID        string    `json:"id" doc:"Answer it with POST /api/v0/approvals/{id}."`
 	Session   string    `json:"session" doc:"The session whose turn asked."`
-	Turn      string    `json:"turn,omitempty" doc:"The turn the ask came from; an allow continues this session on that turn's agent."`
+	Turn      string    `json:"turn,omitempty" doc:"The turn the gateway is holding for this approval; an allow releases its reply so the agent runs the command in that same turn."`
 	Agent     string    `json:"agent,omitempty" doc:"The session's agent (harness) that asked, such as claude; a cockpit shows its product name. Absent for a session no run started."`
 	ToolID    string    `json:"tool_id,omitempty" doc:"The model's id for the tool call."`
 	ToolName  string    `json:"tool_name,omitempty" doc:"The shell tool's name, such as Bash."`
@@ -42,7 +44,7 @@ type HeldCalls struct {
 
 // Decision is the body of POST /api/v0/approvals/{id}.
 type Decision struct {
-	Decision string `json:"decision" doc:"once runs a continuation turn that may run exactly these commands, this turn only, and writes nothing to the settings; always moves each matched command from ask to allow in the settings and runs a continuation turn; refuse records the decision only and leaves the settings unchanged. (allow is the old name for always.)"`
+	Decision string `json:"decision" doc:"once releases the held call so the agent runs these commands in the same turn and writes nothing to the settings; always releases them and also moves each matched command from ask to allow in the settings, for later turns; refuse refuses the held call and leaves the settings unchanged. No continuation turn is started for any of them. (allow is the old name for always.)"`
 }
 
 // heldReply is what control reads back from an approval.requested event to list
@@ -180,24 +182,20 @@ func (a *API) decideApproval(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	// Do the work before recording the answer, so a failure leaves it pending
 	// to try again rather than losing it. always moves the matched entries to
-	// allow; once leaves the settings untouched and lets the continuation turn
-	// alone run the commands.
+	// allow, for the turns after this one; once changes no settings.
+	_ = once
 	if always {
 		if err := a.allowCommands(h.rules); err != nil {
 			writeError(w, http.StatusInternalServerError, "the approval could not be written to the settings")
 			return
 		}
 	}
-	if once || always {
-		// Both carry the commands as allowed once, so the continuation turn runs
-		// them even for a command "always" could not add to the allow list (one
-		// built at run time, with no clean rule). "always" additionally moved the
-		// matched entries to allow above, for the turns after this one.
-		if err := a.continueAfterApproval(h, h.commands); err != nil {
-			writeError(w, http.StatusInternalServerError, "the continuation turn could not be started")
-			return
-		}
-	}
+	// H1: no continuation turn. The gateway holds the model's reply at the Ask
+	// call and polls this decision; an allow releases the call so the agent runs
+	// it in the SAME turn, a refuse or a timeout refuses it. A held reply learns
+	// the answer from this recorded decision. An old or remote approval with no
+	// live hold just records the answer — no automatic next turn, which would
+	// cost turns the agent may no longer need (his call, 2026-11-17).
 	if err := a.recordDecision(h, decision, "a person"); err != nil {
 		a.internal(w)
 		return
@@ -290,47 +288,6 @@ func (a *API) allowCommands(rules []string) error {
 		}
 	}
 	return settings.ErrChanged
-}
-
-// continueAfterApproval starts a turn in the approval's session, on the agent
-// of the turn the ask came from, so the agent can run the now-allowed commands.
-// Like every other continuation path, it names only the session (not a folder),
-// so the runner resumes the session's own workspace. allowOnce are the command
-// lines the continuation turn's gateway lets run this turn only
-// (queue.Spec.AllowOnce). Both "once" and "always" pass the commands, so the
-// turn runs even one "always" could not add to the allow list (a command built
-// at run time); "always" has also moved the matched entries to allow, for the
-// turns after this one.
-func (a *API) continueAfterApproval(h heldReply, allowOnce []string) error {
-	if a.cfg.Queue == nil || h.session == "" || h.turn == "" {
-		return nil
-	}
-	j, err := a.cfg.Queue.JobByTurn(queue.DefaultTeam, h.turn)
-	if errors.Is(err, queue.ErrNotFound) {
-		// The turn that asked is gone (an old approval, another runner). The
-		// commands are allowed from now on; there is just no turn to continue.
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	src := j.Spec
-	spec := queue.Spec{
-		Harness: src.Harness, AgentID: src.AgentID, Access: src.Access, KeyEnv: src.KeyEnv,
-		Session: h.session, Model: src.Model, ModelFromAgent: src.ModelFromAgent,
-		AgentModel: src.AgentModel, ReadOnly: src.ReadOnly, AllowOnce: allowOnce,
-		Prompt: "A person approved: you may now run " + strings.Join(h.commands, ", ") + ". Run them and continue.",
-	}
-	links := queue.Links{ContinuesTurn: h.turn, Chain: j.Links.Chain}
-	_, _, err = a.cfg.Queue.CreateTurnLinked(queue.DefaultTeam, "", spec, links, queue.Limits{})
-	var removed *queue.RunnerRemovedError
-	if errors.Is(err, queue.ErrSessionClosed) || errors.Is(err, queue.ErrSessionEnded) || errors.As(err, &removed) {
-		// The session cannot take another turn (closed, ended, or its machine
-		// removed). The commands are allowed from now on; there is just no turn
-		// to run.
-		return nil
-	}
-	return err
 }
 
 // decisionText says how an approval ended, for approval.decided: allowed once,

@@ -33,7 +33,7 @@ import (
 // no credential is added and the call is sent nowhere, so the relay never sees
 // it). Every other event of a relayed call control records itself.
 var relayOnly = map[event.Kind]bool{event.ReplayFailed: true, event.ToolRefused: true,
-	event.ApprovalRequested: true, event.CallRefused: true}
+	event.ApprovalRequested: true, event.ApprovalDecided: true, event.CallRefused: true}
 
 // relayedCall is true for a call's event that control's relay records itself, so
 // a runner that holds no secret leaves it out of what it writes to control's

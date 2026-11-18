@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/url"
@@ -18,7 +19,7 @@ import (
 func decider(t *testing.T, a adapter.Adapter, rules Rules, allowOnce []string) *guardBody {
 	t.Helper()
 	g := New(&url.URL{}, a, &event.Memory{})
-	return g.guardReply(&exchange{id: "x1", session: "s1", turn: "t_1"}, rules, allowOnce,
+	return g.guardReply(context.Background(), &exchange{id: "x1", session: "s1", turn: "t_1"}, rules, allowOnce,
 		io.NopCloser(strings.NewReader("")), func() {}).(*guardBody)
 }
 
