@@ -54,14 +54,7 @@ func (copyBackend) Open(r Request) (*Space, error) {
 		return nil, err
 	}
 	s.start = time.Now()
-	share := shareable(source, r.Share)
-	var method string
-	var err error
-	if len(share) > 0 {
-		method, err = cloneTreeExcept(source, s.Root, share)
-	} else {
-		method, err = cloneTree(source, s.Root)
-	}
+	method, err := cloneTree(source, s.Root)
 	if err != nil {
 		removeAll(s.Root)
 		return nil, err
@@ -73,20 +66,9 @@ func (copyBackend) Open(r Request) (*Space, error) {
 			return nil, err
 		}
 	}
-	sharedMu.Lock()
-	if len(share) > 0 {
-		s.Shared, err = linkShared(r.Workdir, source, s.Root, share)
-	}
-	if err == nil {
-		err = s.save()
-	}
-	if err != nil {
+	if err := s.save(); err != nil {
 		removeAll(s.Root)
 		removeState(s)
-		gcShared(r.Workdir)
-	}
-	sharedMu.Unlock()
-	if err != nil {
 		return nil, err
 	}
 	if _, err := checkpoint(s, Base, copyBackend{}); err != nil {
@@ -133,12 +115,10 @@ func (copyBackend) Close(s *Space) error {
 	if err := removeState(s); err != nil {
 		return err
 	}
-	if len(s.Shared) == 0 {
-		return nil
-	}
-	sharedMu.Lock()
-	defer sharedMu.Unlock()
-	return gcShared(s.Workdir)
+	// Remove any legacy shared copy this close leaves unreferenced. No new copy
+	// makes one; this cleans up an install that used the retired setting.
+	gcLegacyShared(s.Workdir)
+	return nil
 }
 
 // take walks the copy. Its Base records each file by size, modification

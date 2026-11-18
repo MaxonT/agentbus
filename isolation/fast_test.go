@@ -200,64 +200,32 @@ func TestConflictWithoutBaseHash(t *testing.T) {
 	}
 }
 
-// Shared folders: the copy links to one read-only copy, shared by the
-// copies of the same folder state, that a turn cannot write; the last
-// Close removes it.
-func TestShareReadOnly(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root writes a read-only folder")
+// A legacy shared copy a pre-0.6 install left is removed once no space
+// references it, and one a remaining space still references is kept.
+func TestGCLegacyShared(t *testing.T) {
+	work := t.TempDir()
+	shared := filepath.Join(work, stateFolder, legacySharedFolder)
+	orphan := filepath.Join(shared, "orphan")
+	used := filepath.Join(shared, "used")
+	for _, d := range []string{orphan, used} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	src := t.TempDir()
-	fixture(t, src, map[string]string{"a.txt": "a", "node_modules/x/index.js": "x", "vendor/v.txt": "v"})
-	work := filepath.Join(t.TempDir(), "w")
-	b, _ := Get(Copy)
-	share := []string{"node_modules", "missing", "../up", "a.txt"}
-	s1, err := b.Open(Request{ID: "job_1", Workdir: work, Folder: src, Share: share})
-	if err != nil {
+	sp := filepath.Join(work, stateFolder, "job_old")
+	if err := os.MkdirAll(sp, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	s2, err := b.Open(Request{ID: "job_2", Workdir: work, Folder: src, Share: share})
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(sp, "space.json"),
+		[]byte(`{"id":"job_old","backend":"copy","root":"x","dir":"x","shared":["`+used+`"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if len(s1.Shared) != 1 || !reflect.DeepEqual(s1.Shared, s2.Shared) {
-		t.Fatalf("shared %v and %v", s1.Shared, s2.Shared)
+	gcLegacyShared(work)
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("an unreferenced legacy shared copy was kept: %v", err)
 	}
-	if target, _ := os.Readlink(filepath.Join(s1.Dir, "node_modules")); target != s1.Shared[0] {
-		t.Fatalf("node_modules links to %q", target)
-	}
-	if read(t, filepath.Join(s1.Dir, "node_modules", "x", "index.js")) != "x" || read(t, filepath.Join(s1.Dir, "vendor", "v.txt")) != "v" {
-		t.Fatal("the copy does not read as the folder")
-	}
-	if err := os.WriteFile(filepath.Join(s1.Dir, "node_modules", "new.js"), []byte("n"), 0o644); !errors.Is(err, fs.ErrPermission) {
-		t.Fatalf("a write to the shared folder: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(s1.Dir, "node_modules", "x", "index.js"), []byte("n"), 0o644); !errors.Is(err, fs.ErrPermission) {
-		t.Fatalf("a write to a shared file: %v", err)
-	}
-	// A turn's own files are as with any copy.
-	fixture(t, s1.Dir, map[string]string{"a.txt": "a2"})
-	b.Checkpoint(s1, "t1")
-	if c, _ := b.Diff(s1, Base, "t1"); c.Count != 1 || c.Files[0].Path != "a.txt" {
-		t.Fatalf("diff %+v", c)
-	}
-	// The person's node_modules changed: a new shared copy.
-	fixture(t, src, map[string]string{"node_modules/y.js": "y"})
-	s3, err := b.Open(Request{ID: "job_3", Workdir: work, Folder: src, Share: share})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s3.Shared[0] == s1.Shared[0] || read(t, filepath.Join(s3.Dir, "node_modules", "y.js")) != "y" {
-		t.Fatalf("a changed folder shares the old copy: %v", s3.Shared)
-	}
-	Close(s1)
-	if _, err := os.Stat(s1.Shared[0]); err != nil {
-		t.Fatal("a shared copy in use was removed")
-	}
-	Close(s2)
-	Close(s3)
-	if left, _ := os.ReadDir(filepath.Join(work, stateFolder, sharedFolder)); len(left) != 0 {
-		t.Fatalf("shared copies left: %d", len(left))
+	if _, err := os.Stat(used); err != nil {
+		t.Fatalf("a referenced legacy shared copy was removed: %v", err)
 	}
 }
 

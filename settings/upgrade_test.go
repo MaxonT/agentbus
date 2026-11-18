@@ -657,6 +657,63 @@ func TestUpgradeRemovesRetiredKey(t *testing.T) {
 	}
 }
 
+// A stored policy that holds share_read_only, retired in 0.6, loses it on the
+// first start, as one change whose settings.changed event names the key, and
+// keeps the rest. A second start does nothing.
+func TestUpgradeRemovesShareReadOnly(t *testing.T) {
+	dir := home(t)
+	storedDB(t, dir, `{"share_read_only":["node_modules"],"forbid":["rm"]}`)
+	d, rep, err := upgrade(dir).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(rep.Removed, ",") != "share_read_only" || len(rep.Kept) != 0 {
+		t.Fatalf("removed %v kept %v", rep.Removed, rep.Kept)
+	}
+	var got []Change
+	d.SetSink(func(c Change) error { got = append(got, c); return nil }, nil)
+	if s := stored(t, d, SettingPermissions); s != `{"forbid":["rm"]}` {
+		t.Fatalf("stored %s", s)
+	}
+	if len(got) != 1 || got[0].Setting != SettingPermissions || strings.Join(got[0].Keys, ",") != "share_read_only" || got[0].File != "" {
+		t.Fatalf("events %+v", got)
+	}
+	if p, _, err := d.Policy(); err != nil || p.Forbid[0] != "rm" {
+		t.Fatalf("policy %+v %v", p, err)
+	}
+	d.Close()
+
+	d, rep, err = upgrade(dir).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if len(rep.Removed) != 0 || len(rep.Kept) != 0 {
+		t.Fatalf("second start: removed %v kept %v", rep.Removed, rep.Kept)
+	}
+	if cs, _, _ := d.Changes(); len(cs) != 1 {
+		t.Fatalf("second start: %d changes", len(cs))
+	}
+}
+
+// A 0.4 permissions.toml that sets share_read_only imports without error, and
+// the stored policy never holds it.
+func TestUpgradeImportsFileWithShareReadOnly(t *testing.T) {
+	dir := home(t)
+	write(t, filepath.Join(dir, PolicyFile), "share_read_only = [\"node_modules\"]\nforbid = [\"rm\"]\n")
+	d, rep, err := upgrade(dir).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if strings.Join(rep.Imported, ",") != PolicyFile || len(rep.Removed) != 0 {
+		t.Fatalf("imported %v removed %v", rep.Imported, rep.Removed)
+	}
+	if s := stored(t, d, SettingPermissions); strings.Contains(s, "share_read_only") || !strings.Contains(s, `"forbid":["rm"]`) {
+		t.Fatalf("stored %s", s)
+	}
+}
+
 // A settings.db that 0.5 wrote, with its two steps done and
 // subscriptions_on_runners stored (the cockpit's "Turn on for my runners"),
 // loses the key on the first start of 0.5.1: one change whose
