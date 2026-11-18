@@ -70,44 +70,44 @@ func getToolDef(t *testing.T, e *env, name string) toolreg.Tool {
 // result are byte-identical before removing it and after re-adding it.
 func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 	e := mcpEnv(t)
-	// The built-ins are served to the main token: the 13 of B3 plus the two
-	// context-view reads, turn_context and session_context.
-	if got := len(listToolSummaries(t, e)); got != 15 {
-		t.Fatalf("%d built-in tools, want 15", got)
+	// The built-ins served to the main token after B11: ask_agent plus the ten
+	// reads (the four write route copies were removed).
+	if got := len(listToolSummaries(t, e)); got != 11 {
+		t.Fatalf("%d built-in tools, want 11", got)
 	}
-	before := toolEntry(t, e, token, "apply_turn")
+	before := toolEntry(t, e, token, "list_turns")
 	if before == nil {
-		t.Fatal("apply_turn not listed")
+		t.Fatal("list_turns not listed")
 	}
-	_, beforeCall := callText(t, e, token, "apply_turn", `{"turn":"t_x"}`)
+	_, beforeCall := callText(t, e, token, "list_turns", `{}`)
 
-	// The stored definition of apply_turn, from the single tool route.
-	def := getToolDef(t, e, "apply_turn")
-	if def.Run.Method != "POST" || def.Run.Path != "/api/v0/turns/{id}/apply" {
-		t.Fatalf("apply_turn definition: %+v", def)
+	// The stored definition of list_turns, from the single tool route.
+	def := getToolDef(t, e, "list_turns")
+	if def.Run.Method != "GET" || def.Run.Path != "/api/v0/turns" {
+		t.Fatalf("list_turns definition: %+v", def)
 	}
 
 	// Remove it: it stops being served.
-	resp, body := do(t, e.req(t, "DELETE", "/api/v0/tools/apply_turn", nil))
+	resp, body := do(t, e.req(t, "DELETE", "/api/v0/tools/list_turns", nil))
 	if resp.StatusCode != 204 {
-		t.Fatalf("DELETE apply_turn: %d %s", resp.StatusCode, body)
+		t.Fatalf("DELETE list_turns: %d %s", resp.StatusCode, body)
 	}
-	if toolEntry(t, e, token, "apply_turn") != nil {
-		t.Fatal("apply_turn still listed after removal")
+	if toolEntry(t, e, token, "list_turns") != nil {
+		t.Fatal("list_turns still listed after removal")
 	}
 
 	// Re-add the same definition as a custom tool.
 	b, _ := json.Marshal(def)
 	resp, body = do(t, e.req(t, "POST", "/api/v0/tools", bytes.NewReader(b)))
 	if resp.StatusCode != 201 {
-		t.Fatalf("POST apply_turn: %d %s", resp.StatusCode, body)
+		t.Fatalf("POST list_turns: %d %s", resp.StatusCode, body)
 	}
 
-	after := toolEntry(t, e, token, "apply_turn")
+	after := toolEntry(t, e, token, "list_turns")
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("list entry changed after re-add:\nbefore %v\nafter  %v", before, after)
 	}
-	if _, afterCall := callText(t, e, token, "apply_turn", `{"turn":"t_x"}`); afterCall != beforeCall {
+	if _, afterCall := callText(t, e, token, "list_turns", `{}`); afterCall != beforeCall {
 		t.Errorf("call result changed: %q vs %q", beforeCall, afterCall)
 	}
 }
@@ -146,8 +146,8 @@ func TestToolListFactsOnly(t *testing.T) {
 	}
 
 	// The single tool route carries the full definition.
-	def := getToolDef(t, e, "apply_turn")
-	if def.Name != "apply_turn" || def.Run.Path != "/api/v0/turns/{id}/apply" || def.Inputs == nil {
+	def := getToolDef(t, e, "list_turns")
+	if def.Name != "list_turns" || def.Run.Path != "/api/v0/turns" || def.Inputs == nil {
 		t.Fatalf("single tool not full: %+v", def)
 	}
 
@@ -243,15 +243,15 @@ func TestToolHintsFollowTheRoute(t *testing.T) {
 // tool cannot act on the caller's session by leaving the id out.
 func TestCustomToolNoSilentOwnSession(t *testing.T) {
 	e := mcpEnv(t)
-	// A tool on the rename route (a built-in's route) with own_session off and
-	// a schema that does not require the id.
-	def := `{"name":"touch_session","description":"renames a session","inputs":{"type":"object","properties":{"session":{"type":"string"},"title":{"type":"string"}},"required":["title"]},"run":{"kind":"api","method":"PATCH","path":"/api/v0/sessions/{id}","id_input":"session","body":true}}`
+	// A tool on the search route (a kept built-in's route) with own_session off
+	// and a schema that does not require the id.
+	def := `{"name":"peek_session","description":"searches a session","inputs":{"type":"object","properties":{"session":{"type":"string"},"q":{"type":"string"}},"required":["q"]},"run":{"kind":"api","method":"GET","path":"/api/v0/sessions/{id}/search","id_input":"session","query":["q"]}}`
 	if resp, body := do(t, e.req(t, "POST", "/api/v0/tools", bytes.NewReader([]byte(def)))); resp.StatusCode != 201 {
-		t.Fatalf("POST touch_session: %d %s", resp.StatusCode, body)
+		t.Fatalf("POST peek_session: %d %s", resp.StatusCode, body)
 	}
 	// Called by a turn of session s1 with no session: refused, never filled in
 	// with s1.
-	isErr, text := callText(t, e, mcpWriteTok, "touch_session", `{"title":"renamed"}`)
+	isErr, text := callText(t, e, mcpWriteTok, "peek_session", `{"q":"x"}`)
 	if !isErr || !bytes.Contains([]byte(text), []byte("session is required")) {
 		t.Errorf("missing id was not refused: isErr=%v text=%q", isErr, text)
 	}

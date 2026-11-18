@@ -53,15 +53,15 @@ func TestIDScanner(t *testing.T) {
 // through the agent's own instruction flag and never inside the prompt: own
 // replay and the vendor's prompt cache need the text the same on every turn.
 // The default is the text turns had before the file existed.
-// With the agentbus MCP tools, {tools} is one line that names them, and no
-// agentbus-api command.
+// With the agentbus MCP tools, {tools} names them; review, apply and stop go
+// through agentbus-api (B11), so the text now carries agentbus-api commands.
 func TestInstructionsWithTools(t *testing.T) {
 	got, err := (&Engine{}).instructions("abc")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got = withTools(got, "abc", true, true)
-	if !strings.Contains(got, settings.ToolsText(true)) || strings.Contains(got, "agentbus-api") || strings.Contains(got, "{tools}") ||
+	if !strings.Contains(got, settings.ToolsText(true)) || strings.Contains(got, "{tools}") ||
 		!strings.Contains(got, "own copy of the person's folder") {
 		t.Errorf("instructions with tools:\n%s", got)
 	}
@@ -69,7 +69,7 @@ func TestInstructionsWithTools(t *testing.T) {
 
 // With [agent_api] apply off (the default from defaults version 2), the
 // instructions do not offer applying, which would answer 403: they say the
-// person applies. On, they are the text of builds before 0.5.1. The same
+// person applies. On, they give the agentbus-api apply command. The same
 // holds for the MCP tools' line and the tool server's own instructions.
 func TestInstructionsFollowApply(t *testing.T) {
 	got, err := (&Engine{}).instructions("abc")
@@ -91,7 +91,7 @@ func TestInstructionsFollowApply(t *testing.T) {
 	if off := settings.ToolServerInstructions(false); strings.Contains(off, "apply_turn") || strings.Contains(off, "apply turns") {
 		t.Errorf("tool server, apply off: %s", off)
 	}
-	if on := settings.ToolServerInstructions(true); !strings.Contains(on, "apply_turn") {
+	if on := settings.ToolServerInstructions(true); !strings.Contains(on, "apply") {
 		t.Errorf("tool server, apply on: %s", on)
 	}
 }

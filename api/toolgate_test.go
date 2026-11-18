@@ -29,7 +29,7 @@ func TestToolCallHeldUntilPersonAnswers(t *testing.T) {
 	// The agent calls a does-tool: the gate holds it (no rule, effect does).
 	done := make(chan map[string]any, 1)
 	go func() {
-		_, v := rpc(t, e, mcpWriteTok, renameCall)
+		_, v := rpc(t, e, mcpWriteTok, askCall)
 		done <- v
 	}()
 
@@ -57,7 +57,7 @@ func TestToolCallRefusedByPerson(t *testing.T) {
 	e := toolGateEnv(t, 5*time.Second, 0, nil)
 	done := make(chan map[string]any, 1)
 	go func() {
-		_, v := rpc(t, e, mcpWriteTok, renameCall)
+		_, v := rpc(t, e, mcpWriteTok, askCall)
 		done <- v
 	}()
 	id := waitForApproval(t, e)
@@ -77,7 +77,7 @@ func TestToolCallRefusedByPerson(t *testing.T) {
 // records approval.decided so nothing is left pending (no next turn).
 func TestToolCallTimesOutWithNoAnswer(t *testing.T) {
 	e := toolGateEnv(t, 120*time.Millisecond, 0, nil)
-	_, v := rpc(t, e, mcpWriteTok, renameCall)
+	_, v := rpc(t, e, mcpWriteTok, askCall)
 	if dig(v, "result", "isError") != true || !strings.Contains(resultText(v), "no one answered") {
 		t.Errorf("timeout: %v", v)
 	}
@@ -99,12 +99,12 @@ func TestToolCallReadsRunsWithoutHold(t *testing.T) {
 // A forbid entry naming a tool refuses the call outright, with no hold, and
 // records tool.refused with the entry.
 func TestToolCallForbidden(t *testing.T) {
-	e := toolGateEnv(t, 50*time.Millisecond, 0, func(p *settings.Policy) { p.Forbid = []string{"rename_session"} })
-	_, v := rpc(t, e, mcpWriteTok, renameCall)
+	e := toolGateEnv(t, 50*time.Millisecond, 0, func(p *settings.Policy) { p.Forbid = []string{"ask_agent"} })
+	_, v := rpc(t, e, mcpWriteTok, askCall)
 	if dig(v, "result", "isError") != true || !strings.Contains(resultText(v), "Forbid rule") {
 		t.Errorf("forbidden tool: %v", v)
 	}
-	if !hasEvent(t, e, event.ToolRefused, "rename_session") {
+	if !hasEvent(t, e, event.ToolRefused, "ask_agent") {
 		t.Error("no tool.refused recorded for the forbidden call")
 	}
 }
@@ -112,8 +112,8 @@ func TestToolCallForbidden(t *testing.T) {
 // An allow entry naming a does-tool lets it run with no hold: a named rule
 // overrides the effect default.
 func TestToolCallAllowedByRuleRunsWithoutHold(t *testing.T) {
-	e := toolGateEnv(t, 50*time.Millisecond, 0, func(p *settings.Policy) { p.Allow = append(p.Allow, "rename_session") })
-	_, v := rpc(t, e, mcpWriteTok, renameCall)
+	e := toolGateEnv(t, 50*time.Millisecond, 0, func(p *settings.Policy) { p.Allow = append(p.Allow, "ask_agent") })
+	_, v := rpc(t, e, mcpWriteTok, askCall)
 	if text := resultText(v); strings.Contains(text, "no one answered") {
 		t.Errorf("an allowed does-tool was held: %q", text)
 	}
@@ -123,11 +123,11 @@ func TestToolCallAllowedByRuleRunsWithoutHold(t *testing.T) {
 // gate records that entry, so "always" moves the one that matched — not the
 // bare tool name, which is not on the ask list and would leave it to ask again.
 func TestToolCallAlwaysMovesTheMatchedRule(t *testing.T) {
-	entry := "/usr/bin/rename_session"
+	entry := "/usr/bin/ask_agent"
 	e := toolGateEnv(t, 5*time.Second, 0, func(p *settings.Policy) { p.Ask = []string{entry} })
 	done := make(chan map[string]any, 1)
 	go func() {
-		_, v := rpc(t, e, mcpWriteTok, renameCall)
+		_, v := rpc(t, e, mcpWriteTok, askCall)
 		done <- v
 	}()
 	id := waitForApproval(t, e)
@@ -155,13 +155,13 @@ func TestToolCallAdmissionCapRefusesExtras(t *testing.T) {
 	// The first call takes the one slot and holds.
 	held := make(chan map[string]any, 1)
 	go func() {
-		_, v := rpc(t, e, mcpWriteTok, renameCall)
+		_, v := rpc(t, e, mcpWriteTok, askCall)
 		held <- v
 	}()
 	id1 := waitForApproval(t, e) // the first hold is live, holding the slot
 
 	// A second call finds no slot and is refused at once, without an approval.
-	_, v := rpc(t, e, mcpWriteTok, renameCall)
+	_, v := rpc(t, e, mcpWriteTok, askCall)
 	if dig(v, "result", "isError") != true || !strings.Contains(resultText(v), "too many tool calls") {
 		t.Errorf("second call past the cap: %v", v)
 	}
@@ -194,21 +194,21 @@ func approvalRule(t *testing.T, e *env, id string) string {
 }
 
 // By design the gate does not validate a tool's inputs (his decision,
-// 2026-11-18, DESIGN_0_6_tools.md #8): a does-tool is held on its name and
-// effect even when the tool will later reject the inputs. An Ask on
-// rename_session with an empty title is HELD, allowed, and then the tool's OWN
-// 400 comes back to the agent — the gate decided, the tool validated.
-func TestToolCallEmptyTitleHeldThenToolRejects(t *testing.T) {
+// 2026-11-18, DESIGN_0_6_tools.md #8): a does-tool is held on its name even
+// when its inputs are invalid. An Ask on ask_agent with an empty prompt is
+// HELD, not pre-rejected; once allowed, the route — not the gate — decides it
+// and returns its own error.
+func TestToolCallEmptyInputHeldThenRouteRejects(t *testing.T) {
 	e := toolGateEnv(t, 5*time.Second, 0, nil)
-	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rename_session","arguments":{"title":""}}}`
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask_agent","arguments":{"agent":"a_x","prompt":""}}}`
 	done := make(chan map[string]any, 1)
 	go func() { _, v := rpc(t, e, mcpWriteTok, call); done <- v }()
-	id := waitForApproval(t, e) // it IS held, though the title is invalid
+	id := waitForApproval(t, e) // it IS held, though the prompt is empty
 	answerApproval(t, e, id, "once")
 	v := <-done
 	text := resultText(v)
-	if dig(v, "result", "isError") != true || !strings.Contains(text, "HTTP 400") || !strings.Contains(text, "at least one character") {
-		t.Errorf("want the tool's own 400 after allow, got: %q", text)
+	if dig(v, "result", "isError") != true || strings.Contains(text, "no one answered") || strings.Contains(text, "refused this call") {
+		t.Errorf("want the route's own error after allow, got: %q", text)
 	}
 }
 
@@ -216,7 +216,7 @@ func TestToolCallEmptyTitleHeldThenToolRejects(t *testing.T) {
 // before the gate can hold it, with the route's own message (R2).
 func TestToolCallUnauthorizedRefusedWithoutHold(t *testing.T) {
 	e := toolGateEnv(t, 5*time.Second, 0, nil)
-	_, v := rpc(t, e, mcpReadTok, renameCall)
+	_, v := rpc(t, e, mcpReadTok, askCall)
 	if dig(v, "result", "isError") != true || !strings.Contains(resultText(v), "read-only") {
 		t.Errorf("unauthorized call: %v", v)
 	}
@@ -229,10 +229,10 @@ func TestToolCallUnauthorizedRefusedWithoutHold(t *testing.T) {
 // entry does not keep asking after the first is moved (R2).
 func TestToolCallAlwaysClearsEveryMatchingAskEntry(t *testing.T) {
 	e := toolGateEnv(t, 5*time.Second, 0, func(p *settings.Policy) {
-		p.Ask = []string{"rename_session", "/usr/bin/rename_session"}
+		p.Ask = []string{"ask_agent", "/usr/bin/ask_agent"}
 	})
 	done := make(chan map[string]any, 1)
-	go func() { _, v := rpc(t, e, mcpWriteTok, renameCall); done <- v }()
+	go func() { _, v := rpc(t, e, mcpWriteTok, askCall); done <- v }()
 	id := waitForApproval(t, e)
 	answerApproval(t, e, id, "always")
 	<-done
@@ -240,7 +240,7 @@ func TestToolCallAlwaysClearsEveryMatchingAskEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contains(p.Ask, "rename_session") || contains(p.Ask, "/usr/bin/rename_session") {
+	if contains(p.Ask, "ask_agent") || contains(p.Ask, "/usr/bin/ask_agent") {
 		t.Errorf("ask still holds a matching entry after always: %v", p.Ask)
 	}
 }
@@ -249,19 +249,19 @@ func TestToolCallAlwaysClearsEveryMatchingAskEntry(t *testing.T) {
 // at the one dispatch point, then time out for want of an answer.
 func TestToolCallGatesBuiltinAndCustomAlike(t *testing.T) {
 	e := toolGateEnv(t, 120*time.Millisecond, 0, nil)
-	// A custom tool on the same does-route as rename_session, same effect.
-	base, ok := e.api.servedByName("rename_session")
+	// A custom tool on the same does-route as ask_agent, same effect.
+	base, ok := e.api.servedByName("ask_agent")
 	if !ok {
-		t.Fatal("rename_session not served")
+		t.Fatal("ask_agent not served")
 	}
 	twin := base.def
-	twin.Name = "rename_twin"
+	twin.Name = "ask_twin"
 	if _, err := e.api.registry.Add(twin); err != nil {
 		t.Fatal(err)
 	}
 	e.api.rebuildTools()
-	for _, name := range []string{"rename_session", "rename_twin"} {
-		call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":{"title":"x"}}}`
+	for _, name := range []string{"ask_agent", "ask_twin"} {
+		call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":{"agent":"a_x","prompt":"x"}}}`
 		_, v := rpc(t, e, mcpWriteTok, call)
 		if dig(v, "result", "isError") != true || !strings.Contains(resultText(v), "no one answered") {
 			t.Errorf("%s not gated by the shared code: %v", name, v)
@@ -348,9 +348,9 @@ func resultText2(res toolResult) string {
 	return res.Content[0].Text
 }
 
-// renameCall is a tools/call for rename_session, a does-tool the write turn
-// token lists. On its own session, with a title.
-const renameCall = `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"rename_session","arguments":{"title":"renamed"}}}`
+// askCall is a tools/call for ask_agent, the one built-in does-tool the write
+// turn token lists. No rule covers it, so the gate holds it (Ask).
+const askCall = `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"ask_agent","arguments":{"agent":"a_x","prompt":"renamed"}}}`
 
 // resultText is a tool result's one piece of text.
 func resultText(v map[string]any) string {

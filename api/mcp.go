@@ -134,7 +134,7 @@ func (a *API) mcp(w http.ResponseWriter, r *http.Request) {
 			"protocolVersion": v,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "agentbus", "version": a.cfg.Build.Version},
-			"instructions":    settings.ToolServerInstructions(a.lists(r, "apply_turn")),
+			"instructions":    settings.ToolServerInstructions(a.mayApply(r)),
 		}, nil)
 	case "ping":
 		reply(req.ID, map[string]any{}, nil)
@@ -180,14 +180,15 @@ func rpcID(id json.RawMessage) bool {
 	return false
 }
 
-// lists says r's token sees the tool named name (toolList).
-func (a *API) lists(r *http.Request, name string) bool {
-	for _, t := range a.toolList(r) {
-		if t.Name == name {
-			return true
-		}
+// mayApply says r's token may apply a turn: its [agent_api] apply is on and it
+// is not read-only (the same test authorize makes, api/tokens.go). B11 removed
+// the apply_turn tool, so this reads the policy, not whether that tool lists.
+func (a *API) mayApply(r *http.Request) bool {
+	if g := grantOf(r); g != nil && g.ReadOnly {
+		return false
 	}
-	return false
+	ap := policyOf(r).AgentAPI.Apply
+	return ap != nil && *ap
 }
 
 // toolList is the tools r's token sees (listedRoute).
