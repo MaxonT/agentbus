@@ -150,9 +150,9 @@ func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 	g := &run.Grant{Session: "s1", Root: "s1"}
 	names := func(api settings.AgentAPI) []string {
 		var out []string
-		for _, tr := range e.api.tools {
-			if listed(tr, g, false, api) {
-				out = append(out, tr.t.name)
+		for _, st := range e.api.toolSnap.Load().list {
+			if listedRoute(st.rt, g, false, api) {
+				out = append(out, st.def.Name)
 			}
 		}
 		return out
@@ -178,8 +178,8 @@ func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 				t.Errorf("%s listed with its switch off: %v", n, got)
 			}
 		}
-		if len(got) != len(e.api.tools)-len(tc.gone) {
-			t.Errorf("%v: %d tools, want %d", tc.gone, len(got), len(e.api.tools)-len(tc.gone))
+		if n := len(e.api.toolSnap.Load().list); len(got) != n-len(tc.gone) {
+			t.Errorf("%v: %d tools, want %d", tc.gone, len(got), n-len(tc.gone))
 		}
 	}
 	// tools = false refuses the tool server to a turn token, naming the
@@ -254,7 +254,8 @@ func TestMCPCallSendsTheRoute(t *testing.T) {
 // inputs, and refuses inputs it does not list.
 func TestMCPToolSchemas(t *testing.T) {
 	e := mcpEnv(t)
-	for name, s := range e.api.toolSchemas {
+	for _, st := range e.api.toolSnap.Load().list {
+		name, s := st.def.Name, st.def.Inputs
 		b, _ := json.Marshal(s)
 		if strings.Contains(string(b), "$ref") {
 			t.Errorf("%s: schema holds a $ref: %s", name, b)
@@ -263,7 +264,11 @@ func TestMCPToolSchemas(t *testing.T) {
 			t.Errorf("%s: %s", name, b)
 		}
 	}
-	req := func(name string) []string { return schemaRequired(e.api.toolSchemas[name]) }
+	schemaOf := func(name string) map[string]any {
+		st, _ := e.api.servedByName(name)
+		return st.def.Inputs
+	}
+	req := func(name string) []string { return schemaRequired(schemaOf(name)) }
 	if r := req("review_turn"); !slices.Contains(r, "turn") || !slices.Contains(r, "agent") {
 		t.Errorf("review requires %v", r)
 	}
@@ -273,7 +278,7 @@ func TestMCPToolSchemas(t *testing.T) {
 	// A turn input says it takes the id, not the turn's number: agents
 	// passed "3" in 5 of 6 MCP runs (2026-11-11).
 	for _, name := range []string{"get_turn", "stop_turn", "turn_diff", "apply_turn", "review_turn"} {
-		props, _ := e.api.toolSchemas[name]["properties"].(map[string]any)
+		props, _ := schemaOf(name)["properties"].(map[string]any)
 		turn, _ := props["turn"].(map[string]any)
 		if d, _ := turn["description"].(string); !strings.Contains(d, "never the turn's number") {
 			t.Errorf("%s: turn input says %q", name, d)

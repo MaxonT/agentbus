@@ -14,6 +14,7 @@ import (
 
 	"github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/store"
+	"github.com/staysup/agentbus/toolreg"
 )
 
 // route is one operation: a method on a path.
@@ -127,6 +128,7 @@ var tags = []struct {
 	{name: "Turns", doc: "A turn is one message to an agent, its reply and its changes. Every action is on a turn: start it, stop it, read its diff, apply its changes to the person's folder, ask another agent to review it, and read its model calls."},
 	{name: "Sessions", doc: "A session is a conversation: its turns, in order. Read its history, search it, name it or close it."},
 	{name: "Agents", doc: "Saved agents: a harness, how it reaches its model, the model and a name. A turn names one. And the harnesses, runners and folders a turn can use."},
+	{name: "Tools", doc: "The tools control serves to agents: the built-in ones and the person's own, in one stored format. List, add and remove them. The main token only."},
 	{name: "Settings", doc: "The policy and the instructions every turn gets, and the subscriptions control holds for runners. The main token only."},
 	{name: "Approvals", doc: "The commands the gateway held for a person (an ask entry, or a command on none of the lists under the ask default): list them and answer one, once, always or refuse. The main token only."},
 	{name: "Events", doc: "The record as a live stream, for a cockpit, an export or a program, and a program's own events. The main token only."},
@@ -492,6 +494,30 @@ var routes = slices.Concat([]route{
 			"A turn that names it afterwards is refused with \"was removed; pick another\", for a default agent (claude, codex, agy) too. No body is read.",
 		replies: []reply{{status: 204, doc: "Removed.", empty: true}, badRequest, fail(404, "No such agent."), storeFailed},
 		serve:   (*API).removeSaved},
+	{method: "GET", path: "/api/v0/tools", op: "listTools",
+		tag:     "Tools",
+		summary: "List tools",
+		doc: "The tools control serves to agents, in a stable order: the built-in ones first, then the person's own. " +
+			"Each is one record in the stored format: a name, a description for a model, its inputs as a JSON Schema object, " +
+			"what it runs, its effect (reads or does-something) and where it runs (control).",
+		replies: []reply{ok(200, ToolList{}, "The tools."), badRequest},
+		serve:   plain((*API).listTools)},
+	{method: "POST", path: "/api/v0/tools", op: "addTool",
+		tag:     "Tools",
+		summary: "Add a tool",
+		doc: "Add a custom tool in the stored format. A tool whose run kind is api names an AgentBus route by method and path; " +
+			"its call is made as that request, with the caller's own token. A name already served is refused; a built-in that was removed may be re-added as a custom tool, which then behaves as any custom tool does.",
+		body:    toolreg.Tool{},
+		replies: []reply{ok(201, toolreg.Tool{}, "Added."), badRequest, fail(409, "A tool of that name already exists, or there are too many."), storeFailed},
+		serve:   plain((*API).createTool)},
+	{method: "DELETE", path: "/api/v0/tools/{id}", op: "removeTool",
+		idDoc:   "A tool's name. Another shape gets 404.",
+		tag:     "Tools",
+		summary: "Remove a tool",
+		doc: "Remove a tool by name: a custom tool is dropped; a built-in is marked removed and stops being served. " +
+			"A removed built-in can be re-added as a custom tool. No body is read.",
+		replies: []reply{{status: 204, doc: "Removed.", empty: true}, badRequest, fail(404, "No such tool."), storeFailed},
+		serve:   (*API).removeTool},
 	{method: "GET", path: "/api/v0/harnesses", op: "listHarnesses",
 		tag:     "Agents",
 		summary: "List harnesses",

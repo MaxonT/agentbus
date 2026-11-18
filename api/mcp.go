@@ -151,12 +151,12 @@ func (a *API) mcp(w http.ResponseWriter, r *http.Request) {
 			reply(req.ID, nil, &rpcError{rpcInvalidParams, "params must be an object with name and arguments"})
 			return
 		}
-		tr, ok := a.toolNamed(p.Name)
+		st, ok := a.servedByName(p.Name)
 		if !ok {
 			reply(req.ID, nil, &rpcError{rpcInvalidParams, "no such tool; tools/list names them"})
 			return
 		}
-		reply(req.ID, a.callTool(r, tr, p.Arguments), nil)
+		reply(req.ID, a.callTool(r, st, p.Arguments), nil)
 	default:
 		reply(req.ID, nil, &rpcError{rpcMethodNotFound, "this server answers initialize, ping, tools/list and tools/call"})
 	}
@@ -190,17 +190,17 @@ func (a *API) lists(r *http.Request, name string) bool {
 	return false
 }
 
-// toolList is the tools r's token sees (listed).
+// toolList is the tools r's token sees (listedRoute).
 func (a *API) toolList(r *http.Request) []mcpTool {
 	g, turnsOnly := grantOf(r), a.turnsOnly(r)
 	perm := policyOf(r)
 	out := []mcpTool{}
-	for _, tr := range a.tools {
-		if !listed(tr, g, turnsOnly, perm.AgentAPI) {
+	for _, st := range a.toolSnap.Load().list {
+		if !listedRoute(st.rt, g, turnsOnly, perm.AgentAPI) {
 			continue
 		}
-		out = append(out, mcpTool{Name: tr.t.name, Title: tr.rt.summary, Description: tr.t.doc,
-			InputSchema: a.toolSchemas[tr.t.name], Annotations: annotations(tr.t.effect)})
+		out = append(out, mcpTool{Name: st.def.Name, Title: st.rt.summary, Description: st.def.Description,
+			InputSchema: st.def.Inputs, Annotations: st.annot})
 	}
 	return out
 }
@@ -258,7 +258,7 @@ func annotations(effect string) map[string]any {
 
 // callTool sends one tool call through ServeHTTP, as the HTTP request it
 // names, and answers what that request answered.
-func (a *API) callTool(r *http.Request, tr toolRoute, args map[string]any) toolResult {
+func (a *API) callTool(r *http.Request, st servedTool, args map[string]any) toolResult {
 	fail := func(msg string) toolResult {
 		return toolResult{Content: []textContent{{"text", msg}}, IsError: true}
 	}
@@ -266,7 +266,7 @@ func (a *API) callTool(r *http.Request, tr toolRoute, args map[string]any) toolR
 	if g := grantOf(r); g != nil {
 		own = g.Session
 	}
-	method, target, body, why := toolRequest(tr, a.toolSchemas[tr.t.name], args, own)
+	method, target, body, why := toolRequestFrom(st.def, args, own)
 	if why != "" {
 		return fail(why)
 	}
