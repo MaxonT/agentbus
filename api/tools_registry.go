@@ -44,7 +44,6 @@ func defaultTools(tools []toolRoute, schemas map[string]map[string]any) []toolre
 			Name:        tr.t.name,
 			Description: tr.t.doc,
 			Inputs:      schemas[tr.t.name],
-			Effect:      effect2(tr.t.effect),
 			Where:       toolreg.WhereControl,
 			Run: toolreg.Run{
 				Kind:       toolreg.RunAPI,
@@ -58,26 +57,6 @@ func defaultTools(tools []toolRoute, schemas map[string]map[string]any) []toolre
 		})
 	}
 	return out
-}
-
-// effect2 maps a route tool's finer effect to the two stored values: only
-// reading, or doing something (his decision, 2026-11-18).
-func effect2(effect string) string {
-	if effect == effectNone {
-		return toolreg.EffectReads
-	}
-	return toolreg.EffectDoes
-}
-
-// effect5 maps a stored effect back to a finer one, for the MCP annotations: a
-// tool that only reads is read-only and idempotent; one that does something is
-// neither. Hints come from the tool's own effect, so replacing a built-in's
-// name with a different definition advertises the new definition's hints.
-func effect5(e string) string {
-	if e == toolreg.EffectReads {
-		return effectNone
-	}
-	return effectStarts
 }
 
 // queryNames are a route's query parameters, the tool inputs that go into the
@@ -130,15 +109,15 @@ func (a *API) rebuildTools() {
 }
 
 // resolveServed resolves one stored tool for serving: the route its call runs,
-// and its MCP annotations, taken from the tool's own effect so a built-in and
-// a custom tool of the same effect read the same.
+// and its MCP annotations. The annotations come from the resolved route's HTTP
+// method — a GET only reads — not from any claim the tool makes about itself,
+// since nothing about a tool is trusted (his decision, DESIGN_0_6_tools.md #9).
 func (a *API) resolveServed(def toolreg.Tool) (servedTool, bool) {
 	rt := a.routeFor(def.Run.Method, def.Run.Path)
 	if rt == nil {
 		return servedTool{}, false
 	}
-	eff := effect5(def.Effect)
-	return servedTool{def: def, rt: rt, annot: annotations(eff)}, true
+	return servedTool{def: def, rt: rt, annot: annotations(rt.method == http.MethodGet)}, true
 }
 
 // servedByName is the tool named name, served or not listed to this caller.
@@ -225,7 +204,6 @@ func toolRequestFrom(def toolreg.Tool, args map[string]any, own string) (method,
 type ToolSummary struct {
 	Name        string `json:"name" doc:"The tool's name: a model calls it by this name."`
 	Description string `json:"description" doc:"What the tool does, written for a model."`
-	Effect      string `json:"effect" doc:"reads (a call only reads; allowed by default) or does-something (a call starts work or changes files; asked by default)."`
 	Where       string `json:"where" doc:"Where the call runs: control."`
 }
 
@@ -235,7 +213,7 @@ type ToolList struct {
 }
 
 const (
-	badTool    = "the body must be one JSON object: a tool with name, description, inputs, effect, where and run"
+	badTool    = "the body must be one JSON object: a tool with name, description, inputs, where and run"
 	noSuchTool = "no such tool"
 	toolRoute0 = "run must name a route a built-in tool already exposes; another route (one that is not a tool, has a {call}/{n} path, or needs a header such as If-Match) cannot be served as a tool"
 )
@@ -249,7 +227,7 @@ func (a *API) listTools(w http.ResponseWriter, r *http.Request) {
 	defs := a.registry.List()
 	out := make([]ToolSummary, len(defs))
 	for i, d := range defs {
-		out[i] = ToolSummary{Name: d.Name, Description: d.Description, Effect: d.Effect, Where: d.Where}
+		out[i] = ToolSummary{Name: d.Name, Description: d.Description, Where: d.Where}
 	}
 	writeJSON(w, http.StatusOK, ToolList{out})
 }

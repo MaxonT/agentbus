@@ -39,7 +39,7 @@ func mcpEnvTools(t *testing.T, tools bool) *env {
 func mcpEnvGrants(t *testing.T, tools bool, grants map[string]run.Grant) *env {
 	t.Helper()
 	dir := t.TempDir()
-	p := settings.DefaultPolicy()
+	p := settings.FirstInstallPolicy() // ships the read-only built-in tools pre-set to allow
 	p.AgentAPI.Tools = &tools
 	if err := os.WriteFile(filepath.Join(dir, settings.PolicyFile), settings.FormatPolicy(p), 0o600); err != nil {
 		t.Fatal(err)
@@ -286,15 +286,18 @@ func TestMCPToolSchemas(t *testing.T) {
 	}
 }
 
-// The OpenAPI description names each operation's tools.
+// The OpenAPI description names each operation's tools (by name; a tool carries
+// no effect since 0.6).
 func TestOpenAPINamesTools(t *testing.T) {
 	doc := loadSpec(t)
 	op := doc.Paths.Value("/api/v0/turns/{id}/apply").Post
 	b, _ := json.Marshal(op.Extensions["x-agentbus-tools"])
-	if !strings.Contains(string(b), `"apply_turn"`) || !strings.Contains(string(b), effectApply) {
+	if !strings.Contains(string(b), `"apply_turn"`) {
 		t.Errorf("apply's tools: %s", b)
 	}
-
+	if strings.Contains(string(b), "effect") {
+		t.Errorf("x-agentbus-tools still carries an effect: %s", b)
+	}
 }
 
 // A number in a tool's input goes into the query as the route reads it.

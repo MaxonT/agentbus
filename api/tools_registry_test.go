@@ -83,7 +83,7 @@ func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 
 	// The stored definition of apply_turn, from the single tool route.
 	def := getToolDef(t, e, "apply_turn")
-	if def.Run.Method != "POST" || def.Run.Path != "/api/v0/turns/{id}/apply" || def.Effect != toolreg.EffectDoes {
+	if def.Run.Method != "POST" || def.Run.Path != "/api/v0/turns/{id}/apply" {
 		t.Fatalf("apply_turn definition: %+v", def)
 	}
 
@@ -113,9 +113,10 @@ func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 }
 
 // The list carries facts only (the 0.6 rule): each entry has a name, a
-// description, an effect and where it runs, and never the inputs schema or the
-// run. A tool's whole definition is read from GET /api/v0/tools/{id}, which a
-// turn token cannot reach and which 404s on a name not served.
+// description and where it runs, and never the inputs schema or the run (and no
+// effect, which a tool no longer carries). A tool's whole definition is read
+// from GET /api/v0/tools/{id}, which a turn token cannot reach and 404s on a
+// name not served.
 func TestToolListFactsOnly(t *testing.T) {
 	e := mcpEnv(t)
 	resp, body := do(t, e.req(t, "GET", "/api/v0/tools", nil))
@@ -132,12 +133,12 @@ func TestToolListFactsOnly(t *testing.T) {
 		t.Fatal("no tools listed")
 	}
 	for _, m := range raw.Tools {
-		for _, k := range []string{"name", "description", "effect", "where"} {
+		for _, k := range []string{"name", "description", "where"} {
 			if _, ok := m[k]; !ok {
 				t.Errorf("list entry has no %q: %v", k, m)
 			}
 		}
-		for _, k := range []string{"inputs", "run"} {
+		for _, k := range []string{"inputs", "run", "effect"} {
 			if _, ok := m[k]; ok {
 				t.Errorf("list entry carries %q; the list is facts only: %v", k, m)
 			}
@@ -182,25 +183,25 @@ func TestToolsRoutesGuardrails(t *testing.T) {
 		`{"kind":"api","method":"GET","path":"/api/v0/turns/{id}/calls/{call}","id_input":"turn"}`,
 		`{"kind":"api","method":"PUT","path":"/api/v0/settings/instructions","body":true}`,
 	} {
-		body := `{"name":"my_tool","description":"x","inputs":{"type":"object","properties":{}},"effect":"reads","run":` + run + `}`
+		body := `{"name":"my_tool","description":"x","inputs":{"type":"object","properties":{}},"run":` + run + `}`
 		if code, b := post(body); code != 400 || !bytes.Contains([]byte(b), []byte("a built-in tool already exposes")) {
 			t.Errorf("non-tool route %s: %d %s", run, code, b)
 		}
 	}
 	// A property that is not a schema object.
-	badSchema := `{"name":"my_tool","description":"x","inputs":{"type":"object","properties":{"session":17}},"effect":"reads","run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
+	badSchema := `{"name":"my_tool","description":"x","inputs":{"type":"object","properties":{"session":17}},"run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
 	if code, _ := post(badSchema); code != 400 {
 		t.Errorf("malformed schema: %d", code)
 	}
 	// A name already served.
-	dup := `{"name":"list_turns","description":"x","inputs":{"type":"object","properties":{}},"effect":"reads","run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
+	dup := `{"name":"list_turns","description":"x","inputs":{"type":"object","properties":{}},"run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
 	if code, _ := post(dup); code != 409 {
 		t.Errorf("duplicate: %d", code)
 	}
-	// A bad effect.
-	bad := `{"name":"my_tool","description":"x","inputs":{"type":"object","properties":{}},"effect":"maybe","run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
+	// An unknown field (such as the retired effect) is refused.
+	bad := `{"name":"my_tool","description":"x","inputs":{"type":"object","properties":{}},"effect":"reads","run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
 	if code, _ := post(bad); code != 400 {
-		t.Errorf("bad effect: %d", code)
+		t.Errorf("unknown field: %d", code)
 	}
 	// Remove a name that is not served.
 	if resp, _ := do(t, e.req(t, "DELETE", "/api/v0/tools/no_such", nil)); resp.StatusCode != 404 {
@@ -214,23 +215,26 @@ func TestToolsRoutesGuardrails(t *testing.T) {
 	}
 }
 
-// Reusing a built-in's name for a different definition advertises the new
-// definition's hints, not the old name's: list_turns (reads) replaced by a
-// does-something tool is no longer read-only.
-func TestReplacedBuiltinUsesItsOwnHints(t *testing.T) {
+// A tool's MCP hints come from the ROUTE it runs, not from its name or any
+// claim it makes (decision 9: nothing about a tool is trusted). A tool on a GET
+// route is read-only; reuse list_turns's name for a tool that runs a POST route
+// and it is no longer read-only.
+func TestToolHintsFollowTheRoute(t *testing.T) {
 	e := mcpEnv(t)
 	if a := toolEntry(t, e, token, "list_turns")["annotations"].(map[string]any); a["readOnlyHint"] != true {
-		t.Fatalf("built-in list_turns not read-only: %v", a)
+		t.Fatalf("built-in list_turns (GET) not read-only: %v", a)
 	}
 	if resp, body := do(t, e.req(t, "DELETE", "/api/v0/tools/list_turns", nil)); resp.StatusCode != 204 {
 		t.Fatalf("DELETE list_turns: %d %s", resp.StatusCode, body)
 	}
-	custom := `{"name":"list_turns","description":"starts work now","inputs":{"type":"object","properties":{}},"effect":"does-something","run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
+	// Same name, but it now runs a POST route (ask_agent's), so its hint follows
+	// that route, not the old name.
+	custom := `{"name":"list_turns","description":"starts work now","inputs":{"type":"object","properties":{"agent":{"type":"string"},"prompt":{"type":"string"}},"required":["agent","prompt"]},"run":{"kind":"api","method":"POST","path":"/api/v0/turns","body":true}}`
 	if resp, body := do(t, e.req(t, "POST", "/api/v0/tools", bytes.NewReader([]byte(custom)))); resp.StatusCode != 201 {
 		t.Fatalf("POST list_turns: %d %s", resp.StatusCode, body)
 	}
 	if a := toolEntry(t, e, token, "list_turns")["annotations"].(map[string]any); a["readOnlyHint"] != false {
-		t.Errorf("replaced list_turns still read-only: %v", a)
+		t.Errorf("a tool on a POST route is still read-only: %v", a)
 	}
 }
 
@@ -241,7 +245,7 @@ func TestCustomToolNoSilentOwnSession(t *testing.T) {
 	e := mcpEnv(t)
 	// A tool on the rename route (a built-in's route) with own_session off and
 	// a schema that does not require the id.
-	def := `{"name":"touch_session","description":"renames a session","inputs":{"type":"object","properties":{"session":{"type":"string"},"title":{"type":"string"}},"required":["title"]},"effect":"does-something","run":{"kind":"api","method":"PATCH","path":"/api/v0/sessions/{id}","id_input":"session","body":true}}`
+	def := `{"name":"touch_session","description":"renames a session","inputs":{"type":"object","properties":{"session":{"type":"string"},"title":{"type":"string"}},"required":["title"]},"run":{"kind":"api","method":"PATCH","path":"/api/v0/sessions/{id}","id_input":"session","body":true}}`
 	if resp, body := do(t, e.req(t, "POST", "/api/v0/tools", bytes.NewReader([]byte(def)))); resp.StatusCode != 201 {
 		t.Fatalf("POST touch_session: %d %s", resp.StatusCode, body)
 	}
@@ -263,7 +267,7 @@ func TestConcurrentToolChangesAllLand(t *testing.T) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			body := `{"name":"` + name + `","description":"x","inputs":{"type":"object","properties":{}},"effect":"reads","run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
+			body := `{"name":"` + name + `","description":"x","inputs":{"type":"object","properties":{}},"run":{"kind":"api","method":"GET","path":"/api/v0/turns"}}`
 			if resp, b := do(t, e.req(t, "POST", "/api/v0/tools", bytes.NewReader([]byte(body)))); resp.StatusCode != 201 {
 				t.Errorf("POST %s: %d %s", name, resp.StatusCode, b)
 			}

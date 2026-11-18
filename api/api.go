@@ -75,6 +75,17 @@ type Config struct {
 	// BodyTimeout bounds how long a request that is not a stream may take to
 	// send its body. Zero means 10 seconds.
 	BodyTimeout time.Duration
+	// ToolHoldTimeout and ToolHoldPoll are how long the tool gate holds an Ask
+	// tool call before it refuses it for want of an answer, and how often it
+	// reads control's record for the decision meanwhile (B6, toolgate.go). Zero
+	// means H1's own gateway.HoldTimeout and gateway.PollInterval, so a tool
+	// call and a shell command wait the same; tests shorten them.
+	ToolHoldTimeout time.Duration
+	ToolHoldPoll    time.Duration
+	// ToolHoldMax bounds how many Ask tool calls the gate holds at once across
+	// all turns; past it a call is refused rather than held. Zero means
+	// maxToolHolds.
+	ToolHoldMax int
 	// Now is the clock. Nil means time.Now.
 	Now func() time.Time
 
@@ -154,6 +165,12 @@ type API struct {
 
 	// streams admits at most MaxStreams at once.
 	streams chan struct{}
+	// toolHolds admits at most maxToolHolds held Ask tool calls at once, across
+	// all turns (toolgate.go). Each hold keeps a request goroutine and polls the
+	// record for up to the hold window, so an agent firing many parallel tool
+	// calls cannot hold them all open: past the cap a call is refused at once
+	// rather than held.
+	toolHolds chan struct{}
 
 	// spec is the OpenAPI description, built from the route table, and
 	// runnerSpec the runner protocol's.
@@ -209,6 +226,9 @@ func New(cfg Config) (*API, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.ToolHoldMax <= 0 {
+		cfg.ToolHoldMax = maxToolHolds
+	}
 	for _, h := range cfg.Hosts {
 		if h == "" || strings.ContainsAny(h, ":/ ") {
 			return nil, errors.New("api: a host is a name, without a port")
@@ -239,9 +259,10 @@ func New(cfg Config) (*API, error) {
 	reg.SetDefaults(defaultTools(tools, schemas))
 	a := &API{cfg: cfg, token: sha256.Sum256([]byte(cfg.Token)), spec: desc, runnerSpec: runnerDesc,
 		registry: reg, routes: routeIndex(),
-		hosts:    []string{"127.0.0.1:" + cfg.Port, "localhost:" + cfg.Port, "[::1]:" + cfg.Port},
-		streams:  make(chan struct{}, MaxStreams),
-		previews: newSessionGate()}
+		hosts:     []string{"127.0.0.1:" + cfg.Port, "localhost:" + cfg.Port, "[::1]:" + cfg.Port},
+		streams:   make(chan struct{}, MaxStreams),
+		toolHolds: make(chan struct{}, cfg.ToolHoldMax),
+		previews:  newSessionGate()}
 	a.rebuildTools()
 	for _, h := range cfg.Hosts {
 		a.hosts = append(a.hosts, h+":"+cfg.Port)

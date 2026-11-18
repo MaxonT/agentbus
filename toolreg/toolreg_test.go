@@ -34,7 +34,6 @@ func tool(name string) Tool {
 		Name:        name,
 		Description: "does a thing for a model",
 		Inputs:      map[string]any{"type": "object", "properties": map[string]any{}},
-		Effect:      EffectReads,
 		Where:       WhereControl,
 		Run:         Run{Kind: RunAPI, Method: "GET", Path: "/api/v0/turns"},
 	}
@@ -90,7 +89,6 @@ func TestAddRefuses(t *testing.T) {
 	var bad *Invalid
 	for _, broken := range []Tool{
 		func() Tool { x := tool("Bad_Name"); return x }(),
-		func() Tool { x := tool("ok_tool"); x.Effect = "maybe"; return x }(),
 		func() Tool { x := tool("ok_tool"); x.Run.Method = "TRACE"; return x }(),
 		func() Tool { x := tool("ok_tool"); x.Inputs = nil; return x }(),
 		func() Tool { x := tool("ok_tool"); x.Run.Path = "/elsewhere"; return x }(),
@@ -157,7 +155,6 @@ func TestRemoveAndReadd(t *testing.T) {
 	custom.Description = "a custom apply"
 	custom.Inputs = map[string]any{"type": "object", "properties": map[string]any{"turn": map[string]any{"type": "string"}}}
 	custom.Run = Run{Kind: RunAPI, Method: "POST", Path: "/api/v0/turns/{id}/apply", IDInput: "turn", Body: true}
-	custom.Effect = EffectDoes
 	if _, err := r.Add(custom); err != nil {
 		t.Fatal(err)
 	}

@@ -171,6 +171,10 @@ func (a *API) decideApproval(w http.ResponseWriter, r *http.Request, id string) 
 		}
 	}()
 	// Read the held reply from the record, and whether it was answered already.
+	// A late answer to a hold that already ended (a firm-deadline timeout or a
+	// close is on the record) finds it decided and is refused here, the same as
+	// any answered command — no special case (his call, 2026-11-18: too complex
+	// for a rare edge).
 	h, exists, decided, err := a.approvalByID(id)
 	if err != nil {
 		a.internal(w)

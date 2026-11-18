@@ -240,18 +240,18 @@ func (a *API) toolsListed(r *http.Request, list []mcpTool) {
 	}
 }
 
-// annotations are MCP's hints for what a tool changes. destructiveHint is
-// false for every tool: whether a turn may apply is the token's and
-// [agent_api]'s to say, and an apply refuses a file the person changed. codex
-// asks for approval before a tool marked destructive, and a turn has nobody
-// to ask: it refused apply_turn with "MCP tool call requires
-// approval, but approval policy is never" (codex-cli 0.164.0, 2026-11-11, the
-// fresh-agent test).
-func annotations(effect string) map[string]any {
+// annotations are MCP's hints for what a tool changes, from the route's HTTP
+// method: a GET only reads. readOnly says so. destructiveHint is false for
+// every tool: whether a turn may apply is the token's and [agent_api]'s to say,
+// and an apply refuses a file the person changed. codex asks for approval
+// before a tool marked destructive, and a turn has nobody to ask: it refused
+// apply_turn with "MCP tool call requires approval, but approval policy is
+// never" (codex-cli 0.164.0, 2026-11-11, the fresh-agent test).
+func annotations(readOnly bool) map[string]any {
 	return map[string]any{
-		"readOnlyHint":    effect == effectNone,
+		"readOnlyHint":    readOnly,
 		"destructiveHint": false,
-		"idempotentHint":  effect == effectNone || effect == effectApply || effect == effectRename,
+		"idempotentHint":  readOnly,
 		"openWorldHint":   false,
 	}
 }
@@ -262,8 +262,9 @@ func (a *API) callTool(r *http.Request, st servedTool, args map[string]any) tool
 	fail := func(msg string) toolResult {
 		return toolResult{Content: []textContent{{"text", msg}}, IsError: true}
 	}
+	g := grantOf(r)
 	own := ""
-	if g := grantOf(r); g != nil {
+	if g != nil {
 		own = g.Session
 	}
 	method, target, body, why := toolRequestFrom(st.def, args, own)
@@ -285,6 +286,13 @@ func (a *API) callTool(r *http.Request, st servedTool, args map[string]any) tool
 	}
 	if body != nil {
 		inner.Header.Set("Content-Type", "application/json")
+	}
+	// B6: the gate, at the one dispatch point every tool shares, ordered
+	// decode -> authorize -> decide -> hold if Ask -> run (toolgate.go). A
+	// malformed or unauthorized call is refused at once, never held; an allowed
+	// call falls through to run below. Built-in and custom tools pass here alike.
+	if ok, result := a.gateToolCall(r, inner, g, st, args); !ok {
+		return result
 	}
 	rec := &toolRecorder{header: http.Header{}}
 	// Through the http.Handler, as any request: the route table serves this

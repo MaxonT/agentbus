@@ -162,7 +162,7 @@ var routes = slices.Concat([]route{
 		body: TurnRequest{},
 		turn: askTurn,
 		tools: []tool{
-			{name: "ask_agent", effect: effectStarts,
+			{name: "ask_agent",
 				// No folder: the new session is always on the asking
 				// session's folder. An agent on a runner cannot know the
 				// person's folder path, and its own copy's path is refused
@@ -195,7 +195,7 @@ var routes = slices.Concat([]route{
 			{name: "limit", doc: "Turns per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
 		replies: []reply{ok(200, TurnList{}, "A page of turns."), badRequest, storeFailed},
 		turn:    treeSessionQuery,
-		tools: []tool{{name: "list_turns", effect: effectNone,
+		tools: []tool{{name: "list_turns",
 			doc: "List the turns of your AgentBus session, newest first: each turn's id, number (turn 3 is number 3), state, agent, cost and whether it is applied. " +
 				"With session, another session you can reach. Use a turn's id in the other agentbus tools."}},
 		turns: true,
@@ -209,7 +209,7 @@ var routes = slices.Concat([]route{
 		query:   []param{{name: "session", doc: turnSessionDoc}},
 		replies: []reply{ok(200, OneTurn{}, "The turn."), badRequest, fail(404, "No such turn."), storeFailed},
 		turn:    treeTurn,
-		tools: []tool{{name: "get_turn", effect: effectNone, id: "turn",
+		tools: []tool{{name: "get_turn", id: "turn",
 			doc: "Read one AgentBus turn: its state (queued, running, finished, failed or stopped), agent, prompt, reply and cost, and for a review its verdict and findings."}},
 		turns: true,
 		serve: (*API).getTurn},
@@ -227,7 +227,7 @@ var routes = slices.Concat([]route{
 			fail(409, "The turn has ended, or it is not a turn of this service."),
 			storeFailed},
 		turn: askedTurn,
-		tools: []tool{{name: "stop_turn", effect: effectStops, id: "turn",
+		tools: []tool{{name: "stop_turn", id: "turn",
 			doc: "Stop a queued or running AgentBus turn that work from your session asked for. A queued turn never starts; a running one and every process it started end. " +
 				"The answer comes at once; get_turn then reads stopped."}},
 		turns: true,
@@ -241,7 +241,7 @@ var routes = slices.Concat([]route{
 		query:   []param{{name: "session", doc: turnSessionDoc}},
 		replies: []reply{ok(200, TurnDiff{}, "The turn's diff summary."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
 		turn:    treeTurn,
-		tools: []tool{{name: "turn_diff", effect: effectNone, id: "turn",
+		tools: []tool{{name: "turn_diff", id: "turn",
 			doc: "A summary of what one AgentBus turn did: how many files it changed, its model and tool call counts, cost and timing, and whether its changes were applied. The files are at turn_changes, the model calls at turn_calls, the tool calls and commands at turn_tools."}},
 		turns: true,
 		serve: (*API).turnDiff},
@@ -257,7 +257,7 @@ var routes = slices.Concat([]route{
 			{name: "limit", doc: "Files per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
 		replies: []reply{ok(200, TurnChangesPage{}, "A page of the turn's file changes."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
 		turn:    treeTurn,
-		tools: []tool{{name: "turn_changes", effect: effectNone, id: "turn",
+		tools: []tool{{name: "turn_changes", id: "turn",
 			doc: "The files one AgentBus turn changed, a page at a time: each file's path, change, size and, in an isolated copy, its diff."}},
 		turns: true,
 		serve: (*API).turnChanges},
@@ -273,7 +273,7 @@ var routes = slices.Concat([]route{
 			{name: "limit", doc: "Calls per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
 		replies: []reply{ok(200, TurnCallsPage{}, "A page of the turn's model calls."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
 		turn:    treeTurn,
-		tools: []tool{{name: "turn_calls", effect: effectNone, id: "turn",
+		tools: []tool{{name: "turn_calls", id: "turn",
 			doc: "The model calls one AgentBus turn made, a page at a time: each call's model, status, cost and latency."}},
 		turns: true,
 		serve: (*API).turnCalls},
@@ -289,7 +289,7 @@ var routes = slices.Concat([]route{
 			{name: "limit", doc: "Tool calls per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
 		replies: []reply{ok(200, TurnToolsPage{}, "A page of the turn's tool calls."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
 		turn:    treeTurn,
-		tools: []tool{{name: "turn_tools", effect: effectNone, id: "turn",
+		tools: []tool{{name: "turn_tools", id: "turn",
 			doc: "The tool calls one AgentBus turn made, a page at a time: each call's name, input, whether it errored, and the commands it ran."}},
 		turns: true,
 		serve: (*API).turnTools},
@@ -302,7 +302,7 @@ var routes = slices.Concat([]route{
 		query:   []param{{name: "session", doc: turnSessionDoc}},
 		replies: []reply{ok(200, TurnContext{}, "The turn's context."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
 		turn:    treeTurn,
-		tools: []tool{{name: "turn_context", effect: effectNone, id: "turn",
+		tools: []tool{{name: "turn_context", id: "turn",
 			doc: "How big one AgentBus turn's context got, how much came from the prompt cache, and what its largest prompt was made of."}},
 		turns: true,
 		serve: (*API).turnContext},
@@ -325,7 +325,7 @@ var routes = slices.Concat([]route{
 			ok(409, ApplyState{}, "Refused or failed: error says why, and conflicts names each file in your folder that changed. Nothing was written on a conflict."),
 			tooMany, fail(503, "The runner of the folder's machine has not been seen for a minute. Nothing was written and no apply was made."), storeFailed},
 		turn: applyTurnTok,
-		tools: []tool{{name: "apply_turn", effect: effectApply, id: "turn",
+		tools: []tool{{name: "apply_turn", id: "turn",
 			doc: "Apply an AgentBus turn's file changes to the person's folder. Your edits stay in your session's own copy until a turn is applied. " +
 				"It writes the session's changes up to and including this turn, earlier unapplied turns too. " +
 				"A file the person changed since refuses the whole apply, and nothing is written. Applying a turn again changes nothing."}},
@@ -346,7 +346,7 @@ var routes = slices.Concat([]route{
 			fail(409, "The turn cannot be reviewed: it has not ended, it recorded no changed files, its session is closed, its session's machine was removed, or the key names another turn."),
 			fail(http.StatusTooManyRequests, "Too many turns are waiting; wait for some to end."), storeFailed},
 		turn: askReview,
-		tools: []tool{{name: "review_turn", effect: effectStarts, id: "turn",
+		tools: []tool{{name: "review_turn", id: "turn",
 			doc: "Ask a saved AgentBus agent (from list_agents) to review a turn that has ended. Pick an agent other than the one that did the turn. " +
 				"It starts a read-only review turn; its verdict and findings come back to your session as a later turn, and get_turn on the review turn reads them."}},
 		turns: true,
@@ -404,7 +404,7 @@ var routes = slices.Concat([]route{
 			fail(403, "A turn token's request is refused: error says why."), noSession,
 			fail(409, "A turn of the session has not ended, so it cannot be closed."), storeFailed},
 		turn: renameSession,
-		tools: []tool{{name: "rename_session", effect: effectRename, id: "session", ownSession: true,
+		tools: []tool{{name: "rename_session", id: "session", ownSession: true,
 			fields: []string{"title"}, required: []string{"title"},
 			doc: "Give an AgentBus session a name, as the person's screen lists it: your own session when session is absent."}},
 		serve: (*API).updateSession},
@@ -453,7 +453,7 @@ var routes = slices.Concat([]route{
 			{name: "limit", doc: "Hits per page. 20 when absent.", integer: true, min: 1, max: maxSearchLimit}},
 		replies: []reply{ok(200, store.SearchResult{}, "A page of hits."), badRequest, storeFailed},
 		turn:    treeSessionPath,
-		tools: []tool{{name: "search_history", effect: effectNone, id: "session", ownSession: true, required: []string{"q"},
+		tools: []tool{{name: "search_history", id: "session", ownSession: true, required: []string{"q"},
 			doc: "Search an AgentBus session's stored history for a piece of text, newest first: your own session when session is absent. " +
 				"It finds what earlier turns said and did, including turns you no longer hold in context."}},
 		serve: (*API).search},
@@ -467,7 +467,7 @@ var routes = slices.Concat([]route{
 			{name: "limit", doc: "Turns per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
 		replies: []reply{ok(200, SessionContext{}, "The session's context."), badRequest, storeFailed},
 		turn:    treeSessionPath,
-		tools: []tool{{name: "session_context", effect: effectNone, id: "session", ownSession: true,
+		tools: []tool{{name: "session_context", id: "session", ownSession: true,
 			doc: "An AgentBus session's context: its token totals and how big each turn's context got, newest first. " +
 				"Your own session when session is absent."}},
 		serve: (*API).sessionContext},
@@ -480,7 +480,7 @@ var routes = slices.Concat([]route{
 			"A data folder that already had agents keeps them.",
 		replies: []reply{ok(200, AgentList{}, "The agents."), badRequest},
 		turn:    anyRead,
-		tools: []tool{{name: "list_agents", effect: effectNone,
+		tools: []tool{{name: "list_agents",
 			doc: "List the saved AgentBus agents: setups across vendors (Claude Code, Codex, Gemini and others) that you can ask for work or a review. " +
 				"These are saved setups, not conversations running now, and not your harness's own subagents. An agent's id goes in ask_agent or review_turn."}},
 		serve: plain((*API).listSaved)},
@@ -525,8 +525,9 @@ var routes = slices.Concat([]route{
 		tag:     "Tools",
 		summary: "List tools",
 		doc: "The tools control serves to agents, in a stable order: the built-in ones first, then the person's own. " +
-			"The list carries facts only — a name, a description for a model, its effect (reads or does-something) and where it runs (control). " +
-			"A tool's full definition (its inputs as a JSON Schema object and what it runs) is read from GET /api/v0/tools/{id}.",
+			"The list carries facts only — a name, a description for a model, and where it runs (control). A tool carries no " +
+			"effect; a call is decided by its name against the rules. A tool's full definition (its inputs as a JSON Schema " +
+			"object and what it runs) is read from GET /api/v0/tools/{id}.",
 		replies: []reply{ok(200, ToolList{}, "The tools."), badRequest},
 		serve:   plain((*API).listTools)},
 	{method: "POST", path: "/api/v0/tools", op: "addTool",
@@ -542,7 +543,7 @@ var routes = slices.Concat([]route{
 		tag:     "Tools",
 		summary: "Get a tool",
 		doc: "One tool's full definition in the stored format: its name, its description for a model, its inputs as a JSON Schema object, " +
-			"what it runs, its effect (reads or does-something) and where it runs. The list (GET /api/v0/tools) carries facts only; this is where a tool's whole definition is read.",
+			"what it runs and where it runs. A tool carries no effect. The list (GET /api/v0/tools) carries facts only; this is where a tool's whole definition is read.",
 		replies: []reply{ok(200, toolreg.Tool{}, "The tool."), badRequest, fail(404, "No such tool.")},
 		serve:   (*API).getTool},
 	{method: "DELETE", path: "/api/v0/tools/{id}", op: "removeTool",
