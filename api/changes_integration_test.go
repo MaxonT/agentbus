@@ -23,13 +23,13 @@ import (
 	"github.com/staysup/agentbus/workspace"
 )
 
-func changesOf(t *testing.T, e *env, session string) SessionChanges {
+func changesOf(t *testing.T, e *env, session string) SessionChangesPage {
 	t.Helper()
 	code, out := as(t, e, token, "GET", "/api/v0/sessions/"+session+"/changes", "")
 	if code != 200 {
 		t.Fatalf("changes of %s: %d %s", session, code, out)
 	}
-	var c SessionChanges
+	var c SessionChangesPage
 	if err := json.Unmarshal([]byte(out), &c); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSessionChangesPreview(t *testing.T) {
 		t.Fatalf("preview over the person's edit: %+v", c)
 	}
 	code, st = applyAs(t, e, token, c.Turn)
-	if code != 409 || len(st.Conflicts) != 1 || st.Conflicts[0] != c.Conflicts[0] {
+	if code != 409 || len(st.Conflicts) != 1 || st.Conflicts[0].Path != c.Conflicts[0].Path || st.Conflicts[0].Why != c.Conflicts[0].Why {
 		t.Fatalf("apply after the preview: %d %+v, preview %+v", code, st, c.Conflicts)
 	}
 
@@ -131,6 +131,61 @@ func TestSessionChangesPreview(t *testing.T) {
 	// Each preview was read, so none of their jobs is kept.
 	if js, err := e.q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindPreview}, 100); err != nil || len(js) != 0 {
 		t.Errorf("preview jobs kept: %d %v", len(js), err)
+	}
+}
+
+// A session closed after its preview is cached does not serve the stale cache:
+// a close writes no store event, so the route checks the queue and, finding
+// the copy gone, re-runs and answers not isolated rather than reusing it.
+func TestSessionChangesClosedSkipsCache(t *testing.T) {
+	e, _ := diffEnv(t, filepath.Join(t.TempDir(), settings.PolicyFile))
+	folder := t.TempDir()
+	os.WriteFile(filepath.Join(folder, "a.txt"), []byte("one\ntwo\n"), 0o644)
+	first := startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"edit1"}`)
+	waitEnded(t, e, first.Turn)
+	if c := changesOf(t, e, first.Session); !c.Isolated || !c.Unapplied || c.Count == 0 {
+		t.Fatalf("preview before close: %+v", c)
+	}
+	if _, err := e.q.CloseSession(queue.DefaultTeam, first.Session); err != nil {
+		t.Fatal(err)
+	}
+	if c := changesOf(t, e, first.Session); c.Isolated || c.Unapplied || c.Why != applySessionClosed || len(c.Files) != 0 {
+		t.Fatalf("changes after close reused the cache: %+v", c)
+	}
+}
+
+// A preview whose session has a stored turn.applied -- here a refused apply,
+// with the turn still unapplied -- is reused, not re-run on every GET. The
+// apply is folded into the preview's base (the preview reflects the folder it
+// refused against), so it does not read back as a change since. Round-3
+// defect: base was the turn's change alone, below the later apply, so every
+// GET re-ran, and answered 503 when the runner was offline instead of serving
+// the stored preview. Reuse shows as the latest preview's seq not moving.
+// Any apply retakes the preview, a refused one included: the apply might have
+// changed the folder and the cursor counts it, so the next GET re-runs rather
+// than serving the cached preview. (Re-running after a refusal also shows the
+// person the folder edit that caused it.)
+func TestSessionChangesRerunsAfterRefusedApply(t *testing.T) {
+	e, _ := diffEnv(t, filepath.Join(t.TempDir(), settings.PolicyFile))
+	folder := t.TempDir()
+	os.WriteFile(filepath.Join(folder, "a.txt"), []byte("one\ntwo\n"), 0o644)
+	first := startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"edit1"}`)
+	waitEnded(t, e, first.Turn)
+	// Cache a preview before any apply: its cursor has no applies yet.
+	changesOf(t, e, first.Session)
+	_, seq1, found, err := e.store.LatestPreview(first.Session)
+	if err != nil || !found {
+		t.Fatalf("no cached preview: %v", err)
+	}
+	// The person edits the file so the apply is refused; the refused apply
+	// still counts, so the cursor moves off the one the preview recorded.
+	os.WriteFile(filepath.Join(folder, "a.txt"), []byte("mine\n"), 0o644)
+	if code, _ := applyAs(t, e, token, first.Turn); code != 409 {
+		t.Fatalf("apply should be refused: %d", code)
+	}
+	changesOf(t, e, first.Session)
+	if _, seq2, _, _ := e.store.LatestPreview(first.Session); seq2 == seq1 {
+		t.Fatalf("the preview was reused after a refused apply (seq %d) instead of re-run", seq1)
 	}
 }
 
@@ -193,8 +248,12 @@ func TestSessionChangesFirstTurnRunning(t *testing.T) {
 // changesQueue is an API over a queue the test drives itself, as the
 // runner of machine con would: one isolated session whose first turn
 // ended with changes. later moves the queue's clock on.
-func changesQueue(t *testing.T) (e *env, q *queue.Queue, r queue.Runner, session, turn string, later func(time.Duration)) {
+func changesQueue(t *testing.T, waits ...time.Duration) (e *env, q *queue.Queue, r queue.Runner, session, turn string, later func(time.Duration)) {
 	t.Helper()
+	wait := 5 * time.Second
+	if len(waits) > 0 {
+		wait = waits[0]
+	}
 	dir := t.TempDir()
 	var skew atomic.Int64
 	q, err := queue.Open(filepath.Join(dir, "jobs.db"), func() time.Time { return time.Now().Add(time.Duration(skew.Load())) })
@@ -209,7 +268,7 @@ func changesQueue(t *testing.T) (e *env, q *queue.Queue, r queue.Runner, session
 	t.Cleanup(func() { st.Close() })
 	srv := httptest.NewUnstartedServer(nil)
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
-	a, err := New(Config{Store: st, Token: token, Port: port, BaseURL: "http://127.0.0.1:" + port, Queue: q, TurnWait: 5 * time.Second})
+	a, err := New(Config{Store: st, Token: token, Port: port, BaseURL: "http://127.0.0.1:" + port, Queue: q, TurnWait: wait})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +347,7 @@ func TestSessionChangesAnswers(t *testing.T) {
 			}
 		}
 		a := <-got
-		var c SessionChanges
+		var c SessionChangesPage
 		if a.code != 200 || json.Unmarshal([]byte(a.out), &c) != nil {
 			t.Fatalf("%d %s", a.code, a.out)
 		}
@@ -300,4 +359,216 @@ func TestSessionChangesAnswers(t *testing.T) {
 			t.Fatalf("the read preview's job: %v", err)
 		}
 	})
+}
+
+// When a re-run cannot run because the runner is offline, the last stored
+// preview is served instead of a 503. Here the session has not changed, so the
+// preview is still current and is not marked stale.
+func TestSessionChangesServesCachedWhenOffline(t *testing.T) {
+	e, q, r, session, _, later := changesQueue(t)
+	// Cache a preview by running the one preview job the first GET plans.
+	got := make(chan int, 1)
+	go func() {
+		code, _ := as(t, e, token, "GET", "/api/v0/sessions/"+session+"/changes", "")
+		got <- code
+	}()
+	p := queue.PreviewResult{Files: []queue.PreviewFile{{Path: "a.txt", Change: "modified"}}, Count: 1}
+	res, _ := json.Marshal(queue.Result{Preview: &p})
+	cached := false
+	for deadline := time.Now().Add(5 * time.Second); !cached && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if js, _ := q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindPreview}, 1); len(js) == 1 {
+			endJob(t, q, r, true, queue.Finish{Status: queue.Finished, Result: res})
+			cached = true
+		}
+	}
+	if !cached {
+		t.Fatal("the preview job was never queued")
+	}
+	if code := <-got; code != 200 {
+		t.Fatalf("the caching GET: %d", code)
+	}
+	// The runner goes offline; ?fresh forces a re-run that cannot run, so the
+	// stored preview is served marked stale.
+	later(queue.RunnerFresh + time.Second)
+	code, out := as(t, e, token, "GET", "/api/v0/sessions/"+session+"/changes?fresh=true", "")
+	var c SessionChangesPage
+	if code != 200 || json.Unmarshal([]byte(out), &c) != nil {
+		t.Fatalf("stale GET: %d %s", code, out)
+	}
+	// The cursor has not moved, so the stored preview is still current: it is
+	// served (not a 503), and not marked stale.
+	if c.Stale || c.Why != "" || c.Count != 1 || c.PreviewedAt == nil || len(c.Files) != 1 {
+		t.Fatalf("expected the current preview served, not stale: %+v", c)
+	}
+}
+
+// A pending apply still answers 409, even when a preview is cached: reuse must
+// not serve a 200 over an apply in progress. The apply moves the cursor, so
+// the cached preview is not reused and the re-run reports the apply is busy.
+func TestSessionChangesBusyNotReused(t *testing.T) {
+	e, q, r, session, turn, _ := changesQueue(t)
+	// Cache a preview by running the one preview job the first GET plans.
+	got := make(chan int, 1)
+	go func() {
+		code, _ := as(t, e, token, "GET", "/api/v0/sessions/"+session+"/changes", "")
+		got <- code
+	}()
+	p := queue.PreviewResult{Files: []queue.PreviewFile{{Path: "a.txt", Change: "modified"}}, Count: 1}
+	res, _ := json.Marshal(queue.Result{Preview: &p})
+	cached := false
+	for deadline := time.Now().Add(5 * time.Second); !cached && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if js, _ := q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindPreview}, 1); len(js) == 1 {
+			endJob(t, q, r, true, queue.Finish{Status: queue.Finished, Result: res})
+			cached = true
+		}
+	}
+	if !cached {
+		t.Fatal("the preview job was never queued")
+	}
+	if code := <-got; code != 200 {
+		t.Fatalf("the caching GET: %d", code)
+	}
+	// Start an apply; it is pending, so a fresh GET must report busy, not the
+	// cached preview.
+	if _, _, err := q.Apply(queue.DefaultTeam, turn); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := as(t, e, token, "GET", "/api/v0/sessions/"+session+"/changes", ""); code != 409 || !strings.Contains(out, applyBusy) {
+		t.Fatalf("a pending apply with a cached preview: %d %s", code, out)
+	}
+}
+
+// A pinned page reports the same stale status as the first: once the session
+// moves off a preview (here an apply), paging it by its event id still says
+// stale, not only the first page. (Round-7 P1.2: the pinned path dropped it.)
+func TestSessionChangesPinnedPageReportsStale(t *testing.T) {
+	e, _ := diffEnv(t, filepath.Join(t.TempDir(), settings.PolicyFile))
+	folder := t.TempDir()
+	os.WriteFile(filepath.Join(folder, "a.txt"), []byte("one\ntwo\n"), 0o644)
+	first := startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"edit1"}`)
+	waitEnded(t, e, first.Turn)
+	c := changesOf(t, e, first.Session)
+	if c.Event == "" {
+		t.Fatalf("no cached preview event: %+v", c)
+	}
+	// An apply moves the cursor off the cached preview.
+	if code, st := applyAs(t, e, token, first.Turn); code != 200 {
+		t.Fatalf("apply: %d %+v", code, st)
+	}
+	// Paging that now out-of-date preview by its event id reports it stale.
+	code, out := as(t, e, token, "GET", "/api/v0/sessions/"+first.Session+"/changes?event="+c.Event, "")
+	var p SessionChangesPage
+	if code != 200 || json.Unmarshal([]byte(out), &p) != nil {
+		t.Fatalf("pinned GET: %d %s", code, out)
+	}
+	if !p.Stale || p.Why != changesStale || p.Event != c.Event {
+		t.Fatalf("a pinned out-of-date preview should be stale: %+v", p)
+	}
+}
+
+// Two GETs of a session's changes that arrive together run one preview, not
+// two racing to store: the first holds the session's gate and runs it, the
+// second waits and reuses its result. Both return the same preview.
+func TestSessionChangesConcurrentGetsRunOnePreview(t *testing.T) {
+	e, q, r, session, _, _ := changesQueue(t)
+	type ans struct {
+		code int
+		out  string
+	}
+	got := make(chan ans, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			code, out := getRaw(e, token, "/api/v0/sessions/"+session+"/changes")
+			got <- ans{code, out}
+		}()
+	}
+	// Exactly one preview job is planned while both GETs are in flight; run it.
+	p := queue.PreviewResult{Files: []queue.PreviewFile{{Path: "a.txt", Change: "modified"}}, Count: 1}
+	res, _ := json.Marshal(queue.Result{Preview: &p})
+	ran := false
+	for deadline := time.Now().Add(5 * time.Second); !ran && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		js, _ := q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindPreview}, 2)
+		if len(js) > 1 {
+			t.Fatalf("two preview jobs ran for concurrent GETs: %d", len(js))
+		}
+		if len(js) == 1 {
+			endJob(t, q, r, true, queue.Finish{Status: queue.Finished, Result: res})
+			ran = true
+		}
+	}
+	if !ran {
+		t.Fatal("no preview job appeared")
+	}
+	for i := 0; i < 2; i++ {
+		a := <-got
+		var c SessionChangesPage
+		if a.code != 200 || json.Unmarshal([]byte(a.out), &c) != nil || c.Count != 1 || len(c.Files) != 1 {
+			t.Fatalf("concurrent GET %d: %d %s", i, a.code, a.out)
+		}
+	}
+	// No second preview ran after the first was read.
+	if js, _ := q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindPreview}, 2); len(js) != 0 {
+		t.Fatalf("a preview job was left or a second ran: %d", len(js))
+	}
+}
+
+// A preview whose session changes while it runs is served stale: the cursor is
+// rechecked after the run, so a turn or apply that landed during it is not
+// shown as current. (Round-8: the final serve hardcoded not-stale.)
+func TestSessionChangesFreshRunStaleIfChangedWhileRunning(t *testing.T) {
+	e, q, r, session, turn, _ := changesQueue(t)
+	got := make(chan string, 1)
+	go func() {
+		_, out := as(t, e, token, "GET", "/api/v0/sessions/"+session+"/changes?fresh=true", "")
+		got <- out
+	}()
+	// While the preview runs, an apply moves the cursor off what it recorded.
+	ran := false
+	for deadline := time.Now().Add(5 * time.Second); !ran && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if js, _ := q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindPreview}, 1); len(js) == 1 {
+			if _, _, err := q.Apply(queue.DefaultTeam, turn); err != nil {
+				t.Fatal(err)
+			}
+			p := queue.PreviewResult{Files: []queue.PreviewFile{{Path: "a.txt", Change: "modified"}}, Count: 1}
+			res, _ := json.Marshal(queue.Result{Preview: &p})
+			endJob(t, q, r, true, queue.Finish{Status: queue.Finished, Result: res})
+			ran = true
+		}
+	}
+	if !ran {
+		t.Fatal("no preview job appeared")
+	}
+	var c SessionChangesPage
+	if json.Unmarshal([]byte(<-got), &c) != nil {
+		t.Fatal("decode")
+	}
+	if !c.Stale || c.Why != changesStale {
+		t.Fatalf("a preview whose session changed while it ran should be stale: %+v", c)
+	}
+}
+
+// Waiting for the preview gate is bounded by one budget with the run, not a
+// fresh wait each: a second GET held behind a stuck preview answers the
+// timeout rather than hanging. (Round-8: the gate wait had no deadline.)
+func TestSessionChangesGateWaitBounded(t *testing.T) {
+	e, q, _, session, _, _ := changesQueue(t, 300*time.Millisecond)
+	// The first GET holds the gate on a preview that never finishes.
+	go getRaw(e, token, "/api/v0/sessions/"+session+"/changes?fresh=true")
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if js, _ := q.List(queue.DefaultTeam, queue.Filter{Kind: queue.KindPreview}, 1); len(js) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the first preview never started")
+		}
+	}
+	// The second GET waits for the gate and, within the budget, answers 504.
+	start := time.Now()
+	code, out := as(t, e, token, "GET", "/api/v0/sessions/"+session+"/changes?fresh=true", "")
+	if code != 504 || !strings.Contains(out, changesSlow) {
+		t.Fatalf("a bounded gate wait: %d %s", code, out)
+	}
+	if waited := time.Since(start); waited > 3*time.Second {
+		t.Fatalf("the gate wait was not bounded: %s", waited)
+	}
 }

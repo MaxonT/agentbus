@@ -1,37 +1,47 @@
 package api
 
 // A conversation's changes not applied yet: GET /api/v0/sessions/{id}/changes.
-// It is the dry run of the apply that POST /api/v0/turns/{id}/apply of the
-// session's latest turn would make: the same two changesets (queue.Preview
-// reads them where Apply does), on the runner of the folder's machine, by
-// the apply's own code stopped before it writes (connector.Preview). It
-// writes nothing in the folder and stores no event; the preview is a job in
-// the queue, as an apply is, removed once read (queue.DropPreview).
+// It pages the apply's dry run - what POST /api/v0/turns/{id}/apply of the
+// session's latest turn would do - from the record. A preview runs on the
+// folder's machine (connector.Preview, nothing written) and control stores it
+// as a changes.previewed event, the one source; the route serves and pages
+// that event. A later request reuses the stored preview until the session
+// changes or ?fresh=true asks for a new one; an apply always re-checks the
+// folder itself, so the safety stays there.
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"time"
 
+	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/settings"
 )
 
-// SessionChanges is the answer to GET /api/v0/sessions/{id}/changes.
-type SessionChanges struct {
-	Session   string                `json:"session"`
-	Isolated  bool                  `json:"isolated" doc:"The session works in an isolated copy of the person's folder, so its changes reach the folder only by an apply. false: it works in the folder as it is, there is nothing to apply, and why says so."`
-	Unapplied bool                  `json:"unapplied" doc:"An apply would change the person's folder: files or conflicts is not empty. false when every change is applied, when the folder already holds them, or when nothing can be applied (why says why)."`
-	Turn      string                `json:"turn,omitempty" doc:"The session's latest ended turn with changes: the turn to name in POST /api/v0/turns/{id}/apply to apply everything. Also set when it is applied already. Absent when the session has none, or its first turn has not ended."`
-	Turns     []string              `json:"turns,omitempty" doc:"Every turn whose changes that apply would carry, oldest first."`
-	Files     []PreviewFile         `json:"files" doc:"Each file that apply would write or remove, and each file in conflicts, sorted by path, with its change against the person's folder now."`
-	Count     int                   `json:"count" doc:"How many files. files may list fewer, with truncated."`
-	Truncated bool                  `json:"truncated,omitempty" doc:"files or conflicts was cut to keep the answer small."`
-	DiffsCut  bool                  `json:"diffs_cut,omitempty" doc:"Some text files have no diff here: all diffs together passed 1 MiB, and the later ones were left out (each marked diff_left_out)."`
-	Conflicts []queue.ApplyConflict `json:"conflicts" doc:"Each file in the person's folder that is neither as it was at the start of the changes nor already as they leave it, with why: exactly the files that would refuse the apply. Not empty: the apply would write nothing."`
-	Why       string                `json:"why,omitempty" doc:"Why nothing can be applied: the session does not work in an isolated copy, or it was closed."`
+// SessionChangesPage is the answer to GET /api/v0/sessions/{id}/changes: a
+// page of the apply preview, from the record's latest changes.previewed.
+type SessionChangesPage struct {
+	Session     string              `json:"session"`
+	Isolated    bool                `json:"isolated" doc:"The session works in an isolated copy of the person's folder, so its changes reach the folder only by an apply. false: it works in the folder as it is, there is nothing to apply, and why says so."`
+	Unapplied   bool                `json:"unapplied" doc:"An apply would change the person's folder: files or conflicts is not empty. false when every change is applied, when the folder already holds them, or when nothing can be applied (why says why)."`
+	Turn        string              `json:"turn,omitempty" doc:"The session's latest ended turn with changes: the turn to name in POST /api/v0/turns/{id}/apply to apply everything. Also set when it is applied already. Absent when the session has none, or its first turn has not ended."`
+	Turns       []string            `json:"turns,omitempty" doc:"Every turn whose changes that apply would carry, oldest first."`
+	PreviewedAt *time.Time          `json:"previewed_at,omitempty" doc:"When this preview was taken. A reused preview is as of then, not now; ?fresh=true takes a new one. Absent when there is nothing to preview."`
+	Store       string              `json:"store" doc:"The store id."`
+	Event       string              `json:"event,omitempty" doc:"The changes.previewed event this page is from; send it back as event to page the same preview."`
+	Count       int                 `json:"count" doc:"Every file the apply would write or remove, and every conflict, counted whole; files is a page of them, continued by next_before, or fewer than count with truncated when the stored preview omitted some."`
+	Truncated   bool                `json:"truncated,omitempty" doc:"The stored preview kept fewer files than count: they were too many to send, so some are not in the record at all, and count still counts them. This is not paging: a page holding fewer than count is continued by next_before."`
+	DiffsCut    bool                `json:"diffs_cut,omitempty" doc:"Some text files have no diff here: all diffs together passed 1 MiB, and the later ones were left out (each marked diff_left_out)."`
+	Files       []PreviewFile       `json:"files" doc:"A page of the files the apply would write or remove, and the conflicts, sorted by path, each with its change against the person's folder now."`
+	Conflicts   []event.RefusedFile `json:"conflicts" doc:"Each file in the person's folder that is neither as it was at the start of the changes nor already as they leave it, with why: exactly the files that would refuse the apply. Not empty: the apply would write nothing."`
+	NextBefore  *int64              `json:"next_before" doc:"The before for the next, earlier page, or null when the page reaches the first file."`
+	Stale       bool                `json:"stale,omitempty" doc:"This preview is out of date: the session changed, but the runner is offline so a fresh one cannot run. It is the last preview taken, as of previewed_at; retry when the runner is back, or ?fresh=true."`
+	Why         string              `json:"why,omitempty" doc:"Why nothing can be applied: the session does not work in an isolated copy, or it was closed; or, with stale, that the runner is offline."`
 }
 
-// PreviewFile is one file of SessionChanges.
+// PreviewFile is one file of a session changes page.
 type PreviewFile struct {
 	Path        string  `json:"path"`
 	Change      string  `json:"change" doc:"added, modified or deleted, against the person's folder now."`
@@ -46,21 +56,147 @@ const (
 	changesNotIsolated = "this session works in your folder as it is, not in an isolated copy, so its changes are already there: there is nothing to apply"
 	changesSlow        = "the folder's machine did not answer in time, so no preview was made; nothing was written: ask again"
 	changesFailed      = "the preview could not be made; nothing was written"
+	changesStale       = "the session changed, but the folder's machine is offline, so this is the last preview taken, not current: start agentbus runner there and ask again, or ?fresh=true"
 )
 
 // GET /api/v0/sessions/<id>/changes: what applying the session's changes
 // would do to the person's folder now.
 func (a *API) sessionChanges(w http.ResponseWriter, r *http.Request, id string) {
-	out := SessionChanges{Session: id, Isolated: true, Files: []PreviewFile{}, Conflicts: []queue.ApplyConflict{}}
-	if a.cfg.Queue == nil {
-		a.changesWithoutQueue(w, out)
+	before, limit, ok := pageParams(w, r)
+	if !ok {
 		return
 	}
-	job, turn, err := a.cfg.Queue.Preview(queue.DefaultTeam, id)
+	q := r.URL.Query()
+	// Paging a preview already served: read the pinned event and page it, so
+	// every page is of the same snapshot even if the folder changes meanwhile.
+	if pin := q.Get("event"); pin != "" {
+		e, found, err := a.cfg.Store.EventByID(id, "", pin)
+		if err != nil {
+			a.internal(w)
+			return
+		}
+		if !found || e.Previewed == nil {
+			writeError(w, http.StatusNotFound, "no such preview; ask again without event")
+			return
+		}
+		// A pinned page carries the same stale status as the first: if the
+		// session has moved off this preview's cursor (or was closed), every
+		// page of it is out of date, not only the first.
+		stale, err := a.previewStale(id, e.Previewed)
+		if err != nil {
+			a.internal(w)
+			return
+		}
+		a.writePreviewPage(w, id, e, before, limit, stale)
+		return
+	}
+	// Fast path: reuse the session's latest preview, without taking the gate,
+	// when it is already current.
+	if a.servedCurrent(w, r, id, before, limit) {
+		return
+	}
+	// Otherwise take the session's preview gate, so GETs that arrive together
+	// run one preview, not several racing to store: wait for any in-flight one,
+	// then reuse its result or run a preview. A ?fresh GET reuses nothing, so it
+	// runs its own once the in-flight one is done. One deadline covers the wait
+	// and the run together -- the same budget the await uses -- so a line of
+	// waiters cannot each add a full await; it is passed on to runPreview.
+	wait := a.cfg.TurnWait
+	if wait == 0 {
+		wait = DefaultTurnWait
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), wait)
+	defer cancel()
+	leave, ok := a.previews.enter(ctx, id)
+	if !ok {
+		// Timed out waiting for the gate, or the client went away. Answer the
+		// timeout as a slow preview does; say nothing when the client is gone.
+		if ctx.Err() == context.DeadlineExceeded {
+			writeError(w, http.StatusGatewayTimeout, changesSlow)
+		}
+		return
+	}
+	defer leave()
+	r = r.WithContext(ctx)
+	if a.servedCurrent(w, r, id, before, limit) {
+		return
+	}
+	a.runPreview(w, r, id, before, limit)
+}
+
+// servedCurrent serves the session's latest stored preview when it may be
+// reused -- the request is not ?fresh, a preview is stored, and it is not stale
+// (the appliable cursor still equals the one it recorded, and the session is
+// not closed) -- and returns true. It returns false when a preview must be run;
+// on an internal error it writes the error and returns true, the request done.
+func (a *API) servedCurrent(w http.ResponseWriter, r *http.Request, id string, before int64, limit int) bool {
+	if r.URL.Query().Get("fresh") == "true" {
+		return false
+	}
+	e, _, found, err := a.cfg.Store.LatestPreview(id)
+	if err != nil {
+		a.internal(w)
+		return true
+	}
+	if !found || e.Previewed == nil {
+		return false
+	}
+	stale, err := a.previewStale(id, e.Previewed)
+	if err != nil {
+		a.internal(w)
+		return true
+	}
+	if stale {
+		return false
+	}
+	a.writePreviewPage(w, id, e, before, limit, false)
+	return true
+}
+
+// previewStale says whether the stored preview p is out of date for the
+// session now: it was closed, or its appliable cursor has moved off the one
+// the preview recorded (a new appliable turn, or any apply). It is what the
+// reuse check tests, read here so a pinned page reports the same stale status
+// the first page did.
+func (a *API) previewStale(session string, p *event.Previewed) (bool, error) {
+	if a.sessionClosed(session) {
+		return true, nil
+	}
+	if a.cfg.Queue == nil {
+		return false, nil
+	}
+	turn, applies, ok, err := a.cfg.Queue.AppliableCursor(queue.DefaultTeam, session)
+	if err != nil {
+		return false, err
+	}
+	return !ok || turn != p.Turn || applies != p.Applies, nil
+}
+
+// sessionClosed says the session's copy is gone, so any stored preview of it
+// is stale. A close writes no store event, so it is read from the queue.
+func (a *API) sessionClosed(session string) bool {
+	if a.cfg.Queue == nil {
+		return false
+	}
+	ws, ok, err := a.cfg.Queue.Workspace(queue.DefaultTeam, session)
+	return err == nil && ok && ws.Closed != nil
+}
+
+// runPreview runs a fresh dry run, stores it as a changes.previewed event,
+// and pages it. A session with nothing to apply answers without an event;
+// only a real preview is stored.
+func (a *API) runPreview(w http.ResponseWriter, r *http.Request, id string, before int64, limit int) {
+	out := SessionChangesPage{Session: id, Isolated: true, Store: a.cfg.Store.ID(),
+		Files: []PreviewFile{}, Conflicts: []event.RefusedFile{}}
+	if a.cfg.Queue == nil {
+		a.changesWithoutQueue(w, id)
+		return
+	}
+	job, turn, applies, err := a.cfg.Queue.Preview(queue.DefaultTeam, id)
 	out.Turn = turn
 	switch {
 	case errors.Is(err, queue.ErrNotFound):
-		a.changesWithoutQueue(w, out)
+		a.changesWithoutQueue(w, id)
 		return
 	case errors.Is(err, queue.ErrNotIsolated):
 		out.Isolated, out.Why = false, changesNotIsolated
@@ -71,7 +207,7 @@ func (a *API) sessionChanges(w http.ResponseWriter, r *http.Request, id string) 
 		writeJSON(w, http.StatusOK, out)
 		return
 	case errors.Is(err, queue.ErrSessionClosed):
-		out.Why = applySessionClosed
+		out.Isolated, out.Why = false, applySessionClosed
 		writeJSON(w, http.StatusOK, out)
 		return
 	case errors.Is(err, queue.ErrAllApplied):
@@ -94,6 +230,19 @@ func (a *API) sessionChanges(w http.ResponseWriter, r *http.Request, id string) 
 		writeError(w, http.StatusConflict, applyBusy)
 		return
 	case errors.Is(err, queue.ErrMachineOffline):
+		// The runner is offline, so a fresh preview cannot run. Serve the last
+		// stored preview rather than nothing, marked stale only when the
+		// session has moved off it (otherwise it is still current); only when
+		// there is none to serve is this a 503.
+		if se, _, found, serr := a.cfg.Store.LatestPreview(id); serr == nil && found && se.Previewed != nil {
+			stale, serr := a.previewStale(id, se.Previewed)
+			if serr != nil {
+				a.internal(w)
+				return
+			}
+			a.writePreviewPage(w, id, se, before, limit, stale)
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, applyOffline)
 		return
 	case errors.Is(err, queue.ErrFull):
@@ -109,15 +258,18 @@ func (a *API) sessionChanges(w http.ResponseWriter, r *http.Request, id string) 
 		// not take a folder place for nothing.
 		_, _ = a.cfg.Queue.Cancel(queue.DefaultTeam, job.ID)
 		switch {
-		case r.Context().Err() != nil:
-		case err != nil:
+		case errors.Is(r.Context().Err(), context.Canceled):
+			// The client went away; there is nothing to answer.
+		case err != nil && !errors.Is(err, context.DeadlineExceeded):
 			a.internal(w)
 		default:
+			// The await's deadline (its own or the request's budget) passed.
 			writeError(w, http.StatusGatewayTimeout, changesSlow)
 		}
 		return
 	}
-	// Read here and nowhere else: the job goes once it is read.
+	// The preview job goes once read; store its result as the record's one
+	// source, then page from it.
 	defer func() { _ = a.cfg.Queue.DropPreview(queue.DefaultTeam, job.ID) }()
 	res, _ := queue.ReadResult(j.Result)
 	p := res.Preview
@@ -129,16 +281,60 @@ func (a *API) sessionChanges(w http.ResponseWriter, r *http.Request, id string) 
 		writeError(w, http.StatusConflict, msg)
 		return
 	}
-	out.Turns, out.Count, out.Truncated, out.DiffsCut = j.Links.AppliesTurns, p.Count, p.Truncated, p.DiffsCut
+	// The preview records the appliable cursor it was planned against (turn
+	// and applies), so the route reuses it only while that cursor holds.
+	e := event.Event{Kind: event.ChangesPreviewed, Session: id, Previewed: previewedFrom(applies, turn, j.Links.AppliesTurns, p)}
+	e.ID, e.Time = newEventID(), a.cfg.Now().UTC()
+	if _, _, err := a.cfg.Store.Append(e); err != nil {
+		a.internal(w)
+		return
+	}
+	// Running the preview took time; if the session moved off its cursor while
+	// it ran, it is already out of date, so it is served with that said.
+	stale, err := a.previewStale(id, e.Previewed)
+	if err != nil {
+		a.internal(w)
+		return
+	}
+	a.writePreviewPage(w, id, e, before, limit, stale)
+}
+
+// previewedFrom turns a preview job's result into the stored event's payload.
+func previewedFrom(applies int, turn string, turns []string, p *queue.PreviewResult) *event.Previewed {
+	pv := &event.Previewed{Applies: applies, Turn: turn, Turns: turns, Count: p.Count, Truncated: p.Truncated, DiffsCut: p.DiffsCut,
+		Files: make([]event.PreviewedFile, 0, len(p.Files))}
 	for _, f := range p.Files {
-		out.Files = append(out.Files, PreviewFile{Path: f.Path, Change: f.Change, Added: f.Added, Removed: f.Removed,
+		pv.Files = append(pv.Files, event.PreviewedFile{Path: f.Path, Change: f.Change, Added: f.Added, Removed: f.Removed,
 			Diff: f.Diff, DiffLeftOut: f.DiffLeftOut})
 	}
-	if p.Conflicts != nil {
-		out.Conflicts = p.Conflicts
+	for _, c := range p.Conflicts {
+		pv.Conflicts = append(pv.Conflicts, event.RefusedFile{Path: c.Path, Why: c.Why})
 	}
-	out.Unapplied = out.Count > 0 || len(out.Conflicts) > 0
-	writeJSON(w, http.StatusOK, out)
+	return pv
+}
+
+// writePreviewPage pages a stored changes.previewed event's file list.
+func (a *API) writePreviewPage(w http.ResponseWriter, session string, e event.Event, before int64, limit int, stale bool) {
+	p := e.Previewed
+	window, next := pageBefore(p.Files, before, limit)
+	files := make([]PreviewFile, 0, len(window))
+	for _, f := range window {
+		files = append(files, PreviewFile{Path: f.Path, Change: f.Change, Added: f.Added, Removed: f.Removed,
+			Diff: f.Diff, DiffLeftOut: f.DiffLeftOut})
+	}
+	conflicts := p.Conflicts
+	if conflicts == nil {
+		conflicts = []event.RefusedFile{}
+	}
+	at := e.Time
+	why := ""
+	if stale {
+		why = changesStale
+	}
+	writeJSON(w, http.StatusOK, SessionChangesPage{Session: session, Isolated: true,
+		Unapplied: p.Count > 0 || len(conflicts) > 0, Turn: p.Turn, Turns: p.Turns, PreviewedAt: &at,
+		Store: a.cfg.Store.ID(), Event: e.ID, Count: p.Count, Truncated: p.Truncated, DiffsCut: p.DiffsCut,
+		Files: files, Conflicts: conflicts, NextBefore: next, Stale: stale, Why: why})
 }
 
 // isolationNone says whether the policy's isolation is none: a session's
@@ -158,16 +354,16 @@ func (a *API) isolationNone() (bool, error) {
 // changesWithoutQueue answers for a session the queue does not hold: one
 // the record holds worked in a folder as it is (its turns came through the
 // hooks or the gateway), else there is no such session.
-func (a *API) changesWithoutQueue(w http.ResponseWriter, out SessionChanges) {
+func (a *API) changesWithoutQueue(w http.ResponseWriter, session string) {
 	snap, err := a.cfg.Store.Snapshot()
 	if err != nil {
 		a.internal(w)
 		return
 	}
 	for _, s := range snap.Sessions {
-		if s.ID == out.Session {
-			out.Isolated, out.Why = false, changesNotIsolated
-			writeJSON(w, http.StatusOK, out)
+		if s.ID == session {
+			writeJSON(w, http.StatusOK, SessionChangesPage{Session: session, Isolated: false, Why: changesNotIsolated,
+				Store: a.cfg.Store.ID(), Files: []PreviewFile{}, Conflicts: []event.RefusedFile{}})
 			return
 		}
 	}

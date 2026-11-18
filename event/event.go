@@ -122,6 +122,12 @@ const (
 	TurnChanged Kind = "turn.changed"
 	TurnApplied Kind = "turn.applied"
 
+	// ChangesPreviewed: what applying the session's changes to the person's
+	// folder would do now, the dry run's result, stored so GET /sessions/{id}/
+	// changes serves it from the record (one source) and pages it. Previewed
+	// holds it. Stored when a preview runs; reused until the session changes.
+	ChangesPreviewed Kind = "changes.previewed"
+
 	// PlanUsage: how much of a subscription's plan is used in one of its
 	// windows, as the vendor said in a model reply's headers (gateway/plan.go).
 	// Plan holds the reading. Stored when the reading changes, and again
@@ -177,6 +183,7 @@ var Kinds = []KindInfo{
 	{SettingsChanged, "The settings changed, through the API or by the one-time import of the settings files: setting is permissions, instructions or agents; keys names what changed (a policy key such as limits.max_depth, text for the instructions, an agent id or id.field such as a_1234.model); settings_version is the settings version the change made. On an import, file is the file the setting came from. A build that changed a default writes the old value into the person's policy on its first start: a change of permissions with no file, whose keys are those defaults. Names only: never a value, so never a secret. The change and this event are stored together: the settings database keeps the event until the record has it. No session.", []string{"setting", "settings_version"}},
 	{TurnChanged, "What the turn changed in its session's copy, or in the folder it ran in, from its start to its end. Stored by control once it accepts the turn's end, at most once per turn: changes holds the changed files (path, change, size, sha256 at the end, sha256_before at the start) and, for small text files, each one's unified diff (at most 1 MiB for the whole turn; diffs_cut says some were left out) and content. A binary file has its path, size and hashes only. The file list can be cut: truncated says it is not complete, because files were left out (past 1,000, or when the whole was too large to send; count still counts them) or because the copy held more files than a checkpoint keeps (then count misses some too). GET /api/v0/turns/{id}/changes lists it, and /diff summarises it. Absent for a turn that ran in no folder, and for turns from before 0.5, whose changes are in their job.", []string{"session", "turn", "changes"}},
 	{TurnApplied, "An apply of the session's turns to the person's folder ended (POST /api/v0/turns/{id}/apply): turn is the turn asked for, and applied holds every turn whose changes it carried, who asked (by: the person or an agent, never a token), the result (applied, refused or failed), the files written or removed, and on a refusal the files that refused it, each with why. Stored once per apply. Show a refusal as a warning.", []string{"session", "turn", "applied"}},
+	{ChangesPreviewed, "What applying the session's changes to the person's folder would do now, the dry run of POST /api/v0/turns/{id}/apply computed on the folder's machine, nothing written: previewed holds the files it would write or remove (with diffs), the conflicts it would refuse, the turn it would apply up to and the turns it would carry. Stored so GET /api/v0/sessions/{id}/changes serves and pages it from the record, as of this event's time; a new one is stored when a preview runs again (the session changed, or a fresh one was asked for). The file list can be cut (truncated) when too many to send; count still counts them all.", []string{"session", "previewed"}},
 	{PlanUsage, "How much of a subscription's plan is used in one of its windows, as the vendor said in the headers of a model reply that carried control's credential for that subscription: plan holds the subscription (the harness, such as claude), the connect its credential came from, the window, its length in minutes, the percent used, when it resets and the vendor's status word. " +
 		"exchange names the call it was read from. Stored when the reading changes, and again every 10 minutes at most while calls keep it the same. " +
 		"The latest per subscription, connect and window is kept; GET /api/v0/subscriptions shows those of the subscription's current connect. Only control's own gateway stores it: a runner's record is refused it. Read from a fixed list of the vendor's usage headers only; no other header. No session.", []string{"plan"}},
@@ -364,6 +371,8 @@ type Event struct {
 	Changes *TurnChanges `json:"changes,omitempty" doc:"On turn.changed: every file the turn added, modified or deleted, with diffs."`
 	// Applied, only on turn.applied: what the apply did.
 	Applied *Applied `json:"applied,omitempty" doc:"On turn.applied: the turns applied, who asked, the result and the files."`
+	// Previewed, only on changes.previewed: the apply dry run's result.
+	Previewed *Previewed `json:"previewed,omitempty" doc:"On changes.previewed: what applying the session's changes would do to the folder now, listed and paged by GET /api/v0/sessions/{id}/changes."`
 	// Plan, only on plan.usage: the reading.
 	Plan *Plan `json:"plan,omitempty" doc:"On plan.usage: how much of the subscription's plan is used in one window."`
 
@@ -494,6 +503,35 @@ type Applied struct {
 type RefusedFile struct {
 	Path string `json:"path"`
 	Why  string `json:"why"`
+}
+
+// Previewed is an apply's dry run (changes.previewed): what applying the
+// session's changes would do to the person's folder now, nothing written.
+type Previewed struct {
+	// Turn and Applies are the session's appliable cursor when the preview was
+	// taken: the turn it goes up to, and how many apply jobs the session had.
+	// The route reuses the preview only while the session's current cursor
+	// still equals these, so a new appliable turn or any apply (even a refused
+	// one) retakes it, while a not-yet-ended turn or a failed upload -- neither
+	// of which is appliable -- does not.
+	Applies   int             `json:"applies,omitempty" doc:"How many apply jobs the session had when the preview was taken; part of the cursor it is reused against."`
+	Turn      string          `json:"turn,omitempty" doc:"The turn an apply would go up to; POST /api/v0/turns/{id}/apply of it applies the session's changes."`
+	Turns     []string        `json:"turns,omitempty" doc:"Every turn whose changes that apply would carry, oldest first."`
+	Count     int             `json:"count" doc:"Every file the apply would write or remove, and every conflict, counted whole; files may list fewer, with truncated."`
+	Truncated bool            `json:"truncated,omitempty" doc:"files is not every file: too many to send, so later ones were left out; count still counts them, so count minus the files listed is how many are not here."`
+	DiffsCut  bool            `json:"diffs_cut,omitempty" doc:"Some text files have no diff: all diffs together passed 1 MiB and the later ones were left out (each diff_left_out)."`
+	Files     []PreviewedFile `json:"files" doc:"Each file the apply would write or remove, and each conflict, sorted by path."`
+	Conflicts []RefusedFile   `json:"conflicts,omitempty" doc:"Each file in the folder that would refuse the apply, with why. Those files are in files too."`
+}
+
+// PreviewedFile is one file an apply would change (changes.previewed).
+type PreviewedFile struct {
+	Path        string  `json:"path"`
+	Change      string  `json:"change" doc:"added, modified or deleted, against the folder now."`
+	Added       int     `json:"added" doc:"Lines the change adds. 0 when no diff could be made."`
+	Removed     int     `json:"removed" doc:"Lines the change removes. 0 when no diff could be made."`
+	Diff        *string `json:"diff,omitempty" doc:"The unified diff from the folder now to what the apply would write, for small text on both sides."`
+	DiffLeftOut bool    `json:"diff_left_out,omitempty" doc:"The content changes and no diff is here: binary, a link, over 256 KiB, or past the 1 MiB of all diffs."`
 }
 
 // By says who asked for something, by the kind of token it came with. Never

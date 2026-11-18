@@ -65,10 +65,11 @@ func (s *Store) Snapshot() (Snapshot, error) {
 	snap := Snapshot{Store: s.id, Seq: hi, Sessions: []Session{}}
 	byID := map[string]*Session{}
 
-	// A rename is not activity: it leaves started and last as they were.
+	// A rename or a stored preview is not activity: each leaves started and
+	// last as they were.
 	rows, err := s.r.Query(`SELECT session,
-			COALESCE(MIN(CASE WHEN kind <> 'session.renamed' THEN time END), MIN(time)),
-			COALESCE(MAX(CASE WHEN kind <> 'session.renamed' THEN time END), MAX(time)),
+			COALESCE(MIN(CASE WHEN kind NOT IN ('session.renamed', 'changes.previewed') THEN time END), MIN(time)),
+			COALESCE(MAX(CASE WHEN kind NOT IN ('session.renamed', 'changes.previewed') THEN time END), MAX(time)),
 			SUM(kind = 'turn.started'),
 			SUM(kind = 'model.responded' AND COALESCE(json_type(data, '$.usage'), 'null') = 'object'),
 			SUM(kind = 'model.responded' AND COALESCE(json_type(data, '$.usage'), 'null') <> 'object'),
