@@ -56,7 +56,7 @@ const (
 	changesNotIsolated = "this session works in your folder as it is, not in an isolated copy, so its changes are already there: there is nothing to apply"
 	changesSlow        = "the folder's machine did not answer in time, so no preview was made; nothing was written: ask again"
 	changesFailed      = "the preview could not be made; nothing was written"
-	changesStale       = "the session changed, but the folder's machine is offline, so this is the last preview taken, not current: start agentbus runner there and ask again, or ?fresh=true"
+	changesStale       = "the session changed after this preview was taken, so it is not current: ?fresh=true takes a new one, which needs the folder's machine online"
 )
 
 // GET /api/v0/sessions/<id>/changes: what applying the session's changes

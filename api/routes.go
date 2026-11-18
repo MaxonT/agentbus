@@ -359,8 +359,14 @@ var routes = slices.Concat([]route{
 	{method: "GET", path: "/api/v0/sessions", op: "listSessions",
 		tag:     "Sessions",
 		summary: "List sessions",
-		doc:     "The sessions, and the seq they were computed at.",
-		replies: []reply{ok(200, Snapshot{}, "The snapshot."), storeFailed},
+		doc: "A page of sessions, newest activity first, and the seq they were computed at.\n\n" +
+			"Page older sessions with before set to the next_before of the page before, and store and after set to the first page's store and seq: those pin the snapshot, so a session that gains activity meanwhile keeps its place and no page skips it. Stream from the list's store and seq to follow new events.",
+		query: []param{
+			{name: "before", doc: "The previous page's next_before: it names that page's last session, and this page is the sessions after it.", integer: true, min: 1},
+			{name: "limit", doc: "Sessions per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit},
+			{name: "store", doc: "The first page's store, to pin later pages to the same snapshot. With after."},
+			{name: "after", doc: "The first page's seq, to pin later pages to the same snapshot. With store.", integer: true, min: 0}},
+		replies: []reply{ok(200, Snapshot{}, "A page of sessions."), badRequest, mismatch, storeFailed},
 		serve:   plain((*API).sessions)},
 	{method: "GET", path: "/api/v0/sessions/{id}", op: "getSession",
 		tag:     "Sessions",

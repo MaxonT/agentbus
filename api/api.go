@@ -495,8 +495,10 @@ func randomHex(n int) string {
 // is closed, which the queue holds.
 type Snapshot struct {
 	Store    string    `json:"store" doc:"The store id. Send it back as store."`
-	Seq      int64     `json:"seq" doc:"The seq the snapshot was taken at. Send it back as after."`
-	Sessions []Session `json:"sessions" doc:"Newest activity first."`
+	Seq      int64     `json:"seq" doc:"The seq the snapshot was taken at. Send it back as after to stream from here."`
+	Sessions []Session `json:"sessions" doc:"A page of sessions, newest activity first."`
+	// NextBefore is the before for the next, older page.
+	NextBefore *int64 `json:"next_before" doc:"The before for the next, older page, or null when there are no older sessions."`
 }
 
 // Session is one session: the record's, and when it was closed.
@@ -507,8 +509,8 @@ type Session struct {
 
 // snapshot is every session, each with closed set from the queue. A closed
 // session is never resumable: it takes no more turns.
-func (a *API) snapshot() (Snapshot, error) {
-	snap, err := a.cfg.Store.Snapshot()
+func (a *API) snapshot(at, before int64, limit int) (Snapshot, error) {
+	snap, err := a.cfg.Store.Sessions(at, before, limit)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -518,7 +520,7 @@ func (a *API) snapshot() (Snapshot, error) {
 			return Snapshot{}, err
 		}
 	}
-	out := Snapshot{Store: snap.Store, Seq: snap.Seq, Sessions: make([]Session, len(snap.Sessions))}
+	out := Snapshot{Store: snap.Store, Seq: snap.Seq, Sessions: make([]Session, len(snap.Sessions)), NextBefore: snap.NextBefore}
 	for i, s := range snap.Sessions {
 		out.Sessions[i] = a.withClosed(s, closed)
 	}
@@ -536,8 +538,28 @@ func (a *API) withClosed(s store.Session, closed map[string]time.Time) Session {
 }
 
 // GET /api/v0/sessions
-func (a *API) sessions(w http.ResponseWriter, _ *http.Request) {
-	snap, err := a.snapshot()
+func (a *API) sessions(w http.ResponseWriter, r *http.Request) {
+	before, limit, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
+	// store and after from the first page pin the snapshot, so later pages do
+	// not skip a session that gained activity meanwhile. Absent on the first.
+	at, set, ok := a.cursor(w, r)
+	if !ok {
+		return
+	}
+	if !set {
+		at = -1 // No pin: the latest snapshot. An explicit after=0 is a pin.
+	}
+	// A pin beyond the store's latest seq is not a snapshot that was ever
+	// taken: honouring it would let later events move a session and skip it, so
+	// it is refused rather than quietly served against the newest.
+	if at > a.cfg.Store.Last() {
+		writeError(w, http.StatusBadRequest, "after is beyond the store's latest seq")
+		return
+	}
+	snap, err := a.snapshot(at, before, limit)
 	if err != nil {
 		a.internal(w)
 		return

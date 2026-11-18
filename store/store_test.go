@@ -677,3 +677,50 @@ func TestSnapshotTitle(t *testing.T) {
 		t.Errorf("rename: old title %q, %v", e.OldTitle, err)
 	}
 }
+
+// Sessions pages the snapshot newest activity first, by the time of the
+// activity: the cursor is each session's unique last seq, so the order can be
+// by time while the cursor is a plain seq; the pin holds the snapshot so a
+// session that gains activity keeps its place; and a buffered older event that
+// arrives at a high seq still sorts by its time, not its seq.
+func TestSessionsPaging(t *testing.T) {
+	s := newStore(t)
+	base := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
+	min := func(m int) time.Time { return base.Add(time.Duration(m) * time.Minute) }
+	mustAppend(t, s, event.Event{ID: "t1", Kind: event.TurnStarted, Session: "s1", Turn: "t1", Text: "x", Time: min(1)})
+	mustAppend(t, s, event.Event{ID: "t2", Kind: event.TurnStarted, Session: "s2", Turn: "t2", Text: "x", Time: min(2)})
+	mustAppend(t, s, event.Event{ID: "t3", Kind: event.TurnStarted, Session: "s3", Turn: "t3", Text: "x", Time: min(3)})
+	ids := func(ss []Session) string {
+		out := make([]string, 0, len(ss))
+		for _, x := range ss {
+			out = append(out, x.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	// The whole snapshot, newest activity first by time.
+	all, err := s.Sessions(-1, 0, 0)
+	if err != nil || ids(all.Sessions) != "s3,s2,s1" || all.NextBefore != nil {
+		t.Fatalf("all: %q next %v err %v", ids(all.Sessions), all.NextBefore, err)
+	}
+	// Page one: the newest two, with next_before naming the second.
+	p1, err := s.Sessions(-1, 0, 2)
+	if err != nil || ids(p1.Sessions) != "s3,s2" || p1.NextBefore == nil {
+		t.Fatalf("page one: %q next %v err %v", ids(p1.Sessions), p1.NextBefore, err)
+	}
+	// A buffered event: s4 happened at 10:00:30, older than all, but arrives
+	// now at the highest seq. And s1 gains newer activity at 10:05.
+	mustAppend(t, s, event.Event{ID: "t4", Kind: event.TurnStarted, Session: "s4", Turn: "t4", Text: "x", Time: base.Add(30 * time.Second)})
+	mustAppend(t, s, event.Event{ID: "t1b", Kind: event.TurnStarted, Session: "s1", Turn: "t1b", Text: "y", Time: min(5)})
+	// A fresh snapshot is by time: s1 (10:05) is newest, s4 (10:00:30) oldest,
+	// so s4 sorts last though it arrived at the highest seq.
+	fresh, _ := s.Sessions(-1, 0, 0)
+	if ids(fresh.Sessions) != "s1,s3,s2,s4" {
+		t.Fatalf("buffered event out of chronological order: %q", ids(fresh.Sessions))
+	}
+	// Page two, pinned to page one's seq, still has s1 and does not see the
+	// two later events: the pin holds the snapshot from before them.
+	p2, err := s.Sessions(p1.Seq, *p1.NextBefore, 2)
+	if err != nil || ids(p2.Sessions) != "s1" || p2.NextBefore != nil {
+		t.Fatalf("page two pinned: %q next %v err %v", ids(p2.Sessions), p2.NextBefore, err)
+	}
+}
