@@ -950,7 +950,7 @@ func (r *Runner) prepare(ctx context.Context, at *attempt) *queue.Result {
 				return &queue.Result{Refused: "the permissions cannot be read, so the turn did not start; fix them and send the turn again"}
 			}
 			if b, ok := isolation.For(p.Isolation, folder); ok {
-				return r.isolate(at, b, isolation.Request{Folder: folder, Share: p.ShareReadOnly, Ref: at.ref})
+				return r.isolate(at, b, isolation.Request{Folder: folder, Ref: at.ref})
 			}
 		}
 		at.folder = folder

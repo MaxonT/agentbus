@@ -43,8 +43,7 @@
 // On disk, under the runner's workdir: the copy at <workdir>/<id>, and the
 // space's own record at <workdir>/.isolation/<id>: space.json, the
 // checkpoints, the saved files, and an overlay's lower layer. A space
-// shares nothing with another, but the read-only folders share_read_only
-// names (shared.go), so closing it removes everything it made.
+// shares nothing with another, so closing it removes everything it made.
 package isolation
 
 import (
@@ -116,10 +115,6 @@ type Request struct {
 	// Ctx, when not nil, stops a copy built from a snapshot while its
 	// blobs are fetched.
 	Ctx context.Context
-	// Share, for copy: folders at the top of Folder, such as node_modules,
-	// that the copy links to one read-only copy shared by every session
-	// made from the same folder, instead of copying them (shared.go).
-	Share []string
 }
 
 // Space is one session's isolated copy.
@@ -145,8 +140,6 @@ type Space struct {
 	// Method, for copy: clone (copy-on-write), reflink, or copy (a plain
 	// copy); overlay for overlay.
 	Method string `json:"method,omitempty"`
-	// Shared, for copy: the read-only shared folders the copy links to.
-	Shared []string `json:"shared,omitempty"`
 	// Fallback: why the backend asked for could not be used, and which one
 	// was, as For's choice fell back. Empty when it was used.
 	Fallback string `json:"fallback,omitempty"`

@@ -83,15 +83,6 @@ edit = "session"
 # with isolate false always uses the folder itself.
 isolation = "auto"
 
-# share_read_only: folders at the top of a session's folder that a "copy"
-# shares instead of copying, e.g. ["node_modules"]. Every session made from
-# the folder as it is links to one read-only copy of each, which makes a copy
-# of a project with a big node_modules much faster on macOS. A turn that
-# writes there (npm install) fails with "permission denied"; leave the list
-# empty for agents that install packages. Not used by "overlay", which copies
-# nothing per session anyway.
-share_read_only = []
-
 # subagents: whether a turn may start the agent's own subagents. Off by
 # default: agents ask other agents through AgentBus, where the work is
 # recorded. false turns them off on the command line: claude is denied its
@@ -215,20 +206,19 @@ const (
 // Once read from a store every value is filled: a key left out holds its
 // default, and a list is empty, never null.
 type Policy struct {
-	ReadFolders   []string `toml:"read_folders" json:"read_folders" doc:"Folders an agent may read and search beyond its own folder: absolute, or starting with ~/. Each must exist on the machine that runs the turn. A contained turn sees nothing under the real home by default, so a tool kept there (for example ~/.nvm, ~/.cargo, ~/.pyenv) is not reachable until its folder is listed here."`
-	Allow         []string `toml:"allow" json:"allow" doc:"Commands agents may run without asking, for claude and codex alike: a command and its leading arguments, such as \"go test\". A command on none of the lists is held for a person (ask) unless unlisted is set to refuse."`
-	Ask           []string `toml:"ask" json:"ask" doc:"Commands that wait for a person before an agent runs them, for claude and codex alike. The gateway holds a matching call and records it for a person; an \"always\" moves the entry to allow and continues the session so the agent can run it, \"once\" lets it run that continuation turn only, a refusal records the decision. Matched like forbid, by leading words and base name. Forbid wins over ask; ask wins over allow."`
-	Forbid        []string `toml:"forbid" json:"forbid" doc:"Commands claude and codex may never run. The gateway refuses them. It matches each simple command by its leading words and the program's base name, through pipes, sh -c, sudo and env. It reads the command text, so it is not a sandbox: a command built at run time is not seen."`
-	Unlisted      string   `toml:"unlisted" json:"unlisted,omitempty" doc:"What the gateway does with a command on none of the lists: ask (the default; it holds the command and records it for a person) or refuse (it refuses the command). Forbid, ask and allow are matched first; this decides only what is left. Absent in a PUT: ask."`
-	Edit          string   `toml:"edit" json:"edit,omitempty" doc:"Where a turn may edit files without asking: session (its own session's folder) or none. Absent in a PUT: session."`
-	Isolation     string   `toml:"isolation" json:"isolation,omitempty" doc:"Where a new session's turns run: auto (copy on macOS; overlay on Linux where the runner can mount one, else copy), overlay, copy (a copy of its folder as it is now), git (a git worktree with the folder's uncommitted edits, in a repo) or none (the folder itself). On ext4, copy and the overlay's snapshot copy every byte: use xfs, btrfs, git or none for a big folder. Absent in a PUT: auto."`
-	ShareReadOnly []string `toml:"share_read_only" json:"share_read_only" doc:"Folders at the top of a session's folder, such as node_modules, that a copy links to one shared read-only copy of instead of copying. A turn cannot write there. Absent in a PUT: none."`
-	Subagents     *bool    `toml:"subagents" json:"subagents,omitempty" doc:"Whether a turn may start the agent's own subagents. Off by default: agents ask other agents through AgentBus, where the work is recorded. Absent in a PUT: false."`
-	HomeFiles     []string `toml:"home_files" json:"home_files" doc:"Files or folders under the home folder, each starting with ~/, copied into each session's own home at the same place at the start of each turn, such as ~/.aws/config. Sandbox on or off. A folder's files go at any depth, 64 MiB and 10000 files in all. A file the session has is replaced when the original is newer, and kept when it is as new or newer. ~/.claude.json gives only its mcpServers, merged into the session's own .claude.json. The MCP servers copied in (claude's ~/.claude.json, codex's ~/.codex/config.toml) load on an edit turn, and claude may call them without asking; a read-only turn (a review) loads none of them. agy refuses every MCP call. A vendor sign-in file (claude's .credentials.json, codex's auth.json, agy's token) is refused, and left out of a folder listed. Before 0.5.2 this was sandbox.read, which still reads as home_files. Absent in a PUT: none."`
-	Limits        Limits   `toml:"limits" json:"limits" doc:"The limits on work agents ask for."`
-	AgentAPI      AgentAPI `toml:"agent_api" json:"agent_api" doc:"What a turn's own token may call."`
-	Network       Network  `toml:"network" json:"network" doc:"What a turn's agent may reach on the network (on Linux by its network namespace, on macOS by the session's sandbox)."`
-	Sandbox       Sandbox  `toml:"sandbox" json:"sandbox" doc:"A wall around each session's agent (a proof of concept)."`
+	ReadFolders []string `toml:"read_folders" json:"read_folders" doc:"Folders an agent may read and search beyond its own folder: absolute, or starting with ~/. Each must exist on the machine that runs the turn. A contained turn sees nothing under the real home by default, so a tool kept there (for example ~/.nvm, ~/.cargo, ~/.pyenv) is not reachable until its folder is listed here."`
+	Allow       []string `toml:"allow" json:"allow" doc:"Commands agents may run without asking, for claude and codex alike: a command and its leading arguments, such as \"go test\". A command on none of the lists is held for a person (ask) unless unlisted is set to refuse."`
+	Ask         []string `toml:"ask" json:"ask" doc:"Commands that wait for a person before an agent runs them, for claude and codex alike. The gateway holds a matching call and records it for a person; an \"always\" moves the entry to allow and continues the session so the agent can run it, \"once\" lets it run that continuation turn only, a refusal records the decision. Matched like forbid, by leading words and base name. Forbid wins over ask; ask wins over allow."`
+	Forbid      []string `toml:"forbid" json:"forbid" doc:"Commands claude and codex may never run. The gateway refuses them. It matches each simple command by its leading words and the program's base name, through pipes, sh -c, sudo and env. It reads the command text, so it is not a sandbox: a command built at run time is not seen."`
+	Unlisted    string   `toml:"unlisted" json:"unlisted,omitempty" doc:"What the gateway does with a command on none of the lists: ask (the default; it holds the command and records it for a person) or refuse (it refuses the command). Forbid, ask and allow are matched first; this decides only what is left. Absent in a PUT: ask."`
+	Edit        string   `toml:"edit" json:"edit,omitempty" doc:"Where a turn may edit files without asking: session (its own session's folder) or none. Absent in a PUT: session."`
+	Isolation   string   `toml:"isolation" json:"isolation,omitempty" doc:"Where a new session's turns run: auto (copy on macOS; overlay on Linux where the runner can mount one, else copy), overlay, copy (a copy of its folder as it is now), git (a git worktree with the folder's uncommitted edits, in a repo) or none (the folder itself). On ext4, copy and the overlay's snapshot copy every byte: use xfs, btrfs, git or none for a big folder. Absent in a PUT: auto."`
+	Subagents   *bool    `toml:"subagents" json:"subagents,omitempty" doc:"Whether a turn may start the agent's own subagents. Off by default: agents ask other agents through AgentBus, where the work is recorded. Absent in a PUT: false."`
+	HomeFiles   []string `toml:"home_files" json:"home_files" doc:"Files or folders under the home folder, each starting with ~/, copied into each session's own home at the same place at the start of each turn, such as ~/.aws/config. Sandbox on or off. A folder's files go at any depth, 64 MiB and 10000 files in all. A file the session has is replaced when the original is newer, and kept when it is as new or newer. ~/.claude.json gives only its mcpServers, merged into the session's own .claude.json. The MCP servers copied in (claude's ~/.claude.json, codex's ~/.codex/config.toml) load on an edit turn, and claude may call them without asking; a read-only turn (a review) loads none of them. agy refuses every MCP call. A vendor sign-in file (claude's .credentials.json, codex's auth.json, agy's token) is refused, and left out of a folder listed. Before 0.5.2 this was sandbox.read, which still reads as home_files. Absent in a PUT: none."`
+	Limits      Limits   `toml:"limits" json:"limits" doc:"The limits on work agents ask for."`
+	AgentAPI    AgentAPI `toml:"agent_api" json:"agent_api" doc:"What a turn's own token may call."`
+	Network     Network  `toml:"network" json:"network" doc:"What a turn's agent may reach on the network (on Linux by its network namespace, on macOS by the session's sandbox)."`
+	Sandbox     Sandbox  `toml:"sandbox" json:"sandbox" doc:"A wall around each session's agent (a proof of concept)."`
 
 	// where and fix say, in a turn's refusal, where the policy came from and
 	// what to do: set by the store that read it (Error).
@@ -285,7 +275,7 @@ func FirstInstallPolicy() Policy {
 
 // fill sets every value left out to its default.
 func (p *Policy) fill() {
-	for _, l := range []*[]string{&p.ReadFolders, &p.Allow, &p.Ask, &p.Forbid, &p.ShareReadOnly, &p.HomeFiles, &p.Network.Allow} {
+	for _, l := range []*[]string{&p.ReadFolders, &p.Allow, &p.Ask, &p.Forbid, &p.HomeFiles, &p.Network.Allow} {
 		if *l == nil {
 			*l = []string{}
 		}
@@ -351,11 +341,6 @@ func (p *Policy) Check() error {
 	case "", IsolationAuto, IsolationOverlay, IsolationCopy, IsolationGit, IsolationNone:
 	default:
 		return fmt.Errorf("isolation must be %q, %q, %q, %q or %q", IsolationAuto, IsolationOverlay, IsolationCopy, IsolationGit, IsolationNone)
-	}
-	for _, f := range p.ShareReadOnly {
-		if f == "" || f == "." || f == ".." || f == ".git" || strings.ContainsAny(f, "/\\") || strings.ContainsFunc(f, isControl) {
-			return fmt.Errorf("share_read_only entry %s must be one folder name at the top of the session's folder, such as \"node_modules\"", strconv.Quote(f))
-		}
 	}
 	for _, l := range []struct {
 		name string
@@ -439,7 +424,7 @@ func parsePolicy(b []byte) (Policy, error) {
 	}
 	extra := slices.DeleteFunc(md.Undecoded(), func(k toml.Key) bool { return slices.Contains(retiredKeys, strings.Join(k, ".")) })
 	if len(extra) > 0 {
-		return Policy{}, fmt.Errorf("unknown key %s; the keys are read_folders, allow, ask, forbid, unlisted, edit, isolation, share_read_only, subagents, home_files, [limits], [agent_api], [network] and [sandbox] (see the README)", strconv.Quote(extra[0].String()))
+		return Policy{}, fmt.Errorf("unknown key %s; the keys are read_folders, allow, ask, forbid, unlisted, edit, isolation, subagents, home_files, [limits], [agent_api], [network] and [sandbox] (see the README)", strconv.Quote(extra[0].String()))
 	}
 	if err := p.Check(); err != nil {
 		return Policy{}, err
@@ -448,7 +433,7 @@ func parsePolicy(b []byte) (Policy, error) {
 }
 
 // wrongTypeTOML is a permissions.toml's error for a value of the wrong type.
-const wrongTypeTOML = "a value has the wrong type: read_folders, allow, ask, forbid, share_read_only and home_files are lists of strings, such as [\"go test\"]; " +
+const wrongTypeTOML = "a value has the wrong type: read_folders, allow, ask, forbid and home_files are lists of strings, such as [\"go test\"]; " +
 	"edit, unlisted, isolation, contain and mode are strings; [network] allow is a list of strings; subagents is true or false; the [limits] are numbers; the [agent_api] switches are true or false"
 
 // over is p, read with the keys it leaves out unset, on top of base: each key
@@ -557,12 +542,12 @@ func DecodePolicyChange(b []byte) (Policy, error) {
 		var se *json.SyntaxError
 		switch {
 		case errors.As(err, &te) && te.Field != "":
-			return Policy{}, fmt.Errorf("%s has the wrong type: read_folders, allow, ask, forbid, share_read_only and home_files are lists of strings; "+
+			return Policy{}, fmt.Errorf("%s has the wrong type: read_folders, allow, ask, forbid and home_files are lists of strings; "+
 				"edit, unlisted, isolation, contain and mode are strings; network.allow is a list of strings; subagents and the agent_api switches are true or false; the limits are numbers", te.Field)
 		case errors.As(err, &se):
 			return Policy{}, errors.New("the body is not valid JSON")
 		case strings.HasPrefix(err.Error(), "json: unknown field "):
-			return Policy{}, fmt.Errorf("unknown key %s; the keys are read_folders, allow, ask, forbid, unlisted, edit, isolation, share_read_only, subagents, home_files, limits, agent_api, network and sandbox",
+			return Policy{}, fmt.Errorf("unknown key %s; the keys are read_folders, allow, ask, forbid, unlisted, edit, isolation, subagents, home_files, limits, agent_api, network and sandbox",
 				strings.TrimPrefix(err.Error(), "json: unknown field "))
 		}
 		return Policy{}, errors.New("the body must be one JSON object: the policy")
@@ -587,7 +572,7 @@ func FormatPolicy(p Policy) []byte {
 	p.fill()
 	values := map[string]any{
 		"read_folders": p.ReadFolders, "allow": p.Allow, "ask": p.Ask, "forbid": p.Forbid, "unlisted": p.Unlisted, "edit": p.Edit, "isolation": p.Isolation,
-		"share_read_only": p.ShareReadOnly, "subagents": *p.Subagents, "home_files": p.HomeFiles,
+		"subagents": *p.Subagents, "home_files": p.HomeFiles,
 		"limits.max_depth": *p.Limits.MaxDepth, "limits.max_jobs_per_turn": *p.Limits.MaxJobsPerTurn,
 		"limits.max_jobs_per_tree": *p.Limits.MaxJobsPerTree, "limits.max_cost_usd_per_tree": *p.Limits.MaxCostUSDPerTree,
 		"agent_api.apply": *p.AgentAPI.Apply, "agent_api.tools": *p.AgentAPI.Tools,
