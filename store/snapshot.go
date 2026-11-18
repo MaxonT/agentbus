@@ -14,11 +14,14 @@ import (
 	"github.com/staysup/agentbus/event"
 )
 
-// Snapshot is every session as the stored events up to Seq describe it.
+// Snapshot is every session as the stored events up to Seq describe it, or a
+// page of them when Sessions bounded it.
 type Snapshot struct {
 	Store    string    `json:"store" doc:"The store id. Send it back as store."`
 	Seq      int64     `json:"seq" doc:"The seq the snapshot was taken at. Send it back as after."`
 	Sessions []Session `json:"sessions" doc:"Newest activity first."`
+	// NextBefore is the before for the next, older page, set only by Sessions.
+	NextBefore *int64 `json:"next_before,omitempty"`
 }
 
 // Session is one session in a snapshot.
@@ -51,6 +54,11 @@ type Session struct {
 	// cut to TitleRunes. Absent with neither.
 	Title string `json:"title,omitempty" doc:"The name from the session's latest session.renamed; without one, the person's words from the first turn.started with text, cut to 120 characters."`
 
+	// LastSeq is the seq of the session's latest activity (the same events that
+	// set last, so not a rename or a stored preview). Sessions are ordered by
+	// it, newest first, and it is the cursor a page is taken before. Not sent.
+	LastSeq int64 `json:"-"`
+
 	// Why cost_complete is false. Not sent: the contract has no field for
 	// them.
 	UsageMissing     int  `json:"-"` // model.responded events with no usage
@@ -61,7 +69,13 @@ type Session struct {
 
 // Snapshot computes every session from the stored events.
 func (s *Store) Snapshot() (Snapshot, error) {
-	hi := s.Last()
+	return s.snapshotAt(s.Last())
+}
+
+// snapshotAt computes every session from the events up to hi, so a page taken
+// at one hi is stable while later events arrive: a session's activity after hi
+// does not move it, so paging it never skips or repeats one.
+func (s *Store) snapshotAt(hi int64) (Snapshot, error) {
 	snap := Snapshot{Store: s.id, Seq: hi, Sessions: []Session{}}
 	byID := map[string]*Session{}
 
@@ -70,6 +84,7 @@ func (s *Store) Snapshot() (Snapshot, error) {
 	rows, err := s.r.Query(`SELECT session,
 			COALESCE(MIN(CASE WHEN kind NOT IN ('session.renamed', 'changes.previewed') THEN time END), MIN(time)),
 			COALESCE(MAX(CASE WHEN kind NOT IN ('session.renamed', 'changes.previewed') THEN time END), MAX(time)),
+			COALESCE(MAX(CASE WHEN kind NOT IN ('session.renamed', 'changes.previewed') THEN seq END), MAX(seq)),
 			SUM(kind = 'turn.started'),
 			SUM(kind = 'model.responded' AND COALESCE(json_type(data, '$.usage'), 'null') = 'object'),
 			SUM(kind = 'model.responded' AND COALESCE(json_type(data, '$.usage'), 'null') <> 'object'),
@@ -96,7 +111,7 @@ func (s *Store) Snapshot() (Snapshot, error) {
 		var withUsage int
 		var u event.Usage
 		var client sql.NullString
-		if err := rows.Scan(&x.ID, &first, &last, &x.Turns, &withUsage, &x.UsageMissing,
+		if err := rows.Scan(&x.ID, &first, &last, &x.LastSeq, &x.Turns, &withUsage, &x.UsageMissing,
 			&u.InputTokens, &u.OutputTokens, &u.CacheReadTokens, &u.CacheWriteTokens,
 			&u.CacheWrite5mTokens, &u.CacheWrite1hTokens, &x.OutputIncomplete,
 			&x.CostUSD, &x.CostMissing, &client); err != nil {
@@ -240,6 +255,10 @@ func (s *Store) Snapshot() (Snapshot, error) {
 		x.CostComplete = x.CostMissing == 0 && x.UsageMissing == 0 && !x.OutputIncomplete && !x.EventsDropped
 		snap.Sessions = append(snap.Sessions, *x)
 	}
+	// Newest activity first, by the time of the activity, not the seq it was
+	// stored at: a remote runner can forward an older event later, so a higher
+	// seq is not always a later moment. LastSeq is only the page cursor, unique
+	// per session, not the order.
 	sort.Slice(snap.Sessions, func(i, j int) bool {
 		a, b := snap.Sessions[i], snap.Sessions[j]
 		if !a.Last.Equal(b.Last) {
@@ -247,6 +266,56 @@ func (s *Store) Snapshot() (Snapshot, error) {
 		}
 		return a.ID < b.ID
 	})
+	return snap, nil
+}
+
+// Sessions is a page of the snapshot taken at a fixed seq, newest activity
+// first (by the activity's time). at pins the snapshot: a negative at is no pin
+// (the latest, and its seq is the page's seq), while 0 or more pins to that
+// seq, so later pages pass the first page's seq back and every page is of the
+// same snapshot -- without it a session's own activity would move it and the
+// paging would skip it. before is the previous page's next_before, naming its
+// last session by its unique last seq; the page is the sessions after it in the
+// order. next_before is set to the last one shown when an older one was left
+// out. The whole snapshot is still computed; the page bounds the answer.
+func (s *Store) Sessions(at, before int64, limit int) (Snapshot, error) {
+	// A pin above the latest seq would let later events in, which is what the
+	// pin is for keeping out, so it is capped to the latest; the API rejects it
+	// outright so a caller cannot page against a snapshot that never existed.
+	hi := s.Last()
+	if at >= 0 && at < hi {
+		hi = at
+	}
+	snap, err := s.snapshotAt(hi)
+	if err != nil {
+		return snap, err
+	}
+	all := snap.Sessions
+	if before > 0 {
+		// before is the last session of the previous page, named by its unique
+		// LastSeq. The next page is the sessions after it in the stable order,
+		// so the order can be by time while the cursor stays a plain seq. A
+		// before that names no session (stale, or not of this pin) pages past
+		// the end.
+		i := 0
+		for i < len(all) && all[i].LastSeq != before {
+			i++
+		}
+		if i < len(all) {
+			all = all[i+1:]
+		} else {
+			all = nil
+		}
+	}
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+		// next_before is the last session shown, as GET /turns does it: the
+		// next page is the sessions below it, so none repeats and none is
+		// skipped.
+		next := all[len(all)-1].LastSeq
+		snap.NextBefore = &next
+	}
+	snap.Sessions = all
 	return snap, nil
 }
 
