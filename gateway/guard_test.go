@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -267,7 +268,7 @@ func TestGuardRefusesCodexStream(t *testing.T) {
 func TestGuardHoldsTheCallUntilItEnds(t *testing.T) {
 	pr, pw := io.Pipe()
 	g := New(&url.URL{}, openai.Adapter{}, &event.Memory{})
-	b := g.guardReply(&exchange{}, Rules{Forbid: []string{"git push"}}, nil, pr, func() {})
+	b := g.guardReply(context.Background(), &exchange{}, Rules{Forbid: []string{"git push"}}, nil, pr, func() {})
 	frames := strings.SplitAfter(codexStream, "\n\n")
 	got := make(chan string, 16)
 	go func() {

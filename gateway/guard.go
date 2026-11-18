@@ -27,11 +27,13 @@ package gateway
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/staysup/agentbus/event"
 )
@@ -307,12 +309,29 @@ type guardBody struct {
 	refused map[string]string    // the same keys, refused: the matched rule
 
 	// asked are the ask-matched calls of the reply, collected as it streams.
-	// Each is refused inline, like forbid, so the agent gets a refusal and the
-	// turn ends; at the reply's end they are recorded as one approval
-	// (registerApproval). No connection is held.
+	// On a streamed reply with a decider the gateway HOLDS them (H1, hold.go):
+	// the reply is buffered, pinged, and released on allow or refused on refuse
+	// or a 60 s timeout. Without a decider, or on an unstreamed reply, each is
+	// refused inline, as before H1. At the reply's end, or when the hold begins,
+	// they are recorded as one approval (registerApproval).
 	asked      []heldCall
 	registered bool
 	complete   bool // the reply reached its terminal event (message_stop / response.completed)
+
+	// streamed is true once the reply is sniffed as an SSE stream: an unstreamed
+	// (single-JSON) reply has no frame to ping into, so it is refused inline.
+	streamed bool
+	// H1 hold state (hold.go). hold is the one lifecycle (none -> pending ->
+	// active -> done) that replaces the earlier toHold/holding/latch flags.
+	// heldKeys are the distinct calls to refuse if the hold ends without an
+	// allow. holdID is the approval id the hold polls on — registerApproval sets
+	// it for an inline refusal too, but only an ACTIVE hold is ever finalised, so
+	// the overlap no longer matters.
+	hold                              holdLifecycle
+	heldKeys                          []heldKey
+	holdID                            string
+	holdStart, holdPinged, holdPolled time.Time
+	ctx                               context.Context // the request's; its end means the agent disconnected
 }
 
 // heldCall is one ask-matched call: the guard's key for it, the model's ids,
@@ -325,6 +344,17 @@ type heldCall struct {
 	rule    string
 }
 
+// heldKey is one held tool call to refuse if the hold ends without an allow:
+// its guard key, the model's call id, the tool name, the input and the rule its
+// first Ask command matched (for the refusal event).
+type heldKey struct {
+	key    string
+	callID string
+	name   string
+	input  json.RawMessage
+	rule   string
+}
+
 type openCall struct {
 	name, id string
 	input    strings.Builder // Anthropic: the partial JSON so far
@@ -332,12 +362,22 @@ type openCall struct {
 
 // guardReply wraps src. end runs once, when the guard has read the whole
 // reply or the reply is closed: every tool.refused is emitted by then.
-func (g *Gateway) guardReply(ex *exchange, rules Rules, allowOnce []string, src io.ReadCloser, end func()) io.ReadCloser {
+func (g *Gateway) guardReply(ctx context.Context, ex *exchange, rules Rules, allowOnce []string, src io.ReadCloser, end func()) io.ReadCloser {
 	return &guardBody{g: g, ex: ex, vendor: g.adapter.Vendor(), rules: rules, allowOnce: allowOnce, src: src, end: end,
-		br: bufio.NewReaderSize(src, 64<<10), open: map[string]*openCall{}, refused: map[string]string{}}
+		br: bufio.NewReaderSize(src, 64<<10), open: map[string]*openCall{}, refused: map[string]string{}, ctx: ctx}
 }
 
 func (b *guardBody) Close() error {
+	// A hold still live when the body is closed — the proxy gave up on a ping
+	// write, or tore the request down — ends the approval, so it is not left
+	// pending. finish() wins only from a pending or active hold, so an
+	// inline-refused reply (which stays holdNone though registerApproval set its
+	// holdID) records nothing, and holdStep's own ending and this one stay one
+	// winner. The proxy closes the body only after its copy loop's last Read
+	// returns, so this never races holdStep.
+	if b.hold.finish() {
+		b.recordDecided("the agent's connection closed before an answer")
+	}
 	err := b.src.Close()
 	b.finished()
 	return err
@@ -351,7 +391,11 @@ func (b *guardBody) finished() {
 
 func (b *guardBody) Read(p []byte) (int, error) {
 	for b.out.Len() == 0 && b.err == nil {
-		b.step()
+		if b.hold.state() == holdActive {
+			b.holdStep()
+		} else {
+			b.step()
+		}
 	}
 	if b.err != nil {
 		b.finished()
@@ -388,12 +432,36 @@ func (b *guardBody) step() {
 			}
 			return
 		}
+		// Not a JSON object: an SSE stream, which a hold can ping into.
+		b.streamed = true
 	}
 	frame, err := readFrame(b.br)
 	if len(frame) > 0 {
 		b.frame(frame)
 	}
 	if err != nil {
+		// A hold just began on this frame (the terminal frame and EOF arrived
+		// together): the hold owns the buffered reply now, so do not flush it or
+		// end the body. The hold runs next; once it flushes, this EOF is read
+		// again and ends the body then. Without this, EOF would release the held
+		// Ask call unchanged, unapproved.
+		if b.hold.state() == holdActive {
+			return
+		}
+		// A PENDING hold has Ask calls buffered but the reply ended before its
+		// terminal event, so the hold never went live. It must NOT be flushed
+		// unchanged: codex runs a call at response.output_item.done, before
+		// response.completed, so an unrefused flush would run the unapproved
+		// command even from a cut reply. Refuse the held calls instead — an
+		// unapproved command never runs — and record no approval, since an
+		// incomplete reply is one no person should be asked to answer.
+		if b.hold.state() == holdPending {
+			b.hold.finish() // holdPending -> holdDone
+			b.refuseHeldAll(holdIncompleteText)
+			b.flush()
+			b.err = err
+			return
+		}
 		// Only a reply that reached its terminal event records an approval: a
 		// stream that ends without message_stop / response.completed (a cut, an
 		// error, or a clean EOF after a partial reply) is one the agent discards
@@ -432,7 +500,18 @@ func (b *guardBody) registerApproval() {
 		}
 	}
 	primary := b.asked[0]
+	// The approval id is scoped to the attempt that raised it, as <attempt>-<id>
+	// (ApprovalScope, the runner's turn -> attempt id). So the id already names
+	// its one owner: control enforces the attempt prefix on a runner's writes and
+	// reads (jobs), and no reader resolves by the bare local id, which makes a
+	// runner naming another turn's approval — a cross-turn decision or a
+	// duplicate id — impossible by construction. Without a scope (tests, or a
+	// non-attempt context) the local id stands alone.
 	id := "ap-" + b.g.run + "-" + strconv.FormatUint(b.g.seq.Add(1), 10)
+	if b.g.approvalScope != nil {
+		id = b.g.approvalScope(b.ex.turn, id)
+	}
+	b.holdID = id // the id a hold then waits on (hold.go)
 	b.g.emit(b.ex, []event.Event{{Kind: event.ApprovalRequested, Approval: id, ToolID: primary.callID,
 		ToolName: primary.name, Rule: primary.rule, Text: strings.Join(commands, "\n"),
 		Commands: commands, Rules: rules}})
@@ -538,10 +617,20 @@ func (b *guardBody) frame(f []byte) {
 			}
 		}
 	}
-	if len(b.open) > 0 || len(b.held) > 0 {
+	if len(b.open) > 0 || len(b.held) > 0 || b.hold.state() == holdPending {
 		b.held = append(b.held, f)
 		if len(b.open) == 0 {
-			b.flush()
+			switch {
+			case b.hold.state() == holdPending && !b.complete:
+				// Keep buffering the rest of the reply, so one approval covers
+				// every Ask call; the hold begins once the reply is complete.
+			case b.hold.state() == holdPending:
+				// Complete: the hold goes live (or refuses inline if nothing to
+				// wait on). startHold moves the lifecycle off holdPending.
+				b.startHold()
+			default:
+				b.flush()
+			}
 		}
 		return
 	}
@@ -615,7 +704,17 @@ func (b *guardBody) decide(key, callID, name string, input json.RawMessage, item
 		}
 	}
 	if len(askCmds) > 0 {
-		b.refuse(key, callID, name, input, firstRule, askRefusal(strings.Join(askCmds, "; ")))
+		if b.streamed && b.g.decider != nil {
+			// Streamed, and the gateway can ask control: hold the reply (H1).
+			// The call is not refused yet — an allow lets it through unchanged,
+			// a refuse or a timeout refuses it (startHold, holdStep). Remember
+			// this call so the hold can refuse it then.
+			b.hold.begin() // holdNone -> holdPending (idempotent across Ask calls)
+			b.heldKeys = append(b.heldKeys, heldKey{key: key, callID: callID, name: name, input: input, rule: firstRule})
+		} else {
+			// Unstreamed, or no decider wired: refuse inline, as before H1.
+			b.refuse(key, callID, name, input, firstRule, askRefusal(strings.Join(askCmds, "; ")))
+		}
 	}
 }
 

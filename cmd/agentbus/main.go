@@ -160,6 +160,16 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		}
 		c.chatgpt = tu
 	}
+	// Env only, like the test upstreams: a two-process test shortens the Ask
+	// hold so its timeout path does not take a real minute.
+	if ms := getenv("AGENTBUS_TEST_HOLD_MS"); ms != "" {
+		n, err := strconv.Atoi(ms)
+		if err != nil || n <= 0 {
+			own.Printf("AGENTBUS_TEST_HOLD_MS must be a positive number of milliseconds")
+			return 1
+		}
+		c.holdMS = n
+	}
 	svc, err := start(c)
 	if err != nil {
 		own.Print(err)
@@ -210,6 +220,11 @@ type config struct {
 	home     string
 	upstream *url.URL // Anthropic
 	chatgpt  *url.URL // codex's ChatGPT backend
+	// holdMS, when > 0, shortens the Ask hold's timeout to that many ms (its
+	// ping and poll scaled down with it), so a two-process test can exercise the
+	// hold's timeout without a real minute. Env only (AGENTBUS_TEST_HOLD_MS),
+	// never a flag or in any help or doc, like the test upstreams above.
+	holdMS int
 	// cloudCode is agy's Code Assist host; nil means cloudCode above.
 	cloudCode *url.URL
 	// openrouter is OpenRouter's API; nil means openrouter above.
@@ -251,6 +266,32 @@ type config struct {
 	folders, labels []string
 }
 
+// lazyDecider is the gateways' Ask-hold Decider, set on each guarded gateway
+// before serving (as SetGuard is) and filled in once the runner that backs it
+// is enrolled (startRunner). It satisfies gateway.Decider; the lock keeps the
+// gateway's read race-free with that later write. Nil (before the runner is up)
+// reads as "not yet decided", so a hold keeps holding rather than acting.
+type lazyDecider struct {
+	mu sync.RWMutex
+	d  gateway.Decider
+}
+
+func (l *lazyDecider) set(d gateway.Decider) {
+	l.mu.Lock()
+	l.d = d
+	l.mu.Unlock()
+}
+
+func (l *lazyDecider) Decided(ctx context.Context, turn, approval string) (bool, bool, error) {
+	l.mu.RLock()
+	d := l.d
+	l.mu.RUnlock()
+	if d == nil {
+		return false, false, nil
+	}
+	return d.Decided(ctx, turn, approval)
+}
+
 type service struct {
 	addr     string // the address listened on
 	shown    string // -listen with its port filled in: Go reports 0.0.0.0 as [::]
@@ -273,6 +314,13 @@ type service struct {
 	logins   *credentials.Manager
 	done     chan error
 	once     sync.Once
+
+	// holdDecider is the Ask-hold Decider set on the guarded gateways before
+	// serving; startRunner fills in the runner that backs it once it is up
+	// (gateway/hold.go, runner/decide.go). guardedGws are those gateways, so
+	// startRunner can also give them the runner's approval-id scope.
+	holdDecider *lazyDecider
+	guardedGws  []*gateway.Gateway
 
 	// The built-in runner, and the lease sweep: stopped before the API.
 	stopRunner func()
@@ -775,6 +823,10 @@ func start(c config) (*service, error) {
 		g.KeepBodies(keep)
 		g.SetLog(svcLog.Printf)
 	}
+	// holdDecider backs every guarded gateway's Ask hold; startRunner fills in
+	// the runner that polls control for the decision (H1).
+	holdDecider := &lazyDecider{}
+	var guardedGws []*gateway.Gateway
 	for _, g := range gws {
 		g.KeepBodies(keep)
 		g.SetLog(svcLog.Printf)
@@ -794,6 +846,18 @@ func start(c config) (*service, error) {
 		// for a person, or run.
 		if eng != nil {
 			g.SetGuard(eng)
+			// A held Ask reply (H1) learns its decision from control's record
+			// through the decider; startRunner fills in the runner that polls it,
+			// so without a runner a guarded gateway refuses Ask inline, as before.
+			g.SetDecider(holdDecider)
+			guardedGws = append(guardedGws, g)
+			if c.holdMS > 0 {
+				// Test only: shorten the hold so its timeout path is quick. Ping
+				// and poll scale down with it, keeping their order (poll < ping <
+				// timeout).
+				t := time.Duration(c.holdMS) * time.Millisecond
+				g.SetHoldTiming(t, t/3, t/20)
+			}
 		}
 	}
 	if claudeReplay != nil {
@@ -804,7 +868,7 @@ func start(c config) (*service, error) {
 	}
 	host, _, _ := net.SplitHostPort(c.listen)
 	s := &service{addr: addr, shown: net.JoinHostPort(host, port), loopback: loopback, gws: append(gws, relayGws...), api: a, eng: eng, store: st, blobs: bs, blobSwp: blobSweep, jobsSrv: runnerJobs,
-		queue: q, saved: saved, remote: remote, settings: cfgStore, sdb: sdb, folders: fr, log: svcLog, logins: logins, done: make(chan error, 1)}
+		queue: q, saved: saved, remote: remote, settings: cfgStore, sdb: sdb, folders: fr, log: svcLog, logins: logins, holdDecider: holdDecider, guardedGws: guardedGws, done: make(chan error, 1)}
 	sdbHanded = true
 	if q != nil {
 		s.subs = subs
@@ -1006,6 +1070,15 @@ func (s *service) startRunner(c config, self, enrollToken string, svcLog *logfil
 	rn, err := runner.Enroll(ctx, cfg)
 	if err != nil {
 		return fail(fmt.Errorf("the runner could not enroll with %s: %w", self, err))
+	}
+	// Now the guarded gateways can hold an Ask: the runner polls control for the
+	// decision, scoped to its own attempt (runner/decide.go, jobs/decision.go),
+	// and scopes each raised approval id to the attempt that raised it.
+	if s.holdDecider != nil {
+		s.holdDecider.set(rn.Decider())
+	}
+	for _, g := range s.guardedGws {
+		g.SetApprovalScope(rn.ScopeApproval)
 	}
 	if s.blobs == nil {
 		client := blobClient(self, rn.Token())

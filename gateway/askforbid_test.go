@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/url"
@@ -22,7 +23,7 @@ func TestDecideForbidWinsInMultiCommandExec(t *testing.T) {
 		`await tools.exec_command({cmd:"git push origin main"}); await tools.exec_command({cmd:"git status"});`,
 	} {
 		g := New(&url.URL{}, openai.Adapter{}, &event.Memory{})
-		b := g.guardReply(&exchange{id: "x1", session: "s1", turn: "t_1"},
+		b := g.guardReply(context.Background(), &exchange{id: "x1", session: "s1", turn: "t_1"},
 			Rules{Forbid: []string{"git push"}, Ask: []string{"git status"}}, nil,
 			io.NopCloser(strings.NewReader("")), func() {}).(*guardBody)
 		item := map[string]any{"type": "custom_tool_call", "name": "exec", "input": script}

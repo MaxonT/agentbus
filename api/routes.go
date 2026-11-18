@@ -605,7 +605,7 @@ var routes = slices.Concat([]route{
 		idDoc:   "A command's id, from GET /api/v0/approvals. Another shape gets 404.",
 		tag:     "Approvals",
 		summary: "Answer a command",
-		doc: "Answer a held command, once, always or refuse. once runs a continuation turn that may run exactly these commands, this turn only, and writes nothing to the settings. always moves each matched entry to allow in the settings and continues the session on the asking turn's agent (the runner reads settings fresh per turn). refuse records the decision only. (allow is the old name for always.) " +
+		doc: "Answer a held command, once, always or refuse. The gateway is holding the model's reply at the command: once releases it so the agent runs these commands in the same turn and writes nothing to the settings; always releases them and also moves each matched entry to allow in the settings, for later turns; refuse refuses the held call. No continuation turn is started for any of them (an allow runs in the turn already held). (allow is the old name for always.) " +
 			"An approval.decided event records the answer. Takes the main token only.",
 		body: Decision{},
 		replies: []reply{{status: 204, doc: "Answered.", empty: true}, badRequest, fail(404, "No command by that id, or it was answered already."),

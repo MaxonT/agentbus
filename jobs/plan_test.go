@@ -57,6 +57,9 @@ func TestRunnerRecordAllowList(t *testing.T) {
 		if k == event.SessionClosed {
 			continue // a turn's end settles it, tested with the outcome
 		}
+		if k == event.ApprovalRequested || k == event.ApprovalDecided {
+			continue // need an attempt-scoped id; tested in TestRunnerApprovalDecisionOwnership
+		}
 		ev, _ := json.Marshal(event.Event{ID: "e-taken-" + strconv.Itoa(n), Kind: k, Session: j.Session, Turn: j.Turn})
 		all = append(all, ev)
 		n++
@@ -71,7 +74,7 @@ func TestRunnerRecordAllowList(t *testing.T) {
 		}
 	}
 	for k := range RunnerKinds {
-		if k != event.SessionClosed && got[k] == 0 {
+		if k != event.SessionClosed && k != event.ApprovalRequested && k != event.ApprovalDecided && got[k] == 0 {
 			t.Errorf("the record lacks %s", k)
 		}
 	}

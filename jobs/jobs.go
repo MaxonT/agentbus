@@ -182,6 +182,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/v0/runner/attempts/{id}/events", s.runner(s.events))
 	s.mux.HandleFunc("POST /api/v0/runner/attempts/{id}/finish", s.runner(s.finish))
 	s.mux.HandleFunc("POST /api/v0/runner/attempts/{id}/record", s.runner(s.record))
+	s.mux.HandleFunc("GET /api/v0/runner/attempts/{id}/decision", s.runner(s.decision))
 	s.mux.HandleFunc("POST /api/v0/runner/blobs", s.runner(s.blobsMissing))
 	s.mux.HandleFunc("POST /api/v0/runner/packs", s.runner(s.blobPack))
 	s.mux.HandleFunc("POST /api/v0/runner/packs/fetch", s.runner(s.blobFetch))
