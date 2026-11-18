@@ -165,6 +165,9 @@ The running service describes its own API, without the token or the internet:
 Running agents on more than one machine is in [docs/RUNNER_PROTOCOL.md](docs/RUNNER_PROTOCOL.md). Third-party
 code in the binary is listed in [THIRD_PARTY.md](THIRD_PARTY.md).
 
+To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md), the [ROADMAP.md](ROADMAP.md), and
+[SECURITY.md](SECURITY.md) for reporting a vulnerability.
+
 ## License
 
 Free to use, change and run, including inside your business. You can't sell it as a competing product or service. Each release becomes Apache 2.0 two years after it is published.
