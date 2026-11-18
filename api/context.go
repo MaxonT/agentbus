@@ -20,17 +20,18 @@ import (
 
 // TurnContext is the answer to GET /api/v0/turns/{id}/context.
 type TurnContext struct {
-	Store           string       `json:"store" doc:"The store id."`
-	Seq             int64        `json:"seq" doc:"The seq the context was read at."`
-	Turn            string       `json:"turn"`
-	Session         string       `json:"session"`
-	Model           string       `json:"model" doc:"The model of the turn's largest call, the one made_of is of, read from its request. Empty when the turn made no call with usage, or that call's request body is not kept."`
-	Calls           int          `json:"calls" doc:"The turn's model calls that carried usage."`
-	ContextTokens   int          `json:"context_tokens" doc:"How big the turn's prompt got: the largest over its calls of input + cache_read + cache_write tokens, the whole context one call read. 0 when no call carried usage. The vendor's own counts."`
-	CacheReadTokens int          `json:"cache_read_tokens" doc:"Summed over the turn's calls: tokens read from the prompt cache instead of processed afresh."`
-	FreshTokens     int          `json:"fresh_tokens" doc:"Summed over the turn's calls: input + cache_write tokens, the part processed afresh. The cost driver."`
-	OutputTokens    int          `json:"output_tokens" doc:"Summed over the turn's calls: the tokens the model wrote."`
-	MadeOf          *Composition `json:"made_of" doc:"What the turn's largest prompt was made of, from that call's stored request pieces. Null when no call carried usage, or no request body is kept for that call."`
+	Store           string         `json:"store" doc:"The store id."`
+	Seq             int64          `json:"seq" doc:"The seq the context was read at."`
+	Turn            string         `json:"turn"`
+	Session         string         `json:"session"`
+	Model           string         `json:"model" doc:"The model of the turn's largest call, the one made_of is of, read from its request. Empty when the turn made no call with usage, or that call's request body is not kept."`
+	Window          *ContextWindow `json:"window" doc:"How full the turn's largest prompt is against the model's window, and where this vendor's harness compacts. The practical number. Null when the turn made no call with usage."`
+	Calls           int            `json:"calls" doc:"The turn's model calls that carried usage."`
+	ContextTokens   int            `json:"context_tokens" doc:"How big the turn's prompt got: the largest over its calls of input + cache_read + cache_write tokens, the whole context one call read. 0 when no call carried usage. The vendor's own counts."`
+	CacheReadTokens int            `json:"cache_read_tokens" doc:"Summed over the turn's calls: tokens read from the prompt cache instead of processed afresh."`
+	FreshTokens     int            `json:"fresh_tokens" doc:"Summed over the turn's calls: input + cache_write tokens, the part processed afresh. The cost driver."`
+	OutputTokens    int            `json:"output_tokens" doc:"Summed over the turn's calls: the tokens the model wrote."`
+	MadeOf          *Composition   `json:"made_of" doc:"What the turn's largest prompt was made of, from that call's stored request pieces. Null when no call carried usage, or no request body is kept for that call."`
 }
 
 // Composition is what one prompt was made of, from its stored request pieces.
@@ -113,6 +114,10 @@ func (a *API) turnContext(w http.ResponseWriter, r *http.Request, id string) {
 			}
 		}
 	}
+	// How full the context is against the model's window, and where this
+	// harness compacts: the practical number. Built from the peak context and
+	// the turn's harness, with the model from the peak call when it is kept.
+	out.Window = a.contextWindow(out.Model, t.Harness, tok.Peak)
 	writeJSON(w, http.StatusOK, out)
 }
 

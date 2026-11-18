@@ -43,6 +43,14 @@ type settingsDB interface {
 	Info() (settings.Info, error)
 }
 
+// compactionStore is a settings store that keeps the compaction points:
+// control's. A runner's settings are the server's, so it keeps none, and the
+// compaction routes answer 404 there (the context view is served by control).
+type compactionStore interface {
+	Compaction() (settings.Compaction, settings.Version, error)
+	SetCompaction(settings.Compaction, settings.Version) (settings.Compaction, settings.Version, error)
+}
+
 // SettingsEvent is the settings.changed event of a change.
 func SettingsEvent(c settings.Change) event.Event {
 	return event.Event{ID: c.ID, Kind: event.SettingsChanged, Time: c.Time.UTC(), Setting: c.Setting,
@@ -153,6 +161,30 @@ var settingsRoutes = []route{
 			fail(http.StatusInternalServerError, "The setting could not be written.")},
 		versioned: true,
 		serve:     plain((*API).putInstructions)},
+	{method: "GET", path: "/api/v0/settings/compaction", op: "getCompaction",
+		tag:     "Settings",
+		summary: "Read the compaction points",
+		doc: "The compaction points: per vendor, the share of a model's context window at which that vendor's harness compacts its context, " +
+			"shown in the context view as \"compacts at ~Y%\". Every field is filled: a vendor the person never changed reads as its built-in default. " +
+			"Only opencode and Gemini CLI publish a real point in their own open source; Claude Code and Codex publish none, so their default here is a " +
+			"stated choice, never a hidden number. Which vendor's number is the vendor's own and which is a stated default is in each field's description; " +
+			"the context view labels it (compaction_source).\n\nETag is the compaction points' version: send it back in If-Match to change them.",
+		replies:   []reply{ok(200, settings.Compaction{}, "The compaction points, every field filled."), settingsBroken, noSettings},
+		versioned: true,
+		serve:     plain((*API).getCompaction)},
+	{method: "PUT", path: "/api/v0/settings/compaction", op: "putCompaction",
+		tag:     "Settings",
+		summary: "Change the compaction points",
+		doc: "Change the compaction points. Each field is a share of the window in (0, 1], such as 0.8. A field left out keeps its built-in default. " +
+			"The settings database keeps only the fields whose value differs from the default, so a later build that changes a default reaches a vendor the " +
+			"person never set. The context view's next read shows the new point.\n\n" + versionDoc +
+			"The change and its settings.changed event (keys: the vendors whose point changed, never the numbers) are saved together. A PUT that changes nothing makes no event.",
+		body: settings.Compaction{},
+		replies: []reply{ok(200, settings.Compaction{}, "The compaction points, as stored, every field filled."),
+			fail(http.StatusBadRequest, "A value is refused; error names the vendor."), settingsReadOnly, settingsChanged, settingsNoMatch, noSettings,
+			fail(http.StatusInternalServerError, "The setting could not be written.")},
+		versioned: true,
+		serve:     plain((*API).putCompaction)},
 }
 
 // setVersion sends v as the ETag.
@@ -317,6 +349,47 @@ func (a *API) putInstructions(w http.ResponseWriter, r *http.Request) {
 	}
 	setVersion(w, v)
 	writeJSON(w, http.StatusOK, body)
+}
+
+// GET /api/v0/settings/compaction
+func (a *API) getCompaction(w http.ResponseWriter, _ *http.Request) {
+	store, ok := a.cfg.Settings.(compactionStore)
+	if !ok {
+		writeError(w, http.StatusNotFound, "this service keeps no compaction points: a runner's settings are the server's")
+		return
+	}
+	c, v, err := store.Compaction()
+	if err != nil {
+		a.settingsRead(w, err)
+		return
+	}
+	setVersion(w, v)
+	writeJSON(w, http.StatusOK, c)
+}
+
+// PUT /api/v0/settings/compaction
+func (a *API) putCompaction(w http.ResponseWriter, r *http.Request) {
+	match, ok := a.matched(w, r)
+	if !ok {
+		return
+	}
+	store, ok := a.cfg.Settings.(compactionStore)
+	if !ok {
+		writeError(w, http.StatusConflict, "this service keeps no compaction points: change them on the server")
+		return
+	}
+	var body settings.Compaction
+	if !decodeObject(r, &body) {
+		writeError(w, http.StatusBadRequest, "the body must be one JSON object: the compaction points, each a share such as 0.8")
+		return
+	}
+	c, v, err := store.SetCompaction(body, match)
+	if err != nil {
+		a.settingsWrite(w, err)
+		return
+	}
+	setVersion(w, v)
+	writeJSON(w, http.StatusOK, c)
 }
 
 // settingsInfo is the body of GET /api/v0/settings.
