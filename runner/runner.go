@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,11 @@ type Config struct {
 	Name        string
 	Labels      []string
 	Capacity    int // jobs at once; 0 means run.DefaultMaxRuns
+	// Version is this runner's release, such as 0.6.0 ("dev" for a build from
+	// a clone). The runner refuses to start against a control whose release is
+	// older, so control is upgraded first. Empty, or either side not a release,
+	// skips the check.
+	Version string
 
 	// Engine starts and stops the turns, and Store is the record it writes:
 	// a turn's end and its reply are read from it.
@@ -185,13 +191,18 @@ func Enroll(ctx context.Context, cfg Config) (*Runner, error) {
 	}
 	// A saved identity is used again when the control plane still knows it.
 	if st, ok := loadState(cfg.StateFile); ok {
-		var rn queue.Runner
+		var rn jobs.RunnerBeatReply
 		status, err := call(ctx, r.short, cfg.Queue+"/api/v0/runner/heartbeat", st.Token,
 			jobs.RunnerBeat{Capacity: cfg.Capacity, Labels: cfg.Labels, Capabilities: r.caps(nil)}, &rn)
 		if err != nil {
 			return nil, err
 		}
 		if status == http.StatusOK {
+			// A saved identity, from a restart or agentbus login, checks control
+			// the same way a fresh enrol does: its reply carries the version.
+			if refuseControl(rn.ControlVersion, cfg.Version) {
+				return nil, oldControlErr(rn.ControlVersion, cfg.Version)
+			}
 			r.id, r.token = st.Runner, st.Token
 			r.heartbeat, r.lease = time.Duration(st.HeartbeatMS)*time.Millisecond, time.Duration(st.LeaseMS)*time.Millisecond
 			return r, nil
@@ -215,6 +226,14 @@ func Enroll(ctx context.Context, cfg Config) (*Runner, error) {
 	if status != http.StatusCreated {
 		return nil, fmt.Errorf("runner: enroll answered %d", status)
 	}
+	// Upgrade control first: a runner refuses a control older than itself,
+	// learned from the enroll reply. Such control reads the old record shape
+	// this runner no longer writes (a review's verdict, a delivered reply) and
+	// offers routes this runner's instructions no longer name, so it would
+	// quietly lose work. A newer control, or an older runner on it, is fine.
+	if refuseControl(e.ControlVersion, cfg.Version) {
+		return nil, oldControlErr(e.ControlVersion, cfg.Version)
+	}
 	r.id, r.token = e.Runner.ID, e.Token
 	r.heartbeat, r.lease = time.Duration(e.Heartbeat)*time.Millisecond, time.Duration(e.Lease)*time.Millisecond
 	if cfg.StateFile != "" {
@@ -223,6 +242,64 @@ func Enroll(ctx context.Context, cfg Config) (*Runner, error) {
 		}
 	}
 	return r, nil
+}
+
+// refuseControl says whether a runner of version mine refuses to start against
+// a control whose reply carried controlVersion. A runner that is not a release
+// (a dev build) never refuses. A release runner refuses a control that is an
+// older release, and one that sent no version at all -- control before 0.6,
+// which added the field -- since that is older than any 0.6 release.
+func refuseControl(controlVersion, mine string) bool {
+	if _, ok := parseRelease(mine); !ok {
+		return false
+	}
+	return controlVersion == "" || controlOlder(controlVersion, mine)
+}
+
+// oldControlErr is the plain line a refused runner stops with.
+func oldControlErr(controlVersion, mine string) error {
+	had := controlVersion
+	if had == "" {
+		had = "a release before 0.6 (it does not report its version)"
+	}
+	return fmt.Errorf("control is %s, this runner is %s: upgrade control first", had, mine)
+}
+
+// controlOlder is true only when both are releases (major.minor.patch) and
+// control is below mine. A "dev" or otherwise unparsable version is never
+// older, so a developer's own builds are not blocked.
+func controlOlder(control, mine string) bool {
+	c, ok1 := parseRelease(control)
+	m, ok2 := parseRelease(mine)
+	if !ok1 || !ok2 {
+		return false
+	}
+	for i := range c {
+		if c[i] != m[i] {
+			return c[i] < m[i]
+		}
+	}
+	return false
+}
+
+// parseRelease reads major.minor.patch, dropping any -pre or +build suffix.
+func parseRelease(v string) ([3]int, bool) {
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return [3]int{}, false
+	}
+	var out [3]int
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return [3]int{}, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 // ErrIdentityThere: SaveIdentity found an identity saved in its place.

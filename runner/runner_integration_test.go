@@ -619,3 +619,93 @@ func TestFoldersTypedAtOnceAllListed(t *testing.T) {
 		}
 	}
 }
+
+// A runner newer than its control refuses to start, learning control's version
+// from the enroll reply; against equal or newer control it starts. (Milestone
+// A fix: upgrade control first.)
+func TestEnrollRefusesOlderControl(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, err := run.New(run.Config{Store: st, BaseURL: "http://127.0.0.1:1", MaxRuns: 1, RunGrace: time.Second,
+		Wire: func(string, string, run.Access) (run.Launch, error) { return run.Launch{}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := queue.Open(filepath.Join(dir, "jobs.db"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enroll := func(controlVersion, runnerVersion, name, wt string) error {
+		s, err := jobs.New(jobs.Config{Queue: q, Token: mainTok, EnrollToken: enrollTok, Version: controlVersion})
+		if err != nil {
+			t.Fatal(err)
+		}
+		plane := httptest.NewServer(s)
+		defer plane.Close()
+		_, err = Enroll(context.Background(), Config{Queue: plane.URL, EnrollToken: enrollTok, Name: name, Capacity: 1,
+			Version: runnerVersion, Engine: eng, Store: st, Workdir: filepath.Join(dir, wt)})
+		return err
+	}
+	// Control before 0.6 sends no version at all (as release v0.5.10 does not):
+	// absent is older, so a 0.6 runner is refused.
+	if err := enroll("", "0.6.0", "a", "wt_a"); err == nil || !strings.Contains(err.Error(), "upgrade control first") {
+		t.Fatalf("a newer runner did not refuse pre-0.6 control: %v", err)
+	}
+	// A control that sends an older release is refused too.
+	if err := enroll("0.6.0", "0.7.0", "a2", "wt_a2"); err == nil || !strings.Contains(err.Error(), "upgrade control first") {
+		t.Fatalf("a newer runner did not refuse an older-release control: %v", err)
+	}
+	// Equal control: it starts.
+	if err := enroll("0.6.0", "0.6.0", "b", "wt_b"); err != nil {
+		t.Fatalf("a runner against equal control was refused: %v", err)
+	}
+	// Newer control (an old runner on new control): it starts.
+	if err := enroll("0.7.0", "0.6.0", "c", "wt_c"); err != nil {
+		t.Fatalf("a runner against newer control was refused: %v", err)
+	}
+}
+
+// A saved identity (a restart, or agentbus login) checks control on the
+// heartbeat path too: a 0.6 runner refuses a pre-0.6 control it heartbeats to.
+func TestSavedIdentityRefusesOlderControl(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, err := run.New(run.Config{Store: st, BaseURL: "http://127.0.0.1:1", MaxRuns: 1, RunGrace: time.Second,
+		Wire: func(string, string, run.Access) (run.Launch, error) { return run.Launch{}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := queue.Open(filepath.Join(dir, "jobs.db"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A runner control already knows, and its saved identity.
+	tok := queue.NewID("abr_")
+	rn, err := q.RegisterRunner(queue.DefaultTeam, "saved", nil, 1, queue.HashToken(tok), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "runner.state")
+	if err := SaveIdentity(stateFile, rn, tok, int64(50), int64(2000)); err != nil {
+		t.Fatal(err)
+	}
+	// Control before 0.6 (sends no version): the heartbeat succeeds, then the
+	// runner refuses.
+	s, err := jobs.New(jobs.Config{Queue: q, Token: mainTok, EnrollToken: enrollTok, Version: ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plane := httptest.NewServer(s)
+	defer plane.Close()
+	_, err = Enroll(context.Background(), Config{Queue: plane.URL, EnrollToken: enrollTok, Name: "saved", Capacity: 1,
+		Version: "0.6.0", StateFile: stateFile, Engine: eng, Store: st, Workdir: filepath.Join(dir, "wt")})
+	if err == nil || !strings.Contains(err.Error(), "upgrade control first") {
+		t.Fatalf("a saved-identity runner did not refuse pre-0.6 control: %v", err)
+	}
+}

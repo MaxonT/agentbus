@@ -16,6 +16,7 @@
 package queue
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -344,6 +345,23 @@ func (spec Spec) MarshalJSON() ([]byte, error) {
 		raw
 		Connector string `json:"connector,omitempty"`
 	}{raw(spec), spec.Machine})
+}
+
+// hashBytes is spec serialized for the idempotency hash, exactly as 0.5 wrote
+// it: the machine id under the old "connector" key, in the field's own place
+// (before prompt), and no "machine" key. The hash is over these bytes, so a 0.6
+// control must reproduce 0.5's bytes -- key and position -- for an unchanged
+// request to keep its hash and be found again, not refused as a key conflict.
+// 0.6 renamed the field to "machine" in that same place, so renaming the key
+// back, without moving it, reproduces 0.5's bytes. (MarshalJSON writes both
+// keys for the wire, which would change the hash.)
+func (spec Spec) hashBytes() (json.RawMessage, error) {
+	type raw Spec
+	b, err := json.Marshal(raw(spec))
+	if err != nil {
+		return nil, err
+	}
+	return bytes.Replace(b, []byte(`"machine":`), []byte(`"connector":`), 1), nil
 }
 
 func (spec Spec) asked() Spec {
@@ -916,11 +934,15 @@ func (q *Queue) TurnsAhead(team, id string) ([]Job, error) {
 // session gets its id here. A session whose turn runs is never refused: Take
 // starts its turn jobs one at a time, in the order they were made.
 func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limits, session string) (job Job, created bool, err error) {
+	specBytes, err := spec.asked().hashBytes()
+	if err != nil {
+		return job, false, err
+	}
 	hash := hashOf(struct {
-		Kind  string `json:"kind"`
-		Spec  Spec   `json:"spec"`
-		Links Links  `json:"links"`
-	}{kind, spec.asked(), hashLinks(links)})
+		Kind  string          `json:"kind"`
+		Spec  json.RawMessage `json:"spec"`
+		Links Links           `json:"links"`
+	}{kind, specBytes, hashLinks(links)})
 	err = q.tx(func(tx *sql.Tx) error {
 		if key != "" {
 			var id, h string

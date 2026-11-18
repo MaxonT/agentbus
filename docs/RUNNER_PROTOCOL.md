@@ -141,8 +141,9 @@ its reference. File data goes through the server's blob store, by the hash of it
   apply's own code and stops before it would write: it answers `result.preview` with each file the
   apply would write or remove, and each file that would refuse it, with the file's change and
   unified diff against the folder now, and `conflicts`. It writes nothing in the folder and sends no
-  event. Control keeps it in the job's result; it is not moved to the record. A runner of an older
-  build refuses it as a kind it does not run.
+  event. Control stores the result as a `changes.previewed` event in the record and removes the
+  consumed preview job (from 0.6); it serves and pages that event, and reuses it until the session
+  changes. A runner of an older build refuses the preview job as a kind it does not run.
 - A job of a kind the runner does not run ends as a setup failure with a one-sentence `refused`.
   The `command` job of 0.4 (the person's `!`) is retired: a `!` is now a message to the session's
   agent, which runs it with its own shell tool. One that an older control made is refused so.
