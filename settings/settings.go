@@ -146,13 +146,17 @@ const (
 	PolicyFile       = "permissions.toml"
 	InstructionsFile = "instructions.md"
 	AgentsFile       = "agents.json"
+	// ToolsFile is the tool registry's overlay (package toolreg): the tools
+	// the person added and the built-ins they removed. A turn that could edit
+	// it would change the tools served, so it is a protected file.
+	ToolsFile = "tools.json"
 	// APIClient is the API client a turn's agent calls, under bin/.
 	APIClient = "agentbus-api"
 )
 
 // dataFiles are the data folder's own files, which no turn may edit: a turn
 // that could would raise its own limits, or read a token.
-var dataFiles = []string{PolicyFile, InstructionsFile, AgentsFile, "token", "turns_token",
+var dataFiles = []string{PolicyFile, InstructionsFile, AgentsFile, ToolsFile, "token", "turns_token",
 	"enroll_token", "events.db", "jobs.db", DBFile, "runner.json", "folders.json", filepath.Join("bin", APIClient)}
 
 // protected is dataFiles under dir.

@@ -67,6 +67,7 @@ import (
 	"github.com/staysup/agentbus/runner"
 	"github.com/staysup/agentbus/settings"
 	"github.com/staysup/agentbus/store"
+	"github.com/staysup/agentbus/toolreg"
 )
 
 const (
@@ -631,10 +632,23 @@ func start(c config) (*service, error) {
 			return nil, err
 		}
 	}
+	// The tool registry's overlay lives with the other control-plane files:
+	// the added and removed tools, never the built-in ones. A runner serves
+	// the built-in tools from code and keeps no overlay.
+	var toolReg *toolreg.Registry
+	if c.mode != modeRunner {
+		if toolReg, err = toolreg.Open(filepath.Join(c.home, settings.ToolsFile)); err != nil {
+			ln.Close()
+			svcLog.Close()
+			st.Close()
+			closeQ()
+			return nil, err
+		}
+	}
 	acfg := api.Config{Store: st, Token: token, TurnsToken: turnsToken, Port: port, AnyHost: !loopback,
 		BaseURL: baseURL, Origin: c.origin, Hosts: c.hosts, Getenv: c.getenvOr(), Folders: issuer, Build: build(debug.ReadBuildInfo()),
 		Queue: q, Jobs: runnerJobs, Engine: eng, TurnWait: c.turnWait, Agents: saved, Settings: cfgStore, Subscriptions: logins,
-		Logf: svcLog.Printf}
+		Tools: toolReg, Logf: svcLog.Printf}
 	if q != nil {
 		acfg.Models = modelSources(c, subs)
 		if runnerJobs != nil {

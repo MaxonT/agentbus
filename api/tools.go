@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -106,27 +105,18 @@ func checkTools() error {
 	return nil
 }
 
-// toolNamed is the tool named name, of every tool, listed or not.
-func (a *API) toolNamed(name string) (toolRoute, bool) {
-	for _, tr := range a.tools {
-		if tr.t.name == name {
-			return tr, true
-		}
-	}
-	return toolRoute{}, false
-}
-
-// listed says t is in the list a caller sees: every tool for the main token,
-// the routes it may call for the turns token, and for a turn token the tools
-// its grant and [agent_api] allow. Only discovery: the route decides a call.
-func listed(tr toolRoute, g *run.Grant, turnsOnly bool, api settings.AgentAPI) bool {
+// listedRoute says a tool on rt is in the list a caller sees: every tool for
+// the main token, the routes it may call for the turns token, and for a turn
+// token the tools its grant and [agent_api] allow. Only discovery: the route
+// decides a call.
+func listedRoute(rt *route, g *run.Grant, turnsOnly bool, api settings.AgentAPI) bool {
 	switch {
 	case turnsOnly:
-		return tr.rt.turns
+		return rt.turns
 	case g == nil:
 		return true
 	}
-	return turnRefusal(tr.rt.turn, *g, api) == ""
+	return turnRefusal(rt.turn, *g, api) == ""
 }
 
 // toolSchemas are the input schemas of every tool, by name, built from
@@ -290,67 +280,7 @@ func resolve(doc map[string]any, v any, depth int) (any, error) {
 	return v, nil
 }
 
-// toolRequest is the HTTP request a tool call names: its method, its path
-// with {id} filled, its query and its body. own is the caller's session, for
-// a tool whose session is optional, or "". It says why not, in fixed words
-// that name the input, never its value.
-func toolRequest(tr toolRoute, schema map[string]any, args map[string]any, own string) (method, target string, body []byte, why string) {
-	t, rt := tr.t, tr.rt
-	props, _ := schema["properties"].(map[string]any)
-	for _, r := range schemaRequired(schema) {
-		if v, ok := args[r]; !ok || v == nil {
-			if r == t.id && t.ownSession && own != "" {
-				continue
-			}
-			return "", "", nil, r + " is required"
-		}
-	}
-	path := rt.path
-	q := url.Values{}
-	var fields map[string]any
-	for name, v := range args {
-		if _, ok := props[name]; !ok {
-			return "", "", nil, "this tool takes no input of that name; tools/list gives its inputs"
-		}
-		switch {
-		case name == t.id:
-			s, ok := v.(string)
-			if !ok || !sessionID.MatchString(s) {
-				return "", "", nil, name + " must be an id of letters, digits, _ and -"
-			}
-			path = strings.Replace(path, "{id}", s, 1)
-		case isQuery(rt, name):
-			s, ok := queryValue(v)
-			if !ok {
-				return "", "", nil, name + " must be a string or a number"
-			}
-			q.Set(name, s)
-		default:
-			if fields == nil {
-				fields = map[string]any{}
-			}
-			fields[name] = v
-		}
-	}
-	if strings.Contains(path, "{id}") {
-		if own == "" {
-			return "", "", nil, t.id + " is required"
-		}
-		path = strings.Replace(path, "{id}", own, 1)
-	}
-	if rt.body != nil {
-		if fields == nil {
-			fields = map[string]any{}
-		}
-		body, _ = json.Marshal(fields)
-	}
-	target = path
-	if enc := q.Encode(); enc != "" {
-		target += "?" + enc
-	}
-	return rt.method, target, body, ""
-}
-
+// schemaRequired are the names a JSON Schema object lists as required.
 func schemaRequired(s map[string]any) []string {
 	var out []string
 	switch r := s["required"].(type) {
@@ -364,15 +294,6 @@ func schemaRequired(s map[string]any) []string {
 		}
 	}
 	return out
-}
-
-func isQuery(rt *route, name string) bool {
-	for _, p := range rt.query {
-		if p.name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // queryValue is a JSON value as a query value: a string, a number or a bool.

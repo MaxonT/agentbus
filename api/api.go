@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/staysup/agentbus/jobs"
@@ -38,6 +39,7 @@ import (
 	"github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/settings"
 	"github.com/staysup/agentbus/store"
+	"github.com/staysup/agentbus/toolreg"
 )
 
 // Config is what the API needs.
@@ -129,6 +131,12 @@ type Config struct {
 	// and the settings routes answer 404.
 	Settings settings.Store
 
+	// Tools is the tool registry's overlay store, where the person's added
+	// and removed tools are kept on control (toolreg). Nil keeps the overlay
+	// in memory: the built-in tools are still served, and add and remove last
+	// only this process. New sets the built-in tools on it.
+	Tools *toolreg.Registry
+
 	// Logf writes one line to the service log for each change the API
 	// makes to control's own state, such as a settings file written.
 	// Never a value. Nil: none.
@@ -150,10 +158,20 @@ type API struct {
 	// spec is the OpenAPI description, built from the route table, and
 	// runnerSpec the runner protocol's.
 	spec, runnerSpec []byte
-	// tools are the API as tools, and their input schemas by name, for
-	// POST /api/v0/mcp (tools.go).
-	tools       []toolRoute
-	toolSchemas map[string]map[string]any
+	// registry is the tools control serves: the built-in apps (the 13 routes
+	// that were tools), plus what the person added or removed (tools.go,
+	// tools_registry.go). toolSnap is the served set, rebuilt on every change
+	// and read without a lock.
+	registry *toolreg.Registry
+	toolSnap atomic.Pointer[toolSnapshot]
+	// toolsMu serialises a tool change with the snapshot it rebuilds, so two
+	// changes at once cannot publish a snapshot that misses one of them
+	// (tools_registry.go).
+	toolsMu sync.Mutex
+	// routes is the route table by "METHOD path", so a tool's run resolves to
+	// the route it makes without the route table's initializer referring to
+	// itself (tools_registry.go).
+	routes map[string]*route
 
 	// signin holds the one-time sign-in codes (signin.go).
 	signin signIns
@@ -212,10 +230,19 @@ func New(cfg Config) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &API{cfg: cfg, token: sha256.Sum256([]byte(cfg.Token)), spec: desc, runnerSpec: runnerDesc, tools: tools, toolSchemas: schemas,
+	reg := cfg.Tools
+	if reg == nil {
+		if reg, err = toolreg.New(nil); err != nil {
+			return nil, err
+		}
+	}
+	reg.SetDefaults(defaultTools(tools, schemas))
+	a := &API{cfg: cfg, token: sha256.Sum256([]byte(cfg.Token)), spec: desc, runnerSpec: runnerDesc,
+		registry: reg, routes: routeIndex(),
 		hosts:    []string{"127.0.0.1:" + cfg.Port, "localhost:" + cfg.Port, "[::1]:" + cfg.Port},
 		streams:  make(chan struct{}, MaxStreams),
 		previews: newSessionGate()}
+	a.rebuildTools()
 	for _, h := range cfg.Hosts {
 		a.hosts = append(a.hosts, h+":"+cfg.Port)
 	}
