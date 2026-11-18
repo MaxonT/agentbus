@@ -219,9 +219,19 @@ func toolRequestFrom(def toolreg.Tool, args map[string]any, own string) (method,
 
 // The management routes: control's own. A turn token cannot reach them.
 
-// ToolList is the answer to GET /api/v0/tools.
+// ToolSummary is one tool as the list carries it: facts only. The 0.6 rule is
+// that a list carries facts, not content, so the inputs schema and the run are
+// left out here and loaded from GET /api/v0/tools/{id} instead.
+type ToolSummary struct {
+	Name        string `json:"name" doc:"The tool's name: a model calls it by this name."`
+	Description string `json:"description" doc:"What the tool does, written for a model."`
+	Effect      string `json:"effect" doc:"reads (a call only reads; allowed by default) or does-something (a call starts work or changes files; asked by default)."`
+	Where       string `json:"where" doc:"Where the call runs: control."`
+}
+
+// ToolList is the answer to GET /api/v0/tools: the tools as facts only.
 type ToolList struct {
-	Tools []toolreg.Tool `json:"tools" doc:"The tools, built-in and custom, in a stable order."`
+	Tools []ToolSummary `json:"tools" doc:"The tools, built-in and custom, in a stable order, as facts only. A tool's full definition (inputs and run) is at GET /api/v0/tools/{id}."`
 }
 
 const (
@@ -230,12 +240,31 @@ const (
 	toolRoute0 = "run must name a route a built-in tool already exposes; another route (one that is not a tool, has a {call}/{n} path, or needs a header such as If-Match) cannot be served as a tool"
 )
 
-// GET /api/v0/tools
+// GET /api/v0/tools: the tools as facts only; each one's full definition is at
+// GET /api/v0/tools/{id}.
 func (a *API) listTools(w http.ResponseWriter, r *http.Request) {
 	if !noBody(w, r) {
 		return
 	}
-	writeJSON(w, http.StatusOK, ToolList{a.registry.List()})
+	defs := a.registry.List()
+	out := make([]ToolSummary, len(defs))
+	for i, d := range defs {
+		out[i] = ToolSummary{Name: d.Name, Description: d.Description, Effect: d.Effect, Where: d.Where}
+	}
+	writeJSON(w, http.StatusOK, ToolList{out})
+}
+
+// GET /api/v0/tools/{id}: one tool's full definition (id is the tool's name).
+func (a *API) getTool(w http.ResponseWriter, r *http.Request, id string) {
+	if !noBody(w, r) {
+		return
+	}
+	t, err := a.registry.Get(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, noSuchTool)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
 }
 
 // POST /api/v0/tools

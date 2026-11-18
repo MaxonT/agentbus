@@ -525,8 +525,8 @@ var routes = slices.Concat([]route{
 		tag:     "Tools",
 		summary: "List tools",
 		doc: "The tools control serves to agents, in a stable order: the built-in ones first, then the person's own. " +
-			"Each is one record in the stored format: a name, a description for a model, its inputs as a JSON Schema object, " +
-			"what it runs, its effect (reads or does-something) and where it runs (control).",
+			"The list carries facts only — a name, a description for a model, its effect (reads or does-something) and where it runs (control). " +
+			"A tool's full definition (its inputs as a JSON Schema object and what it runs) is read from GET /api/v0/tools/{id}.",
 		replies: []reply{ok(200, ToolList{}, "The tools."), badRequest},
 		serve:   plain((*API).listTools)},
 	{method: "POST", path: "/api/v0/tools", op: "addTool",
@@ -537,6 +537,14 @@ var routes = slices.Concat([]route{
 		body:    toolreg.Tool{},
 		replies: []reply{ok(201, toolreg.Tool{}, "Added."), badRequest, fail(409, "A tool of that name already exists, or there are too many."), storeFailed},
 		serve:   plain((*API).createTool)},
+	{method: "GET", path: "/api/v0/tools/{id}", op: "getTool",
+		idDoc:   "A tool's name.",
+		tag:     "Tools",
+		summary: "Get a tool",
+		doc: "One tool's full definition in the stored format: its name, its description for a model, its inputs as a JSON Schema object, " +
+			"what it runs, its effect (reads or does-something) and where it runs. The list (GET /api/v0/tools) carries facts only; this is where a tool's whole definition is read.",
+		replies: []reply{ok(200, toolreg.Tool{}, "The tool."), badRequest, fail(404, "No such tool.")},
+		serve:   (*API).getTool},
 	{method: "DELETE", path: "/api/v0/tools/{id}", op: "removeTool",
 		idDoc:   "A tool's name. Another shape gets 404.",
 		tag:     "Tools",

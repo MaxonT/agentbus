@@ -258,14 +258,16 @@ func TestOneEndpointStartsEveryTurn(t *testing.T) {
 	// the commands held for a person (ask in permissions.toml), and 59 with the
 	// three turn list routes GET /api/v0/turns/{id}/changes, .../calls and
 	// .../tools, which page a turn's lists the diff summarises, and 62 with
-	// GET, POST and DELETE of /api/v0/tools, which list, add and remove the
-	// tools control serves and start no turn, and 64 with GET
+	// GET, POST and DELETE of /api/v0/tools and GET /api/v0/tools/{id}, which
+	// list, read, add and remove the tools control serves and start no turn
+	// (the list carries facts only; the {id} route reads one tool's full
+	// definition), and 65 with GET
 	// /api/v0/turns/{id}/context and GET /api/v0/sessions/{id}/context, the
 	// context view: how big a turn's or a session's context is, how much came
 	// from the prompt cache, and what a prompt is made of. Both read the
 	// record and start no turn.
-	if len(ops) != 64 {
-		t.Errorf("%d endpoints, want 64: %v", len(ops), ops)
+	if len(ops) != 65 {
+		t.Errorf("%d endpoints, want 65: %v", len(ops), ops)
 	}
 	for _, want := range []string{"POST /api/v0/turns", "GET /api/v0/turns", "GET /api/v0/turns/{id}", "POST /api/v0/turns/{id}/stop",
 		"GET /api/v0/turns/{id}/diff", "POST /api/v0/turns/{id}/apply", "POST /api/v0/turns/{id}/review",

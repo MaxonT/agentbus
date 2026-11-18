@@ -36,8 +36,9 @@ func callText(t *testing.T, e *env, tok, name, args string) (bool, string) {
 	return dig(v, "result", "isError") == true, c[0].(map[string]any)["text"].(string)
 }
 
-// listTools reads GET /api/v0/tools with the main token.
-func listToolDefs(t *testing.T, e *env) []toolreg.Tool {
+// listToolSummaries reads GET /api/v0/tools with the main token: the list, as
+// facts only.
+func listToolSummaries(t *testing.T, e *env) []ToolSummary {
 	t.Helper()
 	resp, body := do(t, e.req(t, "GET", "/api/v0/tools", nil))
 	if resp.StatusCode != 200 {
@@ -50,6 +51,20 @@ func listToolDefs(t *testing.T, e *env) []toolreg.Tool {
 	return out.Tools
 }
 
+// getToolDef reads GET /api/v0/tools/{name}: one tool's full definition.
+func getToolDef(t *testing.T, e *env, name string) toolreg.Tool {
+	t.Helper()
+	resp, body := do(t, e.req(t, "GET", "/api/v0/tools/"+name, nil))
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET tools/%s: %d %s", name, resp.StatusCode, body)
+	}
+	var def toolreg.Tool
+	if err := json.Unmarshal([]byte(body), &def); err != nil {
+		t.Fatal(err)
+	}
+	return def
+}
+
 // B3's done-when: a built-in removed and re-added as a custom tool behaves the
 // same. The tool's list entry (schema, annotations, description) and a call's
 // result are byte-identical before removing it and after re-adding it.
@@ -57,7 +72,7 @@ func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 	e := mcpEnv(t)
 	// The built-ins are served to the main token: the 13 of B3 plus the two
 	// context-view reads, turn_context and session_context.
-	if got := len(listToolDefs(t, e)); got != 15 {
+	if got := len(listToolSummaries(t, e)); got != 15 {
 		t.Fatalf("%d built-in tools, want 15", got)
 	}
 	before := toolEntry(t, e, token, "apply_turn")
@@ -66,13 +81,8 @@ func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 	}
 	_, beforeCall := callText(t, e, token, "apply_turn", `{"turn":"t_x"}`)
 
-	// The stored definition of apply_turn, as the API gives it.
-	var def toolreg.Tool
-	for _, d := range listToolDefs(t, e) {
-		if d.Name == "apply_turn" {
-			def = d
-		}
-	}
+	// The stored definition of apply_turn, from the single tool route.
+	def := getToolDef(t, e, "apply_turn")
 	if def.Run.Method != "POST" || def.Run.Path != "/api/v0/turns/{id}/apply" || def.Effect != toolreg.EffectDoes {
 		t.Fatalf("apply_turn definition: %+v", def)
 	}
@@ -99,6 +109,57 @@ func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 	}
 	if _, afterCall := callText(t, e, token, "apply_turn", `{"turn":"t_x"}`); afterCall != beforeCall {
 		t.Errorf("call result changed: %q vs %q", beforeCall, afterCall)
+	}
+}
+
+// The list carries facts only (the 0.6 rule): each entry has a name, a
+// description, an effect and where it runs, and never the inputs schema or the
+// run. A tool's whole definition is read from GET /api/v0/tools/{id}, which a
+// turn token cannot reach and which 404s on a name not served.
+func TestToolListFactsOnly(t *testing.T) {
+	e := mcpEnv(t)
+	resp, body := do(t, e.req(t, "GET", "/api/v0/tools", nil))
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET tools: %d %s", resp.StatusCode, body)
+	}
+	var raw struct {
+		Tools []map[string]json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Tools) == 0 {
+		t.Fatal("no tools listed")
+	}
+	for _, m := range raw.Tools {
+		for _, k := range []string{"name", "description", "effect", "where"} {
+			if _, ok := m[k]; !ok {
+				t.Errorf("list entry has no %q: %v", k, m)
+			}
+		}
+		for _, k := range []string{"inputs", "run"} {
+			if _, ok := m[k]; ok {
+				t.Errorf("list entry carries %q; the list is facts only: %v", k, m)
+			}
+		}
+	}
+
+	// The single tool route carries the full definition.
+	def := getToolDef(t, e, "apply_turn")
+	if def.Name != "apply_turn" || def.Run.Path != "/api/v0/turns/{id}/apply" || def.Inputs == nil {
+		t.Fatalf("single tool not full: %+v", def)
+	}
+
+	// A name not served is a 404, with the same words as remove.
+	if r, b := do(t, e.req(t, "GET", "/api/v0/tools/no_such", nil)); r.StatusCode != 404 {
+		t.Errorf("GET missing tool: %d %s", r.StatusCode, b)
+	}
+
+	// A turn token cannot read a single tool, as it cannot list them.
+	r := e.req(t, "GET", "/api/v0/tools/apply_turn", nil)
+	r.Header.Set("Authorization", "Bearer "+mcpWriteTok)
+	if resp, _ := do(t, r); resp.StatusCode == 200 {
+		t.Errorf("turn token read a single tool: %d", resp.StatusCode)
 	}
 }
 
