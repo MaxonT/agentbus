@@ -27,17 +27,12 @@ import (
 	"github.com/staysup/agentbus/settings"
 )
 
-// What a tool changes, for a model and a screen (the x-agentbus-tools of the
-// OpenAPI description, and the tool's MCP annotations).
-const (
-	effectNone   = "none"                       // it only reads
-	effectStarts = "starts work"                // a new turn, by another agent
-	effectStops  = "stops work"                 // a turn ends
-	effectApply  = "writes the person's folder" // a turn's changes are applied
-	effectRename = "renames a session"
-)
-
-// tool is one tool a route is.
+// tool is one tool a route is. It carries no effect: nothing about a tool is
+// trusted, and a call is decided by its NAME against the one rules list (his
+// decision, 2026-11-18, DESIGN_0_6_tools.md #9). AgentBus still knows which of
+// its OWN routes only read — a GET — and ships those tools as allow rules and
+// reads their MCP read-only hint off the method, but that is AgentBus's
+// knowledge of its routes, not a field on the tool format.
 type tool struct {
 	// name is stable: <verb>_<noun>. A model and a recorded tool call name
 	// it, so a rename breaks both. No agentbus_ prefix: claude names the
@@ -46,8 +41,7 @@ type tool struct {
 	name string
 	// doc is the description a model reads: what it does and its scope
 	// first, then what it does not do.
-	doc    string
-	effect string
+	doc string
 	// id is the input that fills the path's {id}: "turn" or "session".
 	// ownSession makes it optional for a turn token: its own session.
 	id         string
@@ -97,8 +91,8 @@ func checkTools() error {
 			return fmt.Errorf("api: tool %s must name its {id} input, and only on a path with one", t.name)
 		case strings.Contains(rt.path, "{call}") || strings.Contains(rt.path, "{n}"):
 			return fmt.Errorf("api: tool %s: a path with {call} or {n} is not a tool yet", t.name)
-		case t.doc == "" || t.effect == "":
-			return fmt.Errorf("api: tool %s needs a doc and an effect", t.name)
+		case t.doc == "":
+			return fmt.Errorf("api: tool %s needs a doc", t.name)
 		}
 		seen[t.name] = true
 	}

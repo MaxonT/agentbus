@@ -1,8 +1,10 @@
 // Package toolreg is the tool registry: the one place control keeps which
 // tools exist and what each is. A tool is one stored record in the format of
 // plans/DESIGN_0_6_tools.md (milestone B): a name, a description written for a
-// model, its inputs as one JSON Schema object, what it runs, its effect and
-// where it runs.
+// model, its inputs as one JSON Schema object, what it runs and where it runs.
+// A tool carries NO effect: nothing about a tool is trusted, and a call is
+// decided by the tool's NAME against the one rules list (his decision,
+// 2026-11-18, DESIGN_0_6_tools.md #9).
 //
 // The built-in tools are defaults, set from code at start-up (SetDefaults);
 // the person's own tools, and any default they removed, are the overlay, kept
@@ -22,14 +24,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-)
-
-// A tool's effect, the honest label of what a call does. His decision,
-// 2026-11-18: two values. The gate's default reads off it (reads → allow,
-// does something → ask); a person's rule always overrides.
-const (
-	EffectReads = "reads"          // it only reads
-	EffectDoes  = "does-something" // it starts work, or changes files
 )
 
 // Where a tool runs. Only control for now; a runner comes with script and
@@ -58,8 +52,6 @@ type Tool struct {
 	Description string `json:"description" doc:"What the tool does and its scope, written for a model: the scope first, then what it does not do."`
 	// Inputs is the tool's arguments as one JSON Schema object.
 	Inputs map[string]any `json:"inputs" doc:"The tool's arguments as one JSON Schema object: type object, with properties and required."`
-	// Effect is reads or does-something.
-	Effect string `json:"effect" doc:"reads (a call only reads; allowed by default) or does-something (a call starts work or changes files; asked by default). A person's rule overrides."`
 	// Where is control.
 	Where string `json:"where" doc:"Where the call runs: control."`
 	// Run is what the call runs.
@@ -115,8 +107,6 @@ func Check(t *Tool) string {
 		return "name must be at most 64 bytes, so it can also be removed by name"
 	case strings.TrimSpace(t.Description) == "":
 		return "a tool needs a description, written for a model"
-	case t.Effect != EffectReads && t.Effect != EffectDoes:
-		return "effect must be reads or does-something"
 	case t.Where != "" && t.Where != WhereControl:
 		return "where must be control"
 	case t.Run.Kind != RunAPI:

@@ -489,7 +489,7 @@ func describe(runner bool) (*openapi3.T, error) {
 			// The tools this operation is, for POST /api/v0/mcp (tools.go).
 			var ts []map[string]string
 			for _, t := range rt.tools {
-				ts = append(ts, map[string]string{"name": t.name, "description": t.doc, "effect": t.effect})
+				ts = append(ts, map[string]string{"name": t.name, "description": t.doc})
 			}
 			op.Extensions = map[string]any{"x-agentbus-tools": ts}
 		}

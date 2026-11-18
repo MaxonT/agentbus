@@ -166,10 +166,18 @@ const (
 
 // StarterAllow is the small read-only allow list a new install starts with, so
 // a first session is not a card for every command. Each is a command that
-// reads, never one that changes anything.
+// reads, never one that changes anything — and, since 0.6, the read-only
+// built-in tools too: a tool is decided by its name against this one list, the
+// same as a shell command (his decision, 2026-11-18, DESIGN_0_6_tools.md #9).
+// AgentBus ships its read-only tools pre-set to allow, as ordinary rules a
+// person sees and edits; the tools that do something carry no rule and are
+// asked by default. The api package pins this list to its GET built-in tools
+// (a test), so a read-only tool is never left off and asked about.
 var StarterAllow = []string{
 	"ls", "cat", "head", "tail", "grep", "find", "wc",
 	"git status", "git diff", "git log", "git show",
+	"list_turns", "get_turn", "turn_diff", "turn_changes", "turn_calls",
+	"turn_tools", "turn_context", "search_history", "session_context", "list_agents",
 }
 
 // Isolation values: where a new session's turns run.
