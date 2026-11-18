@@ -164,6 +164,11 @@ type API struct {
 	// mark; this serialises only within this process (approvals.go).
 	decidingMu sync.Mutex
 	deciding   map[string]bool
+
+	// previews serialises running and storing a session's preview, so two GETs
+	// of its changes do not run two previews and race to store them: the second
+	// waits for the first and reuses its result (changes.go).
+	previews *sessionGate
 }
 
 // New returns the API.
@@ -208,8 +213,9 @@ func New(cfg Config) (*API, error) {
 		return nil, err
 	}
 	a := &API{cfg: cfg, token: sha256.Sum256([]byte(cfg.Token)), spec: desc, runnerSpec: runnerDesc, tools: tools, toolSchemas: schemas,
-		hosts:   []string{"127.0.0.1:" + cfg.Port, "localhost:" + cfg.Port, "[::1]:" + cfg.Port},
-		streams: make(chan struct{}, MaxStreams)}
+		hosts:    []string{"127.0.0.1:" + cfg.Port, "localhost:" + cfg.Port, "[::1]:" + cfg.Port},
+		streams:  make(chan struct{}, MaxStreams),
+		previews: newSessionGate()}
 	for _, h := range cfg.Hosts {
 		a.hosts = append(a.hosts, h+":"+cfg.Port)
 	}

@@ -390,16 +390,19 @@ var routes = slices.Concat([]route{
 	{method: "GET", path: "/api/v0/sessions/{id}/changes", op: "sessionChanges",
 		tag:     "Sessions",
 		summary: "Preview a session's changes",
-		doc: "What applying the session's changes would do to the person's folder now, without writing anything: a preview of POST /api/v0/turns/{id}/apply for the session's latest ended turn with changes, which applies every turn not applied yet.\n\n" +
-			"The preview is made by the apply's own code, on the runner of the folder's machine, and stops before the apply would write. " +
-			"files lists each file the apply would write or remove, with its change (added, modified or deleted) against the folder now, how many lines it adds and removes, and its unified diff for small text files; a file with no diff says diff_left_out. " +
+		doc: "A page of what applying the session's changes would do to the person's folder now, without writing anything: a preview of POST /api/v0/turns/{id}/apply for the session's latest ended turn with changes, which applies every turn not applied yet.\n\n" +
+			"The preview is made by the apply's own code, on the runner of the folder's machine, and stops before the apply would write. Control stores it as a changes.previewed event, the one source, and this route serves and pages that event. A later request reuses the stored preview until the session changes (a new turn or apply) or ?fresh=true asks for a new one; previewed_at says when it was taken. An apply always re-checks the folder itself.\n\n" +
+			"files is a page, sorted by path: each file the apply would write or remove, with its change (added, modified or deleted) against the folder now, how many lines it adds and removes, and its unified diff for small text files; a file with no diff says diff_left_out. count is every file. Page the rest with before set to the previous page's next_before and event set to the event id, so every page is of the same preview. truncated is set only when the stored preview kept fewer files than count because they were too many to send (some are not in the record at all); that is distinct from a page simply holding fewer than count, which next_before continues. " +
 			"conflicts lists each file the apply would refuse, with why: a file in the folder that is neither as it was at the start of the changes nor already as they leave it. Those files are in files too. " +
-			"unapplied is true when files or conflicts is not empty; turn is the turn to apply. " +
-			"When every change is applied, or the folder already holds them, unapplied is false and files is empty. " +
-			"A session that works in the folder as it is, not in an isolated copy, answers isolated false, with why; so does a closed session, whose copy is gone. " +
-			"Nothing is written in the folder and no event is stored. The reply waits up to 30 seconds for the folder's machine.",
-		replies: []reply{ok(200, SessionChanges{}, "The preview."),
-			noSession,
+			"unapplied is true when files or conflicts is not empty; turn is the turn to apply. When every change is applied, or the folder already holds them, unapplied is false and files is empty. " +
+			"A session that works in the folder as it is, not in an isolated copy, answers isolated false, with why; so does a closed session, whose copy is gone. The reply waits up to 30 seconds for the folder's machine when a fresh preview is run.",
+		query: []param{
+			{name: "fresh", doc: "true runs a new preview instead of reusing the stored one: the Refresh on the changes view, and opening the apply view."},
+			{name: "event", doc: "The event id of a changes.previewed from a previous page: pages the same preview."},
+			{name: "before", doc: "Only files before this position: the previous page's next_before.", integer: true, min: 1},
+			{name: "limit", doc: "Files per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
+		replies: []reply{ok(200, SessionChangesPage{}, "A page of the preview."),
+			badRequest, noSession,
 			fail(409, "An apply of the session has not ended (ask again once it has), or the preview could not be made: error says why. Nothing was written."),
 			tooMany, fail(503, "The runner of the folder's machine has not been seen for a minute. Nothing was written."),
 			fail(504, "The folder's machine did not answer within 30 seconds. Nothing was written."), storeFailed},

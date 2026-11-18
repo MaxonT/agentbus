@@ -94,6 +94,24 @@ func (e *env) req(t *testing.T, method, path string, body io.Reader) *http.Reque
 	return r
 }
 
+// getRaw is a GET that never touches t, so it is safe to call from a goroutine
+// (as, req and do all fail the test and cannot). It returns the status and
+// body, or 0 and the error text.
+func getRaw(e *env, tok, path string) (int, string) {
+	req, err := http.NewRequest("GET", e.srv.URL+path, nil)
+	if err != nil {
+		return 0, err.Error()
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
 func do(t *testing.T, r *http.Request) (*http.Response, string) {
 	t.Helper()
 	resp, err := http.DefaultClient.Do(r)

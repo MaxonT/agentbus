@@ -269,12 +269,12 @@ var ErrNoCopyYet = errors.New("queue: the session has no copy yet")
 // ErrApplyBusy while an apply of the session has not ended, and
 // ErrMachineOffline. Each preview is a new job: the folder may have changed
 // since the last one.
-func (q *Queue) Preview(team, session string) (job Job, turn string, err error) {
+func (q *Queue) Preview(team, session string) (job Job, turn string, applies int, err error) {
 	q.applyMu.Lock()
 	defer q.applyMu.Unlock()
 	ws, ok, err := q.Workspace(team, session)
 	if err != nil {
-		return Job{}, "", err
+		return Job{}, "", 0, err
 	}
 	switch {
 	case !ok:
@@ -284,52 +284,93 @@ func (q *Queue) Preview(team, session string) (job Job, turn string, err error) 
 		var n int
 		if err := q.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE team = ? AND session = ? AND kind = 'turn'`,
 			team, session).Scan(&n); err != nil {
-			return Job{}, "", fmt.Errorf("queue: read session: %w", err)
+			return Job{}, "", 0, fmt.Errorf("queue: read session: %w", err)
 		}
 		if n == 0 {
-			return Job{}, "", ErrNotFound
+			return Job{}, "", 0, ErrNotFound
 		}
 		first, err := q.firstSpec(team, session)
 		if err != nil {
-			return Job{}, "", err
+			return Job{}, "", 0, err
 		}
 		if first.Repo == "" && first.RepoRef == "" && !first.Isolate {
-			return Job{}, "", ErrNotIsolated
+			return Job{}, "", 0, ErrNotIsolated
 		}
-		return Job{}, "", ErrNoCopyYet
+		return Job{}, "", 0, ErrNoCopyYet
 	case ws.Kind != WorkspaceCopy && ws.Kind != WorkspaceWorktree:
-		return Job{}, "", ErrNotIsolated
+		return Job{}, "", 0, ErrNotIsolated
 	case ws.Closed != nil:
-		return Job{}, "", ErrSessionClosed
+		return Job{}, "", 0, ErrSessionClosed
 	}
-	turns, err := q.appliableTurns(team, session)
+	// turn and applies are the session's appliable cursor, captured here under
+	// applyMu so the preview this plans and the cursor the API records against
+	// it are of the same moment: a turn or apply that lands after cannot slip
+	// between them.
+	turn, applies, has, err := q.appliableCursor(team, session)
 	if err != nil {
-		return Job{}, "", err
+		return Job{}, "", 0, err
 	}
-	if len(turns) == 0 {
-		return Job{}, "", ErrAllApplied
+	if !has {
+		return Job{}, "", 0, ErrAllApplied
 	}
-	turn = turns[len(turns)-1].turn
-	p, done, has, err := q.planApply(team, turn, nil)
+	p, done, applying, err := q.planApply(team, turn, nil)
 	switch {
 	case err != nil:
-		return Job{}, turn, err
-	case has && done.Ended == nil:
-		return Job{}, turn, ErrApplyBusy
-	case has:
-		return Job{}, turn, ErrAllApplied
+		return Job{}, turn, applies, err
+	case applying && done.Ended == nil:
+		return Job{}, turn, applies, ErrApplyBusy
+	case applying:
+		return Job{}, turn, applies, ErrAllApplied
 	}
 	if ok, err := q.MachineSeen(team, p.spec.Machine); err != nil {
-		return Job{}, turn, err
+		return Job{}, turn, applies, err
 	} else if !ok {
-		return Job{}, turn, ErrMachineOffline
+		return Job{}, turn, applies, ErrMachineOffline
 	}
 	// A preview the API gave up on ended with nobody to read it.
 	if err := q.dropPreviews(team, `session = ? AND cancel = 1`, session); err != nil {
-		return Job{}, turn, err
+		return Job{}, turn, applies, err
 	}
 	job, _, err = q.create(team, KindPreview, "", p.spec, p.links, Limits{}, session)
-	return job, turn, err
+	return job, turn, applies, err
+}
+
+// appliableCursor is the session's appliable state: the latest turn with a
+// changeset -- the one a preview or apply goes up to -- and how many apply
+// jobs the session has. It is what a stored preview stays valid against: a new
+// appliable turn moves the latest, and any apply moves the count. applies
+// counts every apply job, pending or ended, a refusal included, because any
+// apply may have changed the folder and its outcome is recorded in the store,
+// not kept on the job; counting them all needs no second copy of that outcome
+// and no read outside the queue, so the one source stays the queue under
+// applyMu. What a re-run would show is read fresh then; when the runner is
+// offline the last preview is served marked stale instead. A turn with no
+// changeset -- not ended, or its upload failed -- is not appliable and moves
+// neither number. ok is false when nothing is appliable. The caller holds
+// applyMu.
+func (q *Queue) appliableCursor(team, session string) (turn string, applies int, ok bool, err error) {
+	turns, err := q.appliableTurns(team, session)
+	if err != nil {
+		return "", 0, false, err
+	}
+	if len(turns) == 0 {
+		return "", 0, false, nil
+	}
+	if err := q.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE team = ? AND session = ? AND kind = 'apply'`,
+		team, session).Scan(&applies); err != nil {
+		return "", 0, false, fmt.Errorf("queue: count applies: %w", err)
+	}
+	return turns[len(turns)-1].turn, applies, true, nil
+}
+
+// AppliableCursor is the session's appliable cursor (the latest appliable turn
+// and the count of the session's apply jobs), read without planning or running
+// a preview: the API reuses a stored preview only while this still equals the
+// cursor it recorded.
+func (q *Queue) AppliableCursor(team, session string) (turn string, applies int, ok bool, err error) {
+	q.applyMu.Lock()
+	defer q.applyMu.Unlock()
+	return q.appliableCursor(team, session)
 }
 
 // DropPreview removes a preview job of team that has ended, with its

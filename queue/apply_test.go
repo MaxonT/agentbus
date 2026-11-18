@@ -516,3 +516,107 @@ func TestDropPreviews(t *testing.T) {
 		t.Fatalf("a turn job was dropped: %v", err)
 	}
 }
+
+// AppliableCursor is the latest appliable turn and the applied count, and it
+// moves only for what changes an apply: a new appliable turn or an apply. A
+// turn that has not ended (R2) and an ended turn with no changeset -- a failed
+// upload (R4) -- are not appliable and leave the cursor where it was, so a
+// stored preview keyed to the cursor is still reused.
+func TestAppliableCursor(t *testing.T) {
+	q, _ := open(t)
+	rn := capsRunner(t, q, nil, &Capabilities{Connector: conA})
+	if _, _, ok, err := q.AppliableCursor(DefaultTeam, "nope"); err != nil || ok {
+		t.Fatalf("no turns: ok %v err %v", ok, err)
+	}
+	first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
+	t1 := run(t, q, rn, Result{Changeset: hexOf('1')})
+	turn, applied, ok, err := q.AppliableCursor(DefaultTeam, first.Session)
+	if err != nil || !ok || turn != t1.Turn || applied != 0 {
+		t.Fatalf("after t1: turn %q applied %d ok %v err %v", turn, applied, ok, err)
+	}
+	// A second turn that has not ended is not appliable: cursor unchanged (R2).
+	makeJob(t, q, Spec{Session: first.Session})
+	if turn2, applied2, _, _ := q.AppliableCursor(DefaultTeam, first.Session); turn2 != t1.Turn || applied2 != 0 {
+		t.Fatalf("a not-ended turn moved the cursor: turn %q applied %d", turn2, applied2)
+	}
+	// End that turn with no changeset -- a failed upload: still not appliable,
+	// cursor unchanged (R4).
+	run(t, q, rn, Result{})
+	if turn3, applied3, _, _ := q.AppliableCursor(DefaultTeam, first.Session); turn3 != t1.Turn || applied3 != 0 {
+		t.Fatalf("a no-changeset turn moved the cursor: turn %q applied %d", turn3, applied3)
+	}
+}
+
+// endApply takes the session's pending apply and ends it with a crafted
+// outcome, so a test can make a finished, refused, or partial apply.
+func endApply(t *testing.T, q *Queue, r Runner, status, reason string, res Result) {
+	t.Helper()
+	_, a := takeFolder(t, q, r)
+	if _, _, err := q.Start(r.ID, a.ID, a.Number, lease); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(res)
+	if _, err := q.End(r.ID, a.ID, a.Number, Finish{Status: status, Reason: reason, Result: b}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// appliableCursor's applies count moves for every apply job of the session --
+// pending (P1), finished, refused, or failed part way (P2) -- because any
+// apply may have changed the folder and the stored preview is retaken; what it
+// did is read fresh on the re-run.
+func TestAppliableCursorCountsApplies(t *testing.T) {
+	setup := func(t *testing.T) (*Queue, Runner, string, string) {
+		q, _ := open(t)
+		rn := capsRunner(t, q, nil, &Capabilities{Connector: conA})
+		first := makeJob(t, q, Spec{Harness: "claude", FolderRef: refX, Machine: conA, Isolate: true})
+		t1 := run(t, q, rn, Result{Changeset: hexOf('1')})
+		return q, rn, first.Session, t1.Turn
+	}
+	count := func(t *testing.T, q *Queue, session string) int {
+		_, n, ok, err := q.AppliableCursor(DefaultTeam, session)
+		if err != nil || !ok {
+			t.Fatalf("cursor: ok %v err %v", ok, err)
+		}
+		return n
+	}
+	t.Run("pending apply counts", func(t *testing.T) {
+		q, _, session, turn := setup(t)
+		if _, _, err := q.Apply(DefaultTeam, turn); err != nil {
+			t.Fatal(err)
+		}
+		if n := count(t, q, session); n != 1 {
+			t.Fatalf("a pending apply: applies %d, want 1", n)
+		}
+	})
+	t.Run("finished apply counts", func(t *testing.T) {
+		q, rn, session, turn := setup(t)
+		if _, _, err := q.Apply(DefaultTeam, turn); err != nil {
+			t.Fatal(err)
+		}
+		endApply(t, q, rn, Finished, "", Result{Apply: &ApplyResult{Files: []string{"a.txt"}}})
+		if n := count(t, q, session); n != 1 {
+			t.Fatalf("a finished apply: applies %d, want 1", n)
+		}
+	})
+	t.Run("refused apply counts", func(t *testing.T) {
+		q, rn, session, turn := setup(t)
+		if _, _, err := q.Apply(DefaultTeam, turn); err != nil {
+			t.Fatal(err)
+		}
+		endApply(t, q, rn, Failed, ReasonConflict, Result{Apply: &ApplyResult{Files: []string{}}})
+		if n := count(t, q, session); n != 1 {
+			t.Fatalf("a refused apply: applies %d, want 1", n)
+		}
+	})
+	t.Run("failed apply that wrote a file counts", func(t *testing.T) {
+		q, rn, session, turn := setup(t)
+		if _, _, err := q.Apply(DefaultTeam, turn); err != nil {
+			t.Fatal(err)
+		}
+		endApply(t, q, rn, Failed, ReasonSetup, Result{Apply: &ApplyResult{Files: []string{"a.txt"}}})
+		if n := count(t, q, session); n != 1 {
+			t.Fatalf("a partial apply: applies %d, want 1", n)
+		}
+	})
+}
