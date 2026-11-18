@@ -14,9 +14,9 @@ import (
 	"github.com/staysup/agentbus/settings"
 )
 
-// defaultWindow is the window used when the model is not one AgentBus pins: the
-// documented 200k default of the Claude models our control runs. Flagged with
-// WindowKnown false so the view says it is assumed, not read.
+// defaultWindow is the window used for a model AgentBus does not recognise, and
+// for the older Claude models that held 200k. Flagged with WindowKnown false so
+// the view says it is assumed, not read.
 const defaultWindow = 200000
 
 // ContextWindow is how full a prompt is against the model's window, and where
@@ -24,7 +24,7 @@ const defaultWindow = 200000
 type ContextWindow struct {
 	Model        string `json:"model" doc:"The model the window is for, from the prompt's own request. Empty when no call named one."`
 	Harness      string `json:"harness" doc:"The vendor's harness that ran the turn: claude, codex, opencode or gemini. The compaction point is per harness. Empty when no run started the turn."`
-	WindowTokens int    `json:"window_tokens" doc:"The model's context window in tokens, the whole prompt it can hold: an assumed default, not a confirmed figure. research/2026-11-18-context-compaction-points.md: Claude 200k, Gemini 1M, else 200k; some Claude models are 1M, unresolved per model here."`
+	WindowTokens int    `json:"window_tokens" doc:"The model's context window in tokens, the whole prompt it can hold: an assumed default, not a confirmed figure. Current Claude models and Gemini are 1M; Haiku 4.5 and older Claude, and anything unrecognised, take the 200k fallback (Claude API model table, cached 2026-11-03)."`
 	WindowKnown  bool   `json:"window_known" doc:"Whether window_tokens is confirmed from the harness's own report rather than an assumed default. Always false until 0.7, when a harness reports its own window; until then every window here is an assumed default and the view says so. Never claims certainty AgentBus does not have."`
 	UsedTokens   int    `json:"used_tokens" doc:"How much of the window the prompt used: input + cache_read + cache_write, the vendor's own count. Same as context_tokens."`
 	PercentFull  int    `json:"percent_full" doc:"used_tokens as a percent of window_tokens, rounded. The number a person watches: how full the context is."`
@@ -35,25 +35,49 @@ type ContextWindow struct {
 	CompactionIsDefault bool    `json:"compaction_is_default" doc:"True when the point is the built-in default, not one the person set. With compaction_source default, the view says the vendor publishes none and this is editable."`
 }
 
-// windowFor is a model's assumed context window in tokens: a default, never a
-// confirmed figure (contextWindow marks every window assumed until a harness
-// reports its own, 0.7). The numbers are the research note's family defaults
-// (research/2026-11-18-context-compaction-points.md): Claude 200k, Gemini 1M,
-// everything else the 200k fallback. ⚠️ The note also says some Claude models
-// (Sonnet among them) are 1M, unresolved per model here; this does not pin
-// those, so the window is shown as assumed and the harness settles it in 0.7.
-// Matched on the id the vendor reports, which carries the family even when
-// dated (claude-opus-5-5-...).
+// windowFor is a model's assumed context window in tokens: still a default,
+// never a confirmed figure (contextWindow marks every window assumed until a
+// harness reports its own, 0.7). The numbers are the Claude API model table
+// (cached 2026-11-03): every current Claude model holds 1M, and only Haiku 4.5
+// and older hold 200k — Claude 3 (claude-3*), Haiku 4.5 (haiku ... 4-5) and the
+// 4.0/4.1 generation (-4-0, -4-1). Gemini is 1M; everything else takes the 200k
+// fallback. Matched on the id the vendor reports, which carries the family even
+// when dated (claude-opus-5-5-...).
 func windowFor(model string) int {
 	m := strings.ToLower(model)
 	switch {
 	case strings.Contains(m, "gemini"):
 		return 1000000
-	case strings.Contains(m, "opus"), strings.Contains(m, "sonnet"),
-		strings.Contains(m, "haiku"), strings.Contains(m, "claude"):
-		return 200000
+	case isClaudeModel(m):
+		if claudeIs200k(m) {
+			return 200000
+		}
+		return 1000000
 	default:
 		return defaultWindow
+	}
+}
+
+// isClaudeModel reports whether m names a Claude model, by family word.
+func isClaudeModel(m string) bool {
+	return strings.Contains(m, "claude") || strings.Contains(m, "opus") ||
+		strings.Contains(m, "sonnet") || strings.Contains(m, "haiku") || strings.Contains(m, "fable")
+}
+
+// claudeIs200k reports whether a Claude model m is one of the 200k ones: Haiku
+// 4.5 and older. Current Claude models (4.6 generation onward, and every 5.x)
+// hold 1M, so they are not matched here. The Claude API model table, cached
+// 2026-11-03, is the source; a harness reports its own window from 0.7.
+func claudeIs200k(m string) bool {
+	switch {
+	case strings.Contains(m, "claude-3"): // the Claude 3 generation
+		return true
+	case strings.Contains(m, "haiku") && strings.Contains(m, "4-5"): // Haiku 4.5
+		return true
+	case strings.Contains(m, "-4-0") || strings.Contains(m, "-4-1"): // the 4.0 / 4.1 generation
+		return true
+	default:
+		return false
 	}
 }
 
