@@ -4,7 +4,7 @@ Thank you for helping keep AgentBus safe.
 
 ## Report a vulnerability privately
 
-Email **hello@staysup.io**. Do not open a public issue for a security problem.
+Email **security@staysup.io**. Do not open a public issue for a security problem.
 
 Please include:
 
