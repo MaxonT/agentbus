@@ -481,7 +481,8 @@ func start(c config) (*service, error) {
 		// wins over the variable an agent names.
 		creds := credentials.Plug{credentials.AccessOpenRouter: credentials.KeyFirst{Kept: subs, Env: credentials.Env{Getenv: c.getenvOr()}},
 			credentials.AccessSubscription: subs, credentials.AccessAPI: credentials.APIKeys{Kept: subs, Of: apiKeys}}
-		js, err := jobs.New(jobs.Config{Queue: q, Token: token, EnrollToken: enrollToken, Heartbeat: c.heartbeat, Agents: saved, Settings: cfgStore,
+		js, err := jobs.New(jobs.Config{Queue: q, Token: token, EnrollToken: enrollToken, Version: build(debug.ReadBuildInfo()).Version,
+			Heartbeat: c.heartbeat, Agents: saved, Settings: cfgStore,
 			Folders: issuer, Blobs: bs, Sweeper: blobSweep, Record: st, Relay: relay, Credentials: creds})
 		if err != nil {
 			closeQ()
@@ -969,7 +970,8 @@ func (s *service) startRunner(c config, self, enrollToken string, svcLog *logfil
 		return err
 	}
 	cfg := runner.Config{Queue: self, EnrollToken: enrollToken, Name: name, Capacity: capacity,
-		Engine: s.eng, Store: s.store, Logf: svcLog.Printf, Labels: c.labels,
+		Version: build(debug.ReadBuildInfo()).Version,
+		Engine:  s.eng, Store: s.store, Logf: svcLog.Printf, Labels: c.labels,
 		LookPath: c.lookPath, Environ: c.environ,
 		Workdir: filepath.Join(c.home, copiesDir), OldWorkdir: filepath.Join(c.home, oldCopiesDir), StateFile: filepath.Join(c.home, runnerState), Settings: s.settings,
 		Forward: c.mode == modeRunner, NoSecrets: c.noSecrets(), Sandbox: c.canSandbox}

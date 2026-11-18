@@ -125,12 +125,13 @@ type ApplyState struct {
 	Error     string                `json:"error,omitempty" doc:"Why it was refused or failed."`
 }
 
-const (
-	// maxToolInput: a tool call's input is left out past this, with input_left_out.
-	maxToolInput = 4 << 10
-	// maxDiffPages bounds the event pages read for one turn's activity.
-	maxDiffPages = 200
-)
+// maxToolInput: a tool call's input is left out past this, with input_left_out.
+const maxToolInput = 4 << 10
+
+// activityPageLimit is the events a page of buildActivity reads, 1000 in
+// production. A test lowers it to reach many pages with few events, since
+// buildActivity now reads every page, with no cap on their number.
+var activityPageLimit = 1000
 
 // GET /api/v0/turns/<id>/diff: one turn's summary; its lists page elsewhere.
 func (a *API) turnDiff(w http.ResponseWriter, r *http.Request, id string) {
@@ -220,7 +221,8 @@ type activity struct {
 }
 
 // buildActivity reads a turn's model calls, tool calls and commands from its
-// events, every one. maxDiffPages bounds the pages read, as before.
+// events, every one: it pages to the end, so a later call after many tool
+// events is counted and listed, never dropped by a page cap.
 func (a *API) buildActivity(turn, session string) (*activity, error) {
 	f := store.Filter{Turn: turn, TurnSession: session}
 	out := &activity{Models: []ModelCount{}, Calls: []ModelCall{}, Tools: []ToolCall{}}
@@ -231,8 +233,8 @@ func (a *API) buildActivity(turn, session string) (*activity, error) {
 	// so a refusal waits here for its call.
 	refused := map[string]string{}
 	var after int64
-	for range maxDiffPages {
-		recs, more, err := a.cfg.Store.Page(after, f, 1000, store.PageBytes)
+	for {
+		recs, more, err := a.cfg.Store.Page(after, f, activityPageLimit, store.PageBytes)
 		if err != nil {
 			return nil, err
 		}

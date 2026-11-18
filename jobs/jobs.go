@@ -80,6 +80,10 @@ type Config struct {
 	Queue       *queue.Queue
 	Token       string // the main token: it keys the turn tokens of runners' turns (tokens.go)
 	EnrollToken string // adds a runner
+	// Version is control's release, such as 0.6.0. It is told to a runner when
+	// it enrolls, so a runner newer than control refuses to start (upgrade
+	// control first). Empty is not told, and the runner skips the check.
+	Version string
 	// Lease and Heartbeat override the defaults, for tests. Zero keeps them.
 	Lease, Heartbeat, MaxWait time.Duration
 	// Agents are the saved agents a job's spec.agent names. Nil takes
@@ -312,6 +316,15 @@ type RunnerBeat struct {
 	Capabilities *queue.Capabilities `json:"capabilities,omitempty"`
 }
 
+// RunnerBeatReply is the heartbeat's answer: the runner's updated record and
+// control's version. The runner fields are flat, so a runner before 0.6 reads
+// its record and ignores control_version; a 0.6 runner refuses a control older
+// than itself, from this on the saved-identity path as from the enroll reply.
+type RunnerBeatReply struct {
+	queue.Runner
+	ControlVersion string `json:"control_version,omitempty"`
+}
+
 func (s *Server) runnerBeat(w http.ResponseWriter, r *http.Request, rn queue.Runner) {
 	var b RunnerBeat
 	if !decode(r, &b) || b.Capacity < 1 || b.Capacity > MaxCapacity {
@@ -333,7 +346,7 @@ func (s *Server) runnerBeat(w http.ResponseWriter, r *http.Request, rn queue.Run
 		s.internal(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, got)
+	writeJSON(w, http.StatusOK, RunnerBeatReply{Runner: got, ControlVersion: s.cfg.Version})
 }
 
 // runnerSettings sends a runner the policy and the instructions, read fresh,
@@ -393,6 +406,9 @@ type Enrolled struct {
 	Token     string       `json:"token"`
 	Heartbeat int64        `json:"heartbeat_ms"`
 	Lease     int64        `json:"lease_ms"`
+	// ControlVersion is control's release, for the runner to refuse a control
+	// older than itself. Absent when control does not know its release.
+	ControlVersion string `json:"control_version,omitempty"`
 }
 
 // runnerTokenPrefix marks a runner token.
@@ -420,7 +436,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.enrolled(rn)
-	writeJSON(w, http.StatusCreated, Enrolled{rn, rt, s.cfg.Heartbeat.Milliseconds(), s.cfg.Lease.Milliseconds()})
+	writeJSON(w, http.StatusCreated, Enrolled{Runner: rn, Token: rt, Heartbeat: s.cfg.Heartbeat.Milliseconds(),
+		Lease: s.cfg.Lease.Milliseconds(), ControlVersion: s.cfg.Version})
 }
 
 // checkEnroll says what is wrong with an enroll or a sign-in's body, or "".
