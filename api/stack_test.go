@@ -32,6 +32,7 @@ type stack struct {
 	before func(st *store.Store)
 	// settings, when set, is the settings store, in place of permissions.
 	settings settings.Store
+	homes    string
 }
 
 // stackEnv is an API on loopback with a whole stack behind it.
@@ -59,8 +60,12 @@ func stackEnv(t *testing.T, s stack) *env {
 	if s.settings != nil {
 		cfgStore = s.settings
 	}
-	eng, err := run.New(run.Config{Store: st, BaseURL: base, Wire: s.wire, MaxRuns: s.maxRuns, Settings: cfgStore,
-		RunGrace: s.grace})
+	runCfg := run.Config{Store: st, BaseURL: base, Wire: s.wire, MaxRuns: s.maxRuns, Settings: cfgStore,
+		RunGrace: s.grace}
+	if s.homes != "" {
+		runCfg.Homes = s.homes
+	}
+	eng, err := run.New(runCfg)
 	if err != nil {
 		t.Fatal(err)
 	}

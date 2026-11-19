@@ -236,11 +236,6 @@ func (agy) Args(t Turn) []string {
 func agySettings(t Turn) string {
 	allow := []string{}
 	var deny []string
-	for _, f := range t.ReadFolders {
-		if ruleSafe(f) {
-			allow = append(allow, "read_file("+f+")")
-		}
-	}
 	// Every turn may call the MCP servers the person copied into the
 	// session's home (Home files). Read-only turns retired in 0.6 (B12): a
 	// review runs like any turn, so it gets the mcp rule too.

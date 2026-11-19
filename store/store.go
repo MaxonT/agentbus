@@ -54,6 +54,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS events_turn_started ON events(session, turn)
 -- POST /api/v0/turns finds the turn an idempotency key started (TurnByKey).
 CREATE INDEX IF NOT EXISTS events_idempotency ON events(json_extract(data, '$.idempotency_key'))
 	WHERE kind = 'turn.started';
+CREATE TABLE IF NOT EXISTS folder_grants (
+	id      TEXT PRIMARY KEY,
+	session TEXT NOT NULL,
+	folder  TEXT NOT NULL,
+	created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS folder_grants_session ON folder_grants(session);
+CREATE INDEX IF NOT EXISTS folder_grants_folder ON folder_grants(folder);
+CREATE UNIQUE INDEX IF NOT EXISTS folder_grants_unique ON folder_grants(session, folder);
 `
 
 // Store is one events file. It is safe for concurrent use.

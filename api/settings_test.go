@@ -94,7 +94,7 @@ func TestSettingsPolicyReadWrite(t *testing.T) {
 
 	// Nothing changed yet: every default.
 	resp, out := send(t, e, "GET", "/api/v0/settings/permissions", "", "")
-	if resp.StatusCode != 200 || !strings.Contains(out, `"edit":"session"`) || !strings.Contains(out, `"read_folders":[]`) {
+	if resp.StatusCode != 200 || !strings.Contains(out, `"edit":"session"`) {
 		t.Fatalf("GET with nothing changed: %d %s", resp.StatusCode, out)
 	}
 	v0 := resp.Header.Get("ETag")
@@ -119,7 +119,6 @@ func TestSettingsPolicyReadWrite(t *testing.T) {
 		{`{"limits":{"max_depth":-1}}`, "max_depth must be 0 or more"},
 		{`{"forbid":"git push"}`, "forbid has the wrong type"},
 		{`{"allow":["go test:*"]}`, `allow entry "go test:*" has a star`},
-		{`{"read_folders":["notes"]}`, `read_folders entry "notes" must be an absolute path`},
 		{`{"agent_api":{"apply":"yes"}}`, "agent_api.apply has the wrong type"},
 		{`{"allowed":[]}`, `unknown key "allowed"`},
 		{`[]`, "one JSON object"},
@@ -138,9 +137,9 @@ func TestSettingsPolicyReadWrite(t *testing.T) {
 	}
 
 	// A good write: the reply is the policy as stored, with a new version.
-	resp, out = send(t, e, "PUT", "/api/v0/settings/permissions", v0, `{"read_folders":["~/notes"],"forbid":["git push"],"limits":{"max_depth":1}}`)
+	resp, out = send(t, e, "PUT", "/api/v0/settings/permissions", v0, `{"ask":["git pull"],"forbid":["git push"],"limits":{"max_depth":1}}`)
 	if resp.StatusCode != 200 || !strings.Contains(out, `"forbid":["git push"]`) || !strings.Contains(out, `"max_depth":1`) ||
-		!strings.Contains(out, `"max_jobs_per_turn":10`) || !strings.Contains(out, `"read_folders":["~/notes"]`) {
+		!strings.Contains(out, `"max_jobs_per_turn":10`) || !strings.Contains(out, `"ask":["git pull"]`) {
 		t.Fatalf("PUT: %d %s", resp.StatusCode, out)
 	}
 	v1 := resp.Header.Get("ETag")
@@ -152,13 +151,13 @@ func TestSettingsPolicyReadWrite(t *testing.T) {
 	}
 	// The change is in the record when the reply comes: keys, not values.
 	evs := settingsEvents(t, e.store)
-	if len(evs) != 1 || evs[0].Setting != "permissions" || strings.Join(evs[0].Keys, ",") != "forbid,limits.max_depth,read_folders" ||
+	if len(evs) != 1 || evs[0].Setting != "permissions" || strings.Join(evs[0].Keys, ",") != "ask,forbid,limits.max_depth" ||
 		evs[0].SettingsVersion != 1 || evs[0].Session != "" {
 		t.Fatalf("events %+v", evs)
 	}
 	recs, _ := e.store.After(0, store.Filter{}, 100)
 	for _, r := range recs {
-		if strings.Contains(string(r.Data), "git push") || strings.Contains(string(r.Data), "~/notes") {
+		if strings.Contains(string(r.Data), "git push") || strings.Contains(string(r.Data), "git pull") {
 			t.Fatalf("a value is in the record: %s", r.Data)
 		}
 	}
@@ -168,7 +167,7 @@ func TestSettingsPolicyReadWrite(t *testing.T) {
 		t.Fatalf("PUT with a stale version: %d %s", resp.StatusCode, out)
 	}
 	// The same policy again changes nothing: no event, no new version.
-	if resp, _ := send(t, e, "PUT", "/api/v0/settings/permissions", v1, `{"read_folders":["~/notes"],"forbid":["git push"],"limits":{"max_depth":1}}`); resp.StatusCode != 200 || resp.Header.Get("ETag") != v1 {
+	if resp, _ := send(t, e, "PUT", "/api/v0/settings/permissions", v1, `{"ask":["git pull"],"forbid":["git push"],"limits":{"max_depth":1}}`); resp.StatusCode != 200 || resp.Header.Get("ETag") != v1 {
 		t.Fatalf("the same PUT: %d %s", resp.StatusCode, resp.Header.Get("ETag"))
 	}
 	if evs := settingsEvents(t, e.store); len(evs) != 1 {

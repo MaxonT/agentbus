@@ -238,7 +238,7 @@ func (claude) Args(t Turn) []string {
 	}
 	// One --allowedTools, comma-joined (Claude Code 2.1.318,
 	// 2026-11-05): what the tools may do without asking.
-	allowed := readRules(t.ReadFolders)
+	var allowed []string
 	// edit: Edit(<folder>/**) lets Edit and Write change files there
 	// without asking; one Edit rule covers every built-in tool that
 	// edits files. Without it a -p turn cannot edit at all: nobody
@@ -345,22 +345,6 @@ func claudeTools(url string) []string {
 		return nil
 	}
 	return []string{"mcp__" + ToolServer}
-}
-
-// readRules is Claude Code's rules that let Read, Grep and Glob reach each
-// folder and everything under it without asking: Read(//<folder>/**), with
-// "//" marking an absolute path. They grant reading only. --add-dir is not
-// used: it makes the folder a working folder, which under the person's
-// acceptEdits mode lets a turn write there too (Claude Code 2.1.319,
-// 2026-11-07, checked live, found in review). A Read rule alone does not
-// cover Grep, so each tool gets its own.
-func readRules(folders []string) []string {
-	var rules []string
-	for _, f := range folders {
-		p := "/" + strings.TrimSuffix(f, "/") + "/**"
-		rules = append(rules, "Read("+p+")", "Grep("+p+")", "Glob("+p+")")
-	}
-	return rules
 }
 
 // ruleSafe says p can go inside a Claude Code rule as it is: a comma or a

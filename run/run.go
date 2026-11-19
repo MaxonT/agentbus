@@ -823,9 +823,9 @@ func (e *Engine) start(t turn) (*Turn, error) {
 		if why != "" {
 			e.cfg.Logf("run.refused agent=%s reason=sandbox auto=%t", t.harness, autoWall)
 			if autoWall {
-				return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Grant a folder the agent needs under read_folders in the cockpit's Settings (Isolation), fix it on this runner, or turn Network contain off in the cockpit's Settings (Isolation, Network).")
+				return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn Network contain off in the cockpit's Settings (Isolation, Network).")
 			}
-			return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Grant a folder the agent needs under read_folders in the cockpit's Settings (Isolation), fix it on this runner, or turn Sandbox off in the cockpit's Settings (Isolation).")
+			return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or turn Sandbox off in the cockpit's Settings (Isolation).")
 		}
 		jail = box
 		cmd.Env = setEnv(cmd.Env, box.Env())
@@ -1035,7 +1035,7 @@ func (e *Engine) sandbox(p settings.Policy, lead, session, folder string, readOn
 		return nil, lead + ", and this session has no home of its own: it began before homes"
 	}
 	net = wallNet(p, offline, net)
-	box, err := sandbox.New(sandbox.Spec{Copy: folder, ReadOnly: readOnly, Home: home, Read: append(read, p.ReadFolders...), Net: net})
+	box, err := sandbox.New(sandbox.Spec{Copy: folder, ReadOnly: readOnly, Home: home, Read: read, Net: net})
 	if err != nil {
 		return nil, err.Error()
 	}
@@ -1249,7 +1249,7 @@ func turnArgs(h harness.Harness, hint, resumeID, model string, w Writes, perm se
 // turnSpec is what a turn's command line is built from (turnArgs).
 func turnSpec(hint, resumeID, model string, w Writes, perm settings.Policy, prompt string) harness.Turn {
 	return harness.Turn{Hint: hint, ResumeID: resumeID, Model: model, Writes: w,
-		ReadFolders: perm.ReadFolders, Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid,
+		Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid,
 		NoSubagents: perm.Subagents != nil && !*perm.Subagents, Walled: perm.Sandbox.Mode == settings.SandboxOn, Prompt: prompt}
 }
 

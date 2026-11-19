@@ -30,19 +30,18 @@ func defaultPolicy() Policy {
 	num := func(n int) *int { return &n }
 	cost := 0.0
 	return Policy{
-		ReadFolders: []string{},
-		Allow:       []string{},
-		Ask:         []string{},
-		Forbid:      []string{},
-		Unlisted:    UnlistedAsk,
-		Edit:        EditSession,
-		Isolation:   IsolationAuto,
-		Subagents:   off(),
-		HomeFiles:   []string{},
-		Limits:      Limits{MaxDepth: num(2), MaxJobsPerTurn: num(10), MaxJobsPerTree: num(30), MaxCostUSDPerTree: &cost},
-		AgentAPI:    AgentAPI{Apply: off(), Tools: on()},
-		Network:     Network{Contain: ContainOff, Allow: []string{}},
-		Sandbox:     Sandbox{Mode: SandboxOff},
+		Allow:     []string{},
+		Ask:       []string{},
+		Forbid:    []string{},
+		Unlisted:  UnlistedAsk,
+		Edit:      EditSession,
+		Isolation: IsolationAuto,
+		Subagents: off(),
+		HomeFiles: []string{},
+		Limits:    Limits{MaxDepth: num(2), MaxJobsPerTurn: num(10), MaxJobsPerTree: num(30), MaxCostUSDPerTree: &cost},
+		AgentAPI:  AgentAPI{Apply: off(), Tools: on()},
+		Network:   Network{Contain: ContainOff, Allow: []string{}},
+		Sandbox:   Sandbox{Mode: SandboxOff},
 	}
 }
 
@@ -96,6 +95,10 @@ var upgradeSteps = []upgradeStep{
 	// the folder copy-on-write, so a big node_modules costs nothing to copy,
 	// and a turn may now write its own.
 	{Key: "share_read_only", Retired: true},
+	// 0.6: read_folders is retired with B8 folder access tools (read_file,
+	// list_folder, write_file). Access outside the sandbox is granted per
+	// folder on control, never through a machine-wide setting.
+	{Key: "read_folders", Retired: true},
 }
 
 // retiredKeys are the policy keys an older build had and this one does not:

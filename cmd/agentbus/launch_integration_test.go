@@ -94,7 +94,7 @@ func TestLaunchGolden(t *testing.T) {
 	relayed := func(r *engine.Request) { r.Token, r.StandIn = "abr_test-token", "abs_test-standin" }
 	// access api there: control's relay adds the key set in Settings.
 	apiKey := func(r *engine.Request) { relayed(r); r.Access = "api" }
-	lists := "read_folders = [\"<readfolder>\"]\nallow = [\"go test\", \"git commit\"]\nforbid = [\"git push\", \"rm -rf\"]\n"
+	lists := "allow = [\"go test\", \"git commit\"]\nforbid = [\"git push\", \"rm -rf\"]\n"
 	var cases []launchCase
 	for _, h := range []string{"claude", "codex"} {
 		cases = append(cases,
@@ -144,7 +144,7 @@ func TestLaunchGolden(t *testing.T) {
 				turns: []engine.Request{with(first(h), func(r *engine.Request) { r.Origin = asked })}},
 		)
 	}
-	allowOnly := "read_folders = [\"<readfolder>\"]\nallow = [\"go test\", \"git commit\"]\n"
+	allowOnly := "allow = [\"go test\", \"git commit\"]\n"
 	cases = append(cases,
 		launchCase{name: "agy subscription, then resume", turns: []engine.Request{first("agy"), next("t_2")}},
 		launchCase{name: "agy lists, model, own instructions", perm: allowOnly, instr: strp("Be brief in {session}.\n"),

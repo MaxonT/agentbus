@@ -7,7 +7,6 @@ package run
 //
 // What each list becomes, per harness (the flags are built in harness/):
 //
-//	read_folders      claude: --allowedTools Read(//<folder>/**),Grep(…),Glob(…); codex: nothing (its sandbox reads every folder)
 //	allow/ask/forbid/unlisted  the gateway decides every shell command of the
 //	                  turn from these lists, for claude and codex alike
 //	                  (gateway/guard.go): forbid refused, ask held, allow run, a
@@ -21,9 +20,7 @@ package run
 //	edit = "none"     claude: --disallowedTools Edit,Write,NotebookEdit; codex: --sandbox read-only (no network)
 //	subagents = false claude: --disallowedTools Task,Agent,Workflow; codex: --disable multi_agent --disable multi_agent_v2
 //
-// read_folders only grants reads, in Claude Code's default and acceptEdits
-// modes; under the person's own auto mode it may still write there. A forbid
-// wins over an allow and over the person's own settings. Each turn's flags are
+// A forbid wins over an allow and over the person's own settings. Each turn's flags are
 // in its header line in logs/runs/<session>.log.
 
 import (

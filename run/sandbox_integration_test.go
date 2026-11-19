@@ -122,13 +122,9 @@ func TestHomeFilesTurn(t *testing.T) {
 	}
 }
 
-// A contained turn reads nothing under the real home by default: a tool kept
-// there (standing in for ~/.nvm) is unreachable until its folder is listed in
-// read_folders. His rule, 2026-11-17: nothing by default, explicit opt-in in
-// Settings. The folder is a temp dir, which the wall denies by default
-// (systemRead leaves out /private/var/folders), so "not granted" is the real
-// default, not an artefact of where the home is.
-func TestSandboxReadFoldersGrant(t *testing.T) {
+// A contained turn reads nothing under the real home or temp directories by
+// default: the sandbox stays tight, and direct shell access to outside files fails.
+func TestSandboxStaysTight(t *testing.T) {
 	canSandbox(t)
 	tool, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -138,24 +134,15 @@ func TestSandboxReadFoldersGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := `cat "` + filepath.Join(tool, "data") + `" > "$HOME/got.txt" 2>/dev/null; exit 0`
-	for _, c := range []struct {
-		name, policy, want string
-	}{
-		{"not granted", "[sandbox]\nmode = \"on\"\n", ""},
-		{"granted", "read_folders = [\"" + tool + "\"]\n[sandbox]\nmode = \"on\"\n", "TOOLDATA"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			e, _ := sandboxEngine(t, c.policy, true, script)
-			turn, err := e.Start(Request{Harness: "claude", Folder: t.TempDir(), Prompt: "hi"})
-			if err != nil {
-				t.Fatalf("Start: %v", err)
-			}
-			<-turn.Done()
-			b, _ := os.ReadFile(filepath.Join(e.cfg.Homes, turn.Session, "got.txt"))
-			if string(b) != c.want {
-				t.Fatalf("a %s tool read %q, want %q", c.name, b, c.want)
-			}
-		})
+	e, _ := sandboxEngine(t, "[sandbox]\nmode = \"on\"\n", true, script)
+	turn, err := e.Start(Request{Harness: "claude", Folder: t.TempDir(), Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	<-turn.Done()
+	b, _ := os.ReadFile(filepath.Join(e.cfg.Homes, turn.Session, "got.txt"))
+	if string(b) != "" {
+		t.Fatalf("sandbox allowed outside read: %q", b)
 	}
 }
 
