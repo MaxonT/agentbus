@@ -51,3 +51,49 @@ func TestRegistry(t *testing.T) {
 		t.Errorf("NameList = %q", got)
 	}
 }
+
+// NameList is the sentence the API and the CLI build from the registry, so its
+// join is pinned for the shapes a registry of one, two or three names gives.
+func TestNameListJoin(t *testing.T) {
+	cases := []struct {
+		names []string
+		want  string
+	}{
+		{[]string{}, ""},
+		{[]string{"agree"}, "agree"},
+		{[]string{"a", "b"}, "a or b"},
+		{[]string{"a", "b", "c"}, "a, b or c"},
+		{[]string{"a", "b", "c", "d"}, "a, b, c or d"},
+	}
+	for _, c := range cases {
+		if got := joinNames(c.names); got != c.want {
+			t.Errorf("joinNames(%q) = %q, want %q", c.names, got, c.want)
+		}
+	}
+	// The registry's own order is what a user reads in that sentence.
+	if got := Names(); len(got) == 0 || got[0] != "claude" {
+		t.Errorf("Names() starts with %v, not the first registered harness", got)
+	}
+}
+
+// Offers is true only for a kind the harness lists and does not disable.
+func TestOffers(t *testing.T) {
+	info := Info{Access: []Access{
+		{Kind: Subscription},
+		{Kind: OpenRouter, Disabled: true},
+	}}
+	cases := []struct {
+		kind string
+		want bool
+	}{
+		{"", true}, // "" means the subscription
+		{Subscription, true},
+		{OpenRouter, false}, // listed, but disabled
+		{API, false},        // absent
+	}
+	for _, c := range cases {
+		if got := Offers(info, c.kind); got != c.want {
+			t.Errorf("Offers(%q) = %t, want %t", c.kind, got, c.want)
+		}
+	}
+}
