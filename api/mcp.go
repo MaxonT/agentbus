@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/staysup/agentbus/event"
+	"github.com/staysup/agentbus/gateway"
 	"github.com/staysup/agentbus/harness"
 	"github.com/staysup/agentbus/settings"
 )
@@ -181,21 +182,23 @@ func rpcID(id json.RawMessage) bool {
 	return false
 }
 
-// mayApply says r's token may apply a turn: its [agent_api] apply is on (the
+// mayApply says r's token may apply a turn: its agent_api.apply switch is on (the
 // same test authorize makes, api/tokens.go). B11 removed the apply_turn tool,
 // so this reads the policy, not whether that tool lists.
 func (a *API) mayApply(r *http.Request) bool {
-	ap := policyOf(r).AgentAPI.Apply
-	return ap != nil && *ap
+	perm := policyOf(r)
+	return perm.AgentAPI.Apply != nil && *perm.AgentAPI.Apply
 }
 
 // toolList is the tools r's token sees (listedRoute).
 func (a *API) toolList(r *http.Request) []mcpTool {
 	g, turnsOnly := grantOf(r), a.turnsOnly(r)
 	perm := policyOf(r)
+	rules := gateway.Rules{Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid}
 	out := []mcpTool{}
+	apply := perm.AgentAPI.Apply != nil && *perm.AgentAPI.Apply
 	for _, st := range a.toolSnap.Load().list {
-		if !listedRoute(st.rt, g, turnsOnly, perm.AgentAPI) {
+		if !listedRoute(st.rt, g, turnsOnly, rules, apply) {
 			continue
 		}
 		out = append(out, mcpTool{Name: st.def.Name, Title: st.rt.summary, Description: st.def.Description,

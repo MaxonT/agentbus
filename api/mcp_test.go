@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/staysup/agentbus/gateway"
 	"github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/settings"
 	"github.com/staysup/agentbus/store"
@@ -36,12 +37,18 @@ func mcpEnvTools(t *testing.T, tools bool) *env {
 }
 
 // mcpEnvGrants is an API whose runner tokens are grants' keys, each with its
-// grant, and [agent_api] tools as given.
+// grant, and tool:* rule as given.
 func mcpEnvGrants(t *testing.T, tools bool, grants map[string]run.Grant) *env {
 	t.Helper()
 	dir := t.TempDir()
 	p := settings.FirstInstallPolicy() // a fresh install's policy
-	p.AgentAPI.Tools = &tools
+	if tools {
+		p.Allow = append(p.Allow, "tool:*")
+		p.Forbid = slices.DeleteFunc(p.Forbid, func(s string) bool { return s == "tool:*" })
+	} else {
+		p.Allow = slices.DeleteFunc(p.Allow, func(s string) bool { return s == "tool:*" })
+		p.Forbid = append(p.Forbid, "tool:*")
+	}
 	if err := os.WriteFile(filepath.Join(dir, settings.PolicyFile), settings.FormatPolicy(p), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -140,36 +147,32 @@ func TestMCPToolListFollowsTheToken(t *testing.T) {
 	}
 }
 
-// Every remaining tool is listed to a turn token within its tree; tools =
-// false refuses the tool server, naming the switch as Settings shows it. (B11
+// Every remaining tool is listed to a turn token within its tree; tools
+// refused refuses the tool server, naming the switch as Settings shows it. (B11
 // removed the write route copies, so there is no apply_turn to gate off.)
 func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 	e := mcpEnv(t)
 	g := &run.Grant{Session: "s1", Root: "s1"}
-	names := func(api settings.AgentAPI) []string {
+	names := func(rules gateway.Rules) []string {
 		var out []string
 		for _, st := range e.api.toolSnap.Load().list {
-			if listedRoute(st.rt, g, false, api) {
+			if listedRoute(st.rt, g, false, rules, false) {
 				out = append(out, st.def.Name)
 			}
 		}
 		return out
 	}
-	off := func(set func(*settings.AgentAPI)) settings.AgentAPI {
-		p := settings.DefaultPolicy()
-		yes := true
-		p.AgentAPI.Apply = &yes // every switch on, then one off
-		set(&p.AgentAPI)
-		return p.AgentAPI
+	defaultRules := gateway.Rules{
+		Allow:  []string{"tool:*", "tool:edit"},
+		Forbid: []string{"tool:subagent"},
 	}
-	no := false
 	for _, tc := range []struct {
-		api  settings.AgentAPI
-		gone []string
+		rules gateway.Rules
+		gone  []string
 	}{
-		{off(func(a *settings.AgentAPI) {}), nil},
+		{defaultRules, nil},
 	} {
-		got := names(tc.api)
+		got := names(tc.rules)
 		for _, n := range tc.gone {
 			if slices.Contains(got, n) {
 				t.Errorf("%s listed with its switch off: %v", n, got)
@@ -179,9 +182,13 @@ func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 			t.Errorf("%v: %d tools, want %d", tc.gone, len(got), n-len(tc.gone))
 		}
 	}
-	// tools = false refuses the tool server to a turn token, naming the
+	// tool:* refused refuses the tool server to a turn token, naming the
 	// switch as Settings shows it.
-	if msg := turnRefusal(toolList, off(func(a *settings.AgentAPI) { a.Tools = &no })); !strings.Contains(msg, "AgentBus tools is off in Settings (Permissions)") ||
+	toolListRoute := &route{turn: toolList}
+	forbidTools := gateway.Rules{
+		Forbid: []string{"tool:*"},
+	}
+	if msg := turnRefusal(toolListRoute, forbidTools, false); !strings.Contains(msg, "AgentBus tools is off in Settings (Permissions)") ||
 		strings.Contains(msg, "permissions.toml") {
 		t.Errorf("tools off: %q", msg)
 	}
@@ -332,11 +339,11 @@ func TestMCPRefusesABadID(t *testing.T) {
 	}
 }
 
-// With tools = false the tool server refuses a turn token; the main token
-// still reaches it. tools is on by default from 0.5.2.
+// With tools refused the tool server refuses a turn token; the main token
+// still reaches it. tools is allowed by default.
 func TestMCPOff(t *testing.T) {
-	if p := settings.DefaultPolicy(); !*p.AgentAPI.Tools {
-		t.Fatal("tools is off by default")
+	if p := settings.DefaultPolicy(); !slices.Contains(p.Allow, "tool:*") {
+		t.Fatal("tool:* is not allowed by default")
 	}
 	e := mcpEnvTools(t, false)
 	if code, _ := rpc(t, e, mcpWriteTok, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`); code != 403 {

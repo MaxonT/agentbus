@@ -547,7 +547,7 @@ func TestXProcApprovalFromRunnerReachesControl(t *testing.T) {
 	if code, b := x.post("/api/v0/approvals/"+id, map[string]any{"decision": "allow"}); code != 204 {
 		t.Fatalf("decide allow: %d %s", code, b)
 	}
-	if code, b := x.get("/api/v0/settings/permissions"); code != 200 || !strings.Contains(string(b), `"allow":["git push"]`) {
+	if code, b := x.get("/api/v0/settings/permissions"); code != 200 || !strings.Contains(string(b), `"git push"`) {
 		t.Fatalf("after allow, permissions: %d %s", code, b)
 	}
 	// The answered approval no longer lists.

@@ -48,7 +48,7 @@ const (
 	remoteWhere = "the server's settings"
 	remoteFix   = "Check that the server is up and this runner can reach it, or fix the settings on the server"
 	folderWhere = "the server's permissions, on this runner,"
-	folderFix   = "Make the folder on this runner, or change read_folders on the server"
+	folderFix   = "Make the folder on this runner, or grant access through the folder-access apps on the server"
 )
 
 // Enrolled gives the store the runner's id and token, once it has them.

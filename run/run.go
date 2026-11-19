@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/staysup/agentbus/event"
+	"github.com/staysup/agentbus/gateway"
 	"github.com/staysup/agentbus/harness"
 	"github.com/staysup/agentbus/logfile"
 	"github.com/staysup/agentbus/netjail"
@@ -746,16 +747,18 @@ func (e *Engine) start(t turn) (*Turn, error) {
 		e.cfg.Logf("run.refused agent=%s reason=home_files", t.harness)
 		return nil, refuse(http.StatusBadRequest, why+", so the turn did not start. Fix it on this runner, or change Home files in the cockpit's Settings.")
 	}
-	// The tool server ([agent_api] tools), for a harness that takes it, unless
+	// The tool server (tool:* rule), for a harness that takes it, unless
 	// the person's own setting for the harness is in the way.
-	tools := h.Info().ToolServer && perm.AgentAPI.Tools != nil && *perm.AgentAPI.Tools
+	rules := gateway.Rules{Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid}
+	toolDec, _ := gateway.DecideTool(rules, "tool:*")
+	tools := h.Info().ToolServer && toolDec == gateway.Allow
 	if tools {
 		if why := h.OwnTools(cmd.Env, t.folder); why != "" {
 			tools = false
 			e.cfg.Logf("run.tools session=%s turn=%s left_out=%s", t.session, t.id, why)
 		}
 	}
-	// The turn may apply as its token may: [agent_api] apply on. A review's
+	// The turn may apply as its token may: agent_api.apply is on. A review's
 	// own changes stay in its copy; it never applies them automatically.
 	apply := perm.AgentAPI.Apply != nil && *perm.AgentAPI.Apply
 	hint = withTools(hint, t.session, tools, apply)
@@ -1248,9 +1251,13 @@ func turnArgs(h harness.Harness, hint, resumeID, model string, w Writes, perm se
 
 // turnSpec is what a turn's command line is built from (turnArgs).
 func turnSpec(hint, resumeID, model string, w Writes, perm settings.Policy, prompt string) harness.Turn {
+	rules := gateway.Rules{Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid}
+	// Temporary glue: mapping tool:subagent to harness NoSubagents until AgentBus's own loop replaces each harness.
+	subDec, _ := gateway.DecideTool(rules, "tool:subagent")
+	noSubagents := subDec != gateway.Allow
 	return harness.Turn{Hint: hint, ResumeID: resumeID, Model: model, Writes: w,
 		Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid,
-		NoSubagents: perm.Subagents != nil && !*perm.Subagents, Walled: perm.Sandbox.Mode == settings.SandboxOn, Prompt: prompt}
+		NoSubagents: noSubagents, Walled: perm.Sandbox.Mode == settings.SandboxOn, Prompt: prompt}
 }
 
 // withAPI is perm with the agent's way to the API on the allow list, on every

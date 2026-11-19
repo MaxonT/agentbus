@@ -85,9 +85,9 @@ var turnTokenDoc = map[int]string{
 		"The review's result comes back to the asking session as a later turn. Caps: " + askCaps,
 	askedTurn:     "A turn token may stop only a turn its request tree asked for.",
 	anyRead:       "A turn token may call this too.",
-	applyTurnTok:  "A turn token may call this for a turn of a session in its request tree only when [agent_api] apply is on (off by default).",
+	applyTurnTok:  "A turn token may call this for a turn of a session in its request tree only when the Agents may apply switch is on in Settings (Permissions) (off by default).",
 	renameSession: "A turn token may rename a session in its request tree. It never closes one.",
-	toolList: "A turn token may call this: its list holds the tools its turn may call under [agent_api] (none of them when tools is false), " +
+	toolList: "A turn token may call this: its list holds the tools its turn may call under permissions (none of them when tool:* is refused), " +
 		"and each call is checked by the operation it names.",
 }
 

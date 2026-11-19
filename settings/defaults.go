@@ -3,6 +3,7 @@ package settings
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -25,21 +26,18 @@ import (
 // defaultPolicy is the policy of a person who changed nothing, written out
 // in full, so a change of fill() cannot change it.
 func defaultPolicy() Policy {
-	on := func() *bool { b := true; return &b }
-	off := func() *bool { b := false; return &b }
 	num := func(n int) *int { return &n }
 	cost := 0.0
+	off := false
 	return Policy{
-		Allow:     []string{},
+		Allow:     append([]string(nil), defaultAllow...),
 		Ask:       []string{},
-		Forbid:    []string{},
+		Forbid:    append([]string(nil), defaultForbid...),
 		Unlisted:  UnlistedAsk,
-		Edit:      EditSession,
 		Isolation: IsolationAuto,
-		Subagents: off(),
 		HomeFiles: []string{},
+		AgentAPI:  AgentAPI{Apply: &off},
 		Limits:    Limits{MaxDepth: num(2), MaxJobsPerTurn: num(10), MaxJobsPerTree: num(30), MaxCostUSDPerTree: &cost},
-		AgentAPI:  AgentAPI{Apply: off(), Tools: on()},
 		Network:   Network{Contain: ContainOff, Allow: []string{}},
 		Sandbox:   Sandbox{Mode: SandboxOff},
 	}
@@ -50,7 +48,8 @@ func defaultPolicy() Policy {
 // key is gone from the policy: the step removes it from the stored policy,
 // and Old is not used. A retired step with MovedTo names the key that holds
 // its value now: the step writes the stored value there, unless the person
-// set that key, before it removes the old one.
+// set that key, before it removes the old one. Convert transforms a retired
+// key's stored value into other policy keys (such as rules).
 type upgradeStep struct {
 	Key     string
 	Old     json.RawMessage
@@ -99,6 +98,157 @@ var upgradeSteps = []upgradeStep{
 	// list_folder, write_file). Access outside the sandbox is granted per
 	// folder on control, never through a machine-wide setting.
 	{Key: "read_folders", Retired: true},
+	// 0.6: switches become rules (B16). agent_api.tools,
+	// subagents and edit become shipped default rules in the one list.
+	{Key: "agent_api.tools", Retired: true},
+	{Key: "subagents", Retired: true},
+	{Key: "edit", Retired: true},
+}
+
+const stepSwitchesToRules = 14
+
+func getRuleList(o flat, key string, def []string) []string {
+	raw, ok := o[key]
+	if !ok {
+		return append([]string(nil), def...)
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return append([]string(nil), def...)
+	}
+	return list
+}
+
+func putRuleList(o flat, key string, list []string) {
+	b, _ := json.Marshal(list)
+	o[key] = b
+}
+
+func addRule(list []string, item string) []string {
+	if !slices.Contains(list, item) {
+		return append(list, item)
+	}
+	return list
+}
+
+func removeRule(list []string, item string) []string {
+	return slices.DeleteFunc(list, func(s string) bool { return s == item })
+}
+
+// convert06Switches converts legacy 0.5 switches into 0.6 rules on overlay o.
+func convert06Switches(o flat) (modified, removed []string) {
+	_, hasAllow := o["allow"]
+	_, hasForbid := o["forbid"]
+
+	toolsVal := true
+	hasTools := false
+	if raw, ok := o["agent_api.tools"]; ok {
+		hasTools = true
+		_ = json.Unmarshal(raw, &toolsVal)
+	}
+
+	var subagentsVal bool
+	hasSubagents := false
+	if raw, ok := o["subagents"]; ok {
+		hasSubagents = true
+		_ = json.Unmarshal(raw, &subagentsVal)
+	}
+
+	editVal := "session"
+	hasEdit := false
+	if raw, ok := o["edit"]; ok {
+		hasEdit = true
+		_ = json.Unmarshal(raw, &editVal)
+	}
+
+	if !hasTools && !hasSubagents && !hasEdit && !hasAllow {
+		return nil, nil
+	}
+
+	// 1. Process allow
+	if hasAllow {
+		origAllow := getRuleList(o, "allow", nil)
+		allow := append([]string(nil), origAllow...)
+		if toolsVal {
+			allow = addRule(allow, "tool:*")
+		} else {
+			allow = removeRule(allow, "tool:*")
+		}
+		if editVal == "session" {
+			allow = addRule(allow, "tool:edit")
+		} else if editVal == "none" {
+			allow = removeRule(allow, "tool:edit")
+			ask := getRuleList(o, "ask", []string{})
+			ask = addRule(ask, "tool:edit")
+			putRuleList(o, "ask", ask)
+			modified = append(modified, "ask")
+		}
+		if hasSubagents && subagentsVal {
+			allow = addRule(allow, "tool:subagent")
+		}
+		if !slices.Equal(origAllow, allow) {
+			putRuleList(o, "allow", allow)
+			modified = append(modified, "allow")
+		}
+	} else {
+		if (hasTools && !toolsVal) || (hasEdit && editVal == "none") || (hasSubagents && subagentsVal) {
+			allow := getRuleList(o, "allow", defaultAllow)
+			if hasTools && !toolsVal {
+				allow = removeRule(allow, "tool:*")
+			}
+			if hasEdit && editVal == "none" {
+				allow = removeRule(allow, "tool:edit")
+				ask := getRuleList(o, "ask", []string{})
+				ask = addRule(ask, "tool:edit")
+				putRuleList(o, "ask", ask)
+				modified = append(modified, "ask")
+			}
+			if hasSubagents && subagentsVal {
+				allow = addRule(allow, "tool:subagent")
+			}
+			putRuleList(o, "allow", allow)
+			modified = append(modified, "allow")
+		}
+	}
+
+	// 2. Process forbid
+	if hasForbid {
+		origForbid := getRuleList(o, "forbid", nil)
+		forbid := append([]string(nil), origForbid...)
+		if hasSubagents && subagentsVal {
+			forbid = removeRule(forbid, "tool:subagent")
+		} else if (hasSubagents && !subagentsVal) || hasAllow {
+			forbid = addRule(forbid, "tool:subagent")
+		}
+		if hasTools && !toolsVal {
+			forbid = addRule(forbid, "tool:*")
+		}
+		if !slices.Equal(origForbid, forbid) {
+			putRuleList(o, "forbid", forbid)
+			modified = append(modified, "forbid")
+		}
+	} else {
+		if (hasSubagents && subagentsVal) || (hasTools && !toolsVal) {
+			forbid := getRuleList(o, "forbid", defaultForbid)
+			if hasSubagents && subagentsVal {
+				forbid = removeRule(forbid, "tool:subagent")
+			}
+			if hasTools && !toolsVal {
+				forbid = addRule(forbid, "tool:*")
+			}
+			putRuleList(o, "forbid", forbid)
+			modified = append(modified, "forbid")
+		}
+	}
+
+	// 3. Delete retired keys
+	for _, key := range []string{"agent_api.tools", "subagents", "edit"} {
+		if _, ok := o[key]; ok {
+			delete(o, key)
+			removed = append(removed, key)
+		}
+	}
+	return modified, removed
 }
 
 // retiredKeys are the policy keys an older build had and this one does not:
@@ -176,13 +326,13 @@ func place(top map[string]json.RawMessage, key string, v json.RawMessage) error 
 }
 
 // withMoved is the JSON object b with the value of each moved key under its
-// new name, unless b sets the new name too. The old name stays, for
-// withoutRetired to leave out. b itself when it holds none or is not an
-// object (the decoder then says what is wrong).
-func withMoved(b []byte) []byte {
+// new name, unless b sets the new name too. The old name stays, for withoutRetired to
+// leave out. b itself when it holds none or is not an object (the decoder then
+// says what is wrong).
+func withMoved(b []byte) ([]byte, error) {
 	var top map[string]json.RawMessage
 	if json.Unmarshal(b, &top) != nil {
-		return b
+		return b, nil
 	}
 	changed := false
 	for _, m := range movedKeys {
@@ -195,33 +345,79 @@ func withMoved(b []byte) []byte {
 		}
 	}
 	if !changed {
-		return b
+		return b, nil
 	}
 	out, err := json.Marshal(top)
 	if err != nil {
-		return b
+		return b, nil
 	}
-	return out
+	return out, nil
+}
+
+// extractLegacySwitches extracts legacy switch settings (agent_api.tools,
+// subagents, edit) from JSON object b before they are retired.
+func extractLegacySwitches(b []byte) (tools *bool, subagents *bool, edit *string, err error) {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(b, &top) != nil {
+		return nil, nil, nil, nil
+	}
+	if raw, ok := top["agent_api"]; ok && string(raw) != "null" {
+		var sub map[string]json.RawMessage
+		if json.Unmarshal(raw, &sub) == nil {
+			if tRaw, ok := sub["tools"]; ok && string(tRaw) != "null" {
+				var val bool
+				if err := json.Unmarshal(tRaw, &val); err != nil {
+					return nil, nil, nil, err
+				}
+				tools = &val
+			}
+		}
+	}
+	if raw, ok := top["subagents"]; ok && string(raw) != "null" {
+		var val bool
+		if err := json.Unmarshal(raw, &val); err != nil {
+			return nil, nil, nil, err
+		}
+		subagents = &val
+	}
+	if raw, ok := top["edit"]; ok && string(raw) != "null" {
+		var val string
+		if err := json.Unmarshal(raw, &val); err != nil {
+			return nil, nil, nil, err
+		}
+		if val != "session" && val != "none" {
+			return nil, nil, nil, errors.New("edit must be session or none")
+		}
+		edit = &val
+	}
+	return tools, subagents, edit, nil
 }
 
 // movedOver sets, in p decoded from the permissions.toml text b, each moved
 // key the file holds under its new name, unless the file sets the new name
-// too.
+// too, and converts retired switch settings into equivalent rules.
 func movedOver(p *Policy, b []byte, md toml.MetaData) error {
 	var patch map[string]json.RawMessage
+	getPatch := func() error {
+		if patch != nil {
+			return nil
+		}
+		var all map[string]any
+		if _, err := toml.Decode(string(b), &all); err != nil {
+			return errors.New(wrongTypeTOML)
+		}
+		j, err := json.Marshal(all)
+		if err != nil || json.Unmarshal(j, &patch) != nil {
+			return errors.New(wrongTypeTOML)
+		}
+		return nil
+	}
 	for _, m := range movedKeys {
 		if !md.IsDefined(strings.Split(m.From, ".")...) || md.IsDefined(strings.Split(m.To, ".")...) {
 			continue
 		}
-		if patch == nil {
-			var all map[string]any
-			if _, err := toml.Decode(string(b), &all); err != nil {
-				return errors.New(wrongTypeTOML)
-			}
-			j, err := json.Marshal(all)
-			if err != nil || json.Unmarshal(j, &patch) != nil {
-				return errors.New(wrongTypeTOML)
-			}
+		if err := getPatch(); err != nil {
+			return err
 		}
 		v, _ := lookup(patch, m.From)
 		out := map[string]json.RawMessage{}
@@ -233,6 +429,99 @@ func movedOver(p *Policy, b []byte, md toml.MetaData) error {
 			return errors.New(wrongTypeTOML)
 		}
 	}
+	hasTools := md.IsDefined("agent_api", "tools")
+	hasSubagents := md.IsDefined("subagents")
+	hasEdit := md.IsDefined("edit")
+
+	if !hasTools && !hasSubagents && !hasEdit {
+		return nil
+	}
+
+	toolsVal := true
+	if hasTools {
+		if err := getPatch(); err != nil {
+			return err
+		}
+		if v, ok := lookup(patch, "agent_api.tools"); ok {
+			if err := json.Unmarshal(v, &toolsVal); err != nil {
+				return errors.New(wrongTypeTOML)
+			}
+		}
+	}
+
+	var subagentsVal bool
+	if hasSubagents {
+		if err := getPatch(); err != nil {
+			return err
+		}
+		if v, ok := lookup(patch, "subagents"); ok {
+			if err := json.Unmarshal(v, &subagentsVal); err != nil {
+				return errors.New(wrongTypeTOML)
+			}
+		}
+	}
+
+	editVal := "session"
+	if hasEdit {
+		if err := getPatch(); err != nil {
+			return err
+		}
+		if v, ok := lookup(patch, "edit"); ok {
+			if err := json.Unmarshal(v, &editVal); err != nil {
+				return errors.New(wrongTypeTOML)
+			}
+			if editVal != "session" && editVal != "none" {
+				return errors.New(wrongTypeTOML)
+			}
+		}
+	}
+
+	// 1. Allow
+	if (hasTools && !toolsVal) || (hasEdit && editVal == "none") {
+		if p.Allow == nil {
+			p.Allow = []string{}
+		}
+	}
+	if toolsVal {
+		if !slices.Contains(p.Forbid, "tool:*") && !slices.Contains(p.Ask, "tool:*") {
+			p.Allow = addRule(p.Allow, "tool:*")
+		}
+	} else {
+		p.Allow = removeRule(p.Allow, "tool:*")
+	}
+	if editVal == "session" {
+		if !slices.Contains(p.Forbid, "tool:edit") && !slices.Contains(p.Ask, "tool:edit") {
+			p.Allow = addRule(p.Allow, "tool:edit")
+		}
+	} else if editVal == "none" {
+		p.Allow = removeRule(p.Allow, "tool:edit")
+		p.Ask = addRule(p.Ask, "tool:edit")
+	}
+	if hasSubagents {
+		if subagentsVal {
+			p.Allow = addRule(p.Allow, "tool:subagent")
+		} else {
+			p.Allow = removeRule(p.Allow, "tool:subagent")
+		}
+	}
+
+	// 2. Forbid
+	if hasSubagents {
+		if subagentsVal {
+			if p.Forbid == nil {
+				p.Forbid = []string{}
+			}
+			p.Forbid = removeRule(p.Forbid, "tool:subagent")
+		} else {
+			p.Forbid = addRule(p.Forbid, "tool:subagent")
+		}
+	} else if !slices.Contains(p.Allow, "tool:subagent") {
+		p.Forbid = addRule(p.Forbid, "tool:subagent")
+	}
+	if hasTools && !toolsVal {
+		p.Forbid = addRule(p.Forbid, "tool:*")
+	}
+
 	return nil
 }
 

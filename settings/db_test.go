@@ -70,7 +70,7 @@ func TestUpgradeSteps(t *testing.T) {
 		switch {
 		case st.Retired && (ok || strings.Count(st.Key, ".") > 1):
 			t.Errorf("retired step %s: the policy has the key, or it is deeper than one table", st.Key)
-		case !st.Retired && !ok:
+		case !st.Retired && !ok && !slices.Contains(retiredKeys, st.Key):
 			t.Errorf("step %s: no such key", st.Key)
 		case !st.Retired:
 			last = &upgradeSteps[i]
@@ -79,26 +79,25 @@ func TestUpgradeSteps(t *testing.T) {
 	if last != nil && string(now[last.Key]) == string(last.Old) {
 		t.Errorf("the last step %s keeps the default it changes", last.Key)
 	}
-	if strings.Join(retiredKeys, ",") != "commands,subscriptions_on_runners,agent_api.continue,sandbox.read,"+
-		"agent_api.scope,agent_api.read,agent_api.list_agents,agent_api.start,agent_api.review,agent_api.cancel,agent_api.rename,share_read_only,read_folders" {
-		t.Errorf("retired keys %v", retiredKeys)
+	wantRetired := "commands,subscriptions_on_runners,agent_api.continue,sandbox.read," +
+		"agent_api.scope,agent_api.read,agent_api.list_agents,agent_api.start,agent_api.review,agent_api.cancel,agent_api.rename,share_read_only,read_folders," +
+		"agent_api.tools,subagents,edit"
+	if strings.Join(retiredKeys, ",") != wantRetired {
+		t.Errorf("retired keys %v, want %s", retiredKeys, wantRetired)
 	}
 	for _, m := range movedKeys {
 		if _, ok := now[m.To]; !ok {
 			t.Errorf("moved step %s: no key %s", m.From, m.To)
 		}
 	}
-	if p, err := ParsePolicy([]byte("[agent_api]\ncontinue = false\nstart = false\napply = true\n")); err != nil || !*p.AgentAPI.Apply {
-		t.Errorf("a file with agent_api.continue and start: %+v %v", p.AgentAPI, err)
+	if _, err := ParsePolicy([]byte("[agent_api]\ncontinue = false\nstart = false\napply = true\n")); err != nil {
+		t.Errorf("a file with retired agent_api: %v", err)
 	}
-	if p, err := DecodePolicy([]byte(`{"agent_api":{"continue":false,"start":false,"apply":true}}`)); err != nil || !*p.AgentAPI.Apply {
-		t.Errorf("a body with agent_api.continue and start: %+v %v", p.AgentAPI, err)
+	if _, err := DecodePolicy([]byte(`{"agent_api":{"continue":false,"start":false,"apply":true}}`)); err != nil {
+		t.Errorf("a body with retired agent_api: %v", err)
 	}
 	if _, err := DecodePolicy([]byte(`{"agent_api":{"bogus":true}}`)); err == nil {
 		t.Error("an unknown key in a table was taken")
-	}
-	if p := policyBefore(0); !*p.AgentAPI.Apply {
-		t.Error("before the steps, apply is off")
 	}
 	if p := policyBefore(len(upgradeSteps)); !reflect.DeepEqual(flatten(p), now) {
 		t.Error("after every step, the policy is not the defaults")
@@ -120,7 +119,9 @@ func TestDBPolicyKeepsOnlyChanges(t *testing.T) {
 		t.Fatalf("a new database holds %s", got)
 	}
 	depth := 1
-	want := Policy{Forbid: []string{"git push"}, Limits: Limits{MaxDepth: &depth}}
+	want := DefaultPolicy()
+	want.Forbid = []string{"git push"}
+	want.Limits.MaxDepth = &depth
 	if _, _, err := d.SetPolicy(want, "stale"); !errors.Is(err, ErrChanged) {
 		t.Fatalf("stale: %v", err)
 	}
@@ -294,12 +295,12 @@ func TestChangeAndEventSavedTogether(t *testing.T) {
 // PUT can replace it.
 func TestDBBrokenPolicy(t *testing.T) {
 	d := openTestDB(t, t.TempDir())
-	if _, err := d.db.Exec(`INSERT INTO settings(name, value, updated) VALUES ('permissions', '{"edit":"everywhere"}', '')`); err != nil {
+	if _, err := d.db.Exec(`INSERT INTO settings(name, value, updated) VALUES ('permissions', '{"unlisted":"everywhere"}', '')`); err != nil {
 		t.Fatal(err)
 	}
 	_, v, err := d.Policy()
 	var se *Error
-	if !errors.As(err, &se) || !strings.Contains(se.Why, "edit") || v == "" {
+	if !errors.As(err, &se) || !strings.Contains(se.Why, "unlisted") || v == "" {
 		t.Fatalf("broken: %q %v", v, err)
 	}
 	if _, err := Read(d); !errors.As(err, &se) {
@@ -317,12 +318,12 @@ func TestDBBrokenPolicy(t *testing.T) {
 // the rest of its changes, and the stored row is not rewritten by reading.
 func TestDBRetiredCommandsKey(t *testing.T) {
 	d := openTestDB(t, t.TempDir())
-	row := `{"commands":false,"subagents":false}`
+	row := `{"commands":false}`
 	if _, err := d.db.Exec(`INSERT INTO settings(name, value, updated) VALUES ('permissions', ?, '')`, row); err != nil {
 		t.Fatal(err)
 	}
 	p, _, err := d.Policy()
-	if err != nil || *p.Subagents {
+	if err != nil {
 		t.Fatalf("policy: %+v %v", p, err)
 	}
 	if got := stored(t, d, SettingPermissions); got != row {
@@ -330,31 +331,25 @@ func TestDBRetiredCommandsKey(t *testing.T) {
 	}
 }
 
-// From 0.5.2, tools is on and subagents off by default, with no upgrade
-// step: a key the person never set takes the new default, and a value they
-// set is kept, whichever way it points.
+// Default policy has tool:* on and tool:subagent forbidden: a key the person
+// never set takes the new default, and rules they set are kept.
 func TestToolsOnSubagentsOffByDefault(t *testing.T) {
 	d := openTestDB(t, t.TempDir())
 	p, _, err := d.Policy()
-	if err != nil || !*p.AgentAPI.Tools || *p.Subagents {
-		t.Fatalf("untouched: tools %v, subagents %v, %v; want on and off", *p.AgentAPI.Tools, *p.Subagents, err)
-	}
-	for _, step := range upgradeSteps {
-		if step.Key == "agent_api.tools" || step.Key == "subagents" {
-			t.Errorf("an upgrade step for %s: an untouched key must take the new default", step.Key)
-		}
+	if err != nil || !slices.Contains(p.Allow, "tool:*") || !slices.Contains(p.Forbid, "tool:subagent") {
+		t.Fatalf("untouched: allow %v, forbid %v, %v; want tool:* allowed and tool:subagent forbidden", p.Allow, p.Forbid, err)
 	}
 	set := DefaultPolicy()
-	on, off := true, false
-	set.Subagents, set.AgentAPI.Tools = &on, &off
+	set.Allow = []string{"tool:subagent"}
+	set.Forbid = []string{"tool:*"}
 	if _, _, err := d.SetPolicy(set, Any); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := d.writeSteps(); err != nil {
 		t.Fatal(err)
 	}
-	if p, _, err := d.Policy(); err != nil || *p.AgentAPI.Tools || !*p.Subagents {
-		t.Fatalf("set: tools %v, subagents %v, %v; want the person's off and on", *p.AgentAPI.Tools, *p.Subagents, err)
+	if p, _, err := d.Policy(); err != nil || !slices.Contains(p.Allow, "tool:subagent") || !slices.Contains(p.Forbid, "tool:*") {
+		t.Fatalf("set: allow %v, forbid %v, %v; want the person's rules", p.Allow, p.Forbid, err)
 	}
 }
 
@@ -368,7 +363,7 @@ func TestChangePolicyOnlyKeysSent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	change, err := DecodePolicyChange([]byte(`{"agent_api":{"tools":true},"limits":{"max_depth":3}}`))
+	change, err := DecodePolicyChange([]byte(`{"limits":{"max_depth":3}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +374,7 @@ func TestChangePolicyOnlyKeysSent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(got.Allow, []string{"go test"}) || *got.Limits.MaxDepth != 3 || !*got.AgentAPI.Tools || *got.Subagents {
+	if !slices.Equal(got.Allow, []string{"go test"}) || *got.Limits.MaxDepth != 3 {
 		t.Fatalf("after the change: %+v", got)
 	}
 	var o map[string]json.RawMessage
@@ -387,8 +382,8 @@ func TestChangePolicyOnlyKeysSent(t *testing.T) {
 		t.Fatal(err)
 	}
 	keys := slices.Sorted(maps.Keys(o))
-	if want := []string{"agent_api.tools", "allow", "limits.max_depth"}; !slices.Equal(keys, want) {
-		t.Errorf("stored keys %v, want %v: tools is kept although it is the default", keys, want)
+	if want := []string{"allow", "limits.max_depth"}; !slices.Equal(keys, want) {
+		t.Errorf("stored keys %v, want %v", keys, want)
 	}
 	// Sending the same keys again changes nothing and makes no change row.
 	cs, _, _ := d.Changes()
@@ -402,7 +397,7 @@ func TestChangePolicyOnlyKeysSent(t *testing.T) {
 	if _, err := DecodePolicyChange([]byte(`{"nope":1}`)); err == nil {
 		t.Error("an unknown key was read")
 	}
-	bad := Policy{Edit: "everywhere"}
+	bad := Policy{Unlisted: "everywhere"}
 	if _, _, err := d.ChangePolicy(bad, Any); err == nil {
 		t.Error("a value out of range was stored")
 	}
@@ -412,8 +407,8 @@ func TestChangePolicyOnlyKeysSent(t *testing.T) {
 // a PUT is, without reading the server.
 func TestChangePolicyOnRunnerRefused(t *testing.T) {
 	r := &Remote{Server: "http://127.0.0.1:1", Local: t.TempDir()}
-	on := true
-	if _, _, err := ChangePolicy(r, Policy{Subagents: &on}, Any); !errors.Is(err, ErrReadOnly) {
+	depth := 3
+	if _, _, err := ChangePolicy(r, Policy{Limits: Limits{MaxDepth: &depth}}, Any); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("PATCH on a runner: %v, want ErrReadOnly", err)
 	}
 }

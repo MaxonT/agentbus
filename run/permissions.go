@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/staysup/agentbus/gateway"
 	"github.com/staysup/agentbus/harness"
 	"github.com/staysup/agentbus/settings"
 )
@@ -77,7 +78,9 @@ func writesFor(h harness.Harness, folder string, perm settings.Policy, protect [
 	for _, p := range protect {
 		w.Protect = appendReal(w.Protect, p)
 	}
-	if perm.Edit != settings.EditSession {
+	// Temporary glue: mapping tool:edit to harness edit writes until AgentBus's own loop replaces each harness.
+	rules := gateway.Rules{Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid}
+	if dec, _ := gateway.DecideTool(rules, "tool:edit"); dec != gateway.Allow {
 		return w, ""
 	}
 	w.Edit, why = h.Edit(appendReal(nil, folder), w.Protect)

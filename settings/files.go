@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/BurntSushi/toml"
 )
 
 // Files keeps the settings as files in a data folder.
@@ -99,7 +101,19 @@ func (f *Files) policyOver(base Policy) (Policy, error) {
 	if err != nil {
 		return Policy{}, err
 	}
-	return p.over(base)
+	res, err := p.over(base)
+	if err != nil {
+		return Policy{}, err
+	}
+	var ignored map[string]any
+	md, err := toml.Decode(string(b), &ignored)
+	if err != nil {
+		return Policy{}, err
+	}
+	if err := movedOver(&res, b, md); err != nil {
+		return Policy{}, err
+	}
+	return res, nil
 }
 
 // SetPolicy writes p as permissions.toml (FormatPolicy).

@@ -287,6 +287,7 @@ func (codex) Args(t Turn) []string {
 	// its own. Given to exec before resume it reaches the resumed turn: the
 	// turn's recorded sandbox policy follows it (codex-cli 0.164.0,
 	// 2026-11-05).
+	// Temporary glue: mapping tool:edit to codex sandbox modes (danger-full-access vs read-only).
 	// workspace-write only with an edit rule: edit = "none", or a
 	// folder codex could not be kept out of the data folder's files
 	// in, runs read-only (Edit).
@@ -339,6 +340,7 @@ func (codex) Args(t Turn) []string {
 	// Read-only turns retired in 0.6 (B12): a review loads the person's own
 	// MCP servers like any turn, as codex does, rather than turning each off
 	// for the run.
+	// Temporary glue: mapping tool:subagent to codex features multi_agent and multi_agent_v2.
 	if t.NoSubagents {
 		a = append(a, "--disable", "multi_agent", "--disable", "multi_agent_v2")
 	}

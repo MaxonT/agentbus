@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/staysup/agentbus/gateway"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/settings"
@@ -186,7 +187,9 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 		writeError(w, http.StatusServiceUnavailable, turnPolicyBroken(err))
 		return nil, false
 	}
-	if msg := turnRefusal(rt.turn, perm.AgentAPI); msg != "" {
+	rules := gateway.Rules{Allow: perm.Allow, Ask: perm.Ask, Forbid: perm.Forbid}
+	apply := perm.AgentAPI.Apply != nil && *perm.AgentAPI.Apply
+	if msg := turnRefusal(rt, rules, apply); msg != "" {
 		return refuse(msg)
 	}
 	// A review is a leaf (B12): it reviews the turn and reports a verdict, so
@@ -308,19 +311,20 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 	return r.WithContext(ctx), true
 }
 
-// turnRefusal says why a turn token may not call a route of kind turn at all
-// under [agent_api], or "": apply and tools. Reading, listing agents, starting,
+// turnRefusal says why a turn token may not call a route under the person's
+// rules and switches, or "": applyTurn and tools. Reading, listing agents, starting,
 // reviewing, stopping and renaming have no switch: within its request tree a
 // turn token always may (0.5.2). The rest of the check needs the request
 // (allowTurn). The tool list (tools.go) asks it too, so a tool is listed only
 // where its route would take the call.
-func turnRefusal(turn int, api settings.AgentAPI) string {
+func turnRefusal(rt *route, rules gateway.Rules, applyAllowed bool) string {
+	toolDec, _ := gateway.DecideTool(rules, "tool:*")
 	switch {
-	case turn == mainOnly:
+	case rt.turn == mainOnly:
 		return turnWriteRefused
-	case turn == applyTurnTok && !*api.Apply:
+	case rt.turn == applyTurnTok && !applyAllowed:
 		return turnSwitchedOff("apply a turn's changes", "Agents may apply")
-	case (turn == toolList || turn == fileOp) && !*api.Tools:
+	case (rt.turn == toolList || rt.turn == fileOp) && toolDec == gateway.Refuse:
 		return turnSwitchedOff("use the agentbus MCP tools", "AgentBus tools")
 	}
 	return ""

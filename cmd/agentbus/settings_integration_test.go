@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func TestStartUpgradesSettings(t *testing.T) {
 		t.Fatal("the session copies were copied")
 	}
 	var p settings.Policy
-	if code := callAPI(t, s, tok, "GET", "/api/v0/settings/permissions", nil, &p); code != 200 || len(p.Forbid) != 1 || p.Forbid[0] != "git push" {
+	if code := callAPI(t, s, tok, "GET", "/api/v0/settings/permissions", nil, &p); code != 200 || !slices.Contains(p.Forbid, "git push") {
 		t.Fatalf("policy: %d %+v", code, p)
 	}
 	var in api.SettingsInfo

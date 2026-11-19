@@ -470,7 +470,13 @@ var gitOptionsWithValue = map[string]bool{"-C": true, "-c": true, "--git-dir": t
 // "git log --grep push" does not. A rule's own git options are skipped the
 // same way, so "git -C repo push" as a rule means any git push.
 func matchWords(rule, words []string) bool {
-	if len(rule) == 0 || len(words) == 0 || path.Base(words[0]) != path.Base(rule[0]) {
+	if len(rule) == 0 || len(words) == 0 {
+		return false
+	}
+	if strings.HasPrefix(rule[0], "tool:") || strings.HasPrefix(rule[0], "api:") {
+		return false
+	}
+	if path.Base(words[0]) != path.Base(rule[0]) {
 		return false
 	}
 	want, rest := rule[1:], words[1:]

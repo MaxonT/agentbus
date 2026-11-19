@@ -24,11 +24,9 @@ func TestFormatPolicyStarter(t *testing.T) {
 // A policy written by FormatPolicy reads back the same, every value set
 // away from its default.
 func TestFormatPolicyRoundTrip(t *testing.T) {
-	no, yes, two, half := false, true, 7, 0.5
+	two, half := 7, 0.5
 	p := Policy{Allow: []string{"go test", `say "hi"`}, Forbid: []string{"git push"},
-		Edit: EditNone, Subagents: &no,
-		Limits:   Limits{MaxDepth: &two, MaxJobsPerTurn: &two, MaxJobsPerTree: &two, MaxCostUSDPerTree: &half},
-		AgentAPI: AgentAPI{Apply: &yes, Tools: &no}}
+		Limits: Limits{MaxDepth: &two, MaxJobsPerTurn: &two, MaxJobsPerTree: &two, MaxCostUSDPerTree: &half}}
 	b := FormatPolicy(p)
 	q, err := ParsePolicy(b)
 	if err != nil {
@@ -73,23 +71,23 @@ func TestFilesPolicy(t *testing.T) {
 	}
 
 	// By hand: read on the next call.
-	writeFile(t, path, "forbid = [\"rm\"]\nedit = \"none\"\n")
+	writeFile(t, path, "forbid = [\"rm\"]\n")
 	got, v2, err := f.Policy()
-	if err != nil || v2 == v1 || !slices.Equal(got.Forbid, []string{"rm"}) || got.Edit != EditNone {
+	if err != nil || v2 == v1 || !slices.Equal(got.Forbid, []string{"rm"}) {
 		t.Fatalf("after a hand edit: %+v %q %v", got, v2, err)
 	}
 	if _, _, err := f.SetPolicy(DefaultPolicy(), v1); !errors.Is(err, ErrChanged) {
 		t.Fatalf("a write over a hand edit: %v, want ErrChanged", err)
 	}
-	if b, _ := os.ReadFile(path); string(b) != "forbid = [\"rm\"]\nedit = \"none\"\n" {
+	if b, _ := os.ReadFile(path); string(b) != "forbid = [\"rm\"]\n" {
 		t.Fatalf("the refused write changed the file: %q", b)
 	}
 	// A value out of range is Invalid, and writes nothing.
 	bad := DefaultPolicy()
-	bad.Edit = "everywhere"
+	bad.Unlisted = "everywhere"
 	var inv *Invalid
-	if _, _, err := f.SetPolicy(bad, Any); !errors.As(err, &inv) || !strings.Contains(inv.Why, "edit must be") {
-		t.Fatalf("an edit value out of range: %v", err)
+	if _, _, err := f.SetPolicy(bad, Any); !errors.As(err, &inv) || !strings.Contains(inv.Why, "unlisted must be") {
+		t.Fatalf("an unlisted value out of range: %v", err)
 	}
 
 	// Broken: an Error naming the file and the line, with the version of
@@ -276,5 +274,28 @@ func writeFile(t *testing.T, path, s string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(s), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFilesChangePolicyLegacySwitches(t *testing.T) {
+	dir := home(t)
+	f := NewFiles(dir)
+	// Apply change with legacy switches
+	c1, err := DecodePolicyChange([]byte(`{"edit":"none","subagents":true,"agent_api":{"tools":false}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := ChangePolicy(f, c1, Any)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(p.Ask, "tool:edit") {
+		t.Fatalf("expected tool:edit in Ask, got %v", p.Ask)
+	}
+	if !slices.Contains(p.Allow, "tool:subagent") {
+		t.Fatalf("expected tool:subagent in Allow, got %v", p.Allow)
+	}
+	if !slices.Contains(p.Forbid, "tool:*") {
+		t.Fatalf("expected tool:* in Forbid, got %v", p.Forbid)
 	}
 }
