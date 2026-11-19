@@ -460,8 +460,11 @@ func Names() []string {
 }
 
 // NameList is Names for a sentence: "claude or codex".
-func NameList() string {
-	n := Names()
+func NameList() string { return joinNames(Names()) }
+
+// joinNames is the join NameList makes, so its shapes can be checked without
+// changing the registry: "a", "a or b", "a, b or c".
+func joinNames(n []string) string {
 	if len(n) < 2 {
 		return strings.Join(n, "")
 	}
