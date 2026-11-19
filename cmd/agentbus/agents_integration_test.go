@@ -469,15 +469,9 @@ func TestIsolatedSubfolderKeptAcrossTurnsAndReview(t *testing.T) {
 	if r := readReport(t, report); real(r.Cwd) != real(want) {
 		t.Fatalf("next turn ran in %s, want %s", r.Cwd, want)
 	}
-	code, rev := reviewTurn(t, svc, tok, next.Turn, map[string]any{"agent": "codex"})
-	if code != http.StatusAccepted {
-		t.Fatalf("review: %d", code)
-	}
-	// The review names no folder: it reads the reviewed session's workspace.
-	if rev.Spec.Folder != "" || rev.Workspace == nil || rev.Workspace.Space != j.Session {
-		t.Fatalf("review spec folder %q, workspace %+v, want %s", rev.Spec.Folder, rev.Workspace, want)
-	}
-	waitJob(t, svc, tok, rev.ID)
+	// B15: the review-route step retired here; review is the review_turn app,
+	// a normal turn. The subfolder-across-turns behaviour is what this test
+	// covers, and the session still closes and its worktree is removed.
 	if code := callAPI(t, svc, tok, "PATCH", "/api/v0/sessions/"+j.Session, map[string]any{"closed": true}, nil); code/100 != 2 {
 		t.Fatalf("close: %d", code)
 	}
@@ -553,50 +547,9 @@ func TestIsolatedFolderNotInCommitRefused(t *testing.T) {
 	}
 }
 
-// A review names its reviewer as a saved agent, and the job carries what
-// the agent says: its harness, id, access and model.
-func TestReviewBySavedAgent(t *testing.T) {
-	home := t.TempDir()
-	svc := runService(t, home, nil, 0)
-	tok := readToken(t, home)
-	code, ag := sendAPI(t, svc, tok, "POST", "/api/v0/agents", map[string]any{"name": "reviewer", "harness": "codex",
-		"access": "subscription", "model": "gpt-5.5"})
-	if code != http.StatusCreated {
-		t.Fatalf("create: %d %v", code, ag)
-	}
-	code, j := startTurn(t, svc, tok, map[string]any{"agent": "claude", "folder": t.TempDir(), "isolate": false, "prompt": "one"})
-	if code != http.StatusAccepted {
-		t.Fatalf("turn: %d", code)
-	}
-	waitJob(t, svc, tok, j.ID)
-	code, rev := reviewTurn(t, svc, tok, j.Turn, map[string]any{"agent": ag["id"]})
-	if code != http.StatusAccepted {
-		t.Fatalf("review: %d", code)
-	}
-	if rev.Spec.Harness != "codex" || rev.Spec.AgentID != ag["id"] || rev.Spec.Access != "subscription" || rev.Spec.Model != "gpt-5.5" {
-		t.Fatalf("review spec %+v", rev.Spec)
-	}
-	if rev = waitJob(t, svc, tok, rev.ID); rev.State != queue.Finished {
-		t.Fatalf("review %s %s %s", rev.State, rev.Reason, rev.Result)
-	}
-	if code, _ := reviewTurn(t, svc, tok, j.Turn, map[string]any{"agent": "a_nobody"}); code != http.StatusBadRequest {
-		t.Fatalf("unknown reviewer: %d", code)
-	}
-	// A keyed review, its reviewer removed, then the same request: the first review.
-	req := map[string]any{"agent": ag["id"], "idempotency_key": "rev-1"}
-	code, k1 := reviewTurn(t, svc, tok, j.Turn, req)
-	if code != http.StatusAccepted {
-		t.Fatalf("keyed review: %d", code)
-	}
-	waitJob(t, svc, tok, k1.ID)
-	if code, _ := sendAPI(t, svc, tok, "DELETE", "/api/v0/agents/"+ag["id"].(string), nil); code != http.StatusNoContent {
-		t.Fatalf("remove: %d", code)
-	}
-	if code, k2 := reviewTurn(t, svc, tok, j.Turn, req); code != http.StatusAccepted || k2.ID != k1.ID {
-		t.Fatalf("retry after remove: %d %s, want %s", code, k2.ID, k1.ID)
-	}
-}
-
+// B15: TestReviewBySavedAgent retired. A reviewer is resolved exactly as any
+// turn's agent (review_turn is ask_agent with a review prompt), covered by the
+// turn-creation and agent-resolution tests.
 // A subfolder the commit records as a symlink out of the repo is refused,
 // even when the folder itself is a real folder now: the turn never runs
 // outside its worktree.

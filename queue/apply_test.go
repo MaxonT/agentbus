@@ -15,7 +15,7 @@ import (
 // An apply's key holds a "/", as no caller's key may, so no other job can
 // take it first.
 func TestApplyKeyIsReserved(t *testing.T) {
-	if k := ApplyKey("t_1", 0); !strings.Contains(k, "/") || !strings.Contains(ResultKey("job_1"), "/") {
+	if k := ApplyKey("t_1", 0); !strings.Contains(k, "/") || !strings.Contains(ResultKey("on_1", "job_1", "s_1"), "/") {
 		t.Fatalf("apply key %q", k)
 	}
 }

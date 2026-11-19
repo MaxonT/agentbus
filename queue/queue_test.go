@@ -87,7 +87,7 @@ func TestStates(t *testing.T) {
 	q, _ := open(t)
 	r := runner(t, q, 3)
 	j := job(t, q, "")
-	if j.State != Queued || j.Team != DefaultTeam || j.Verdict != nil {
+	if j.State != Queued || j.Team != DefaultTeam {
 		t.Fatalf("created: %+v", j)
 	}
 	tj, a := take(t, q, r)
@@ -105,10 +105,9 @@ func TestStates(t *testing.T) {
 	if _, _, err := q.Start(r.ID, a.ID, 1, lease); err != nil {
 		t.Fatalf("start again: %v", err)
 	}
-	v := "changes_requested"
-	f := Finish{Status: Finished, Verdict: &v, Result: json.RawMessage(`{"turn":"t_1"}`), LastSeq: 0}
+	f := Finish{Status: Finished, Result: json.RawMessage(`{"turn":"t_1"}`), LastSeq: 0}
 	done, err := q.End(r.ID, a.ID, 1, f)
-	if err != nil || done.State != Finished || done.Verdict == nil || *done.Verdict != v || string(done.Result) != `{"turn":"t_1"}` ||
+	if err != nil || done.State != Finished || string(done.Result) != `{"turn":"t_1"}` ||
 		done.Ended == nil || len(done.Attempts) != 1 || done.Attempts[0].State != Finished {
 		t.Fatalf("finished: %+v %v", done, err)
 	}
@@ -415,7 +414,7 @@ func TestCreateIdempotent(t *testing.T) {
 	if _, _, err := q.Create(DefaultTeam, KindTurn, "k1", Spec{Harness: "claude", Folder: "/x", Prompt: "other"}, Links{}); !errors.Is(err, ErrKeyConflict) {
 		t.Fatalf("other fields: %v", err)
 	}
-	if _, _, err := q.Create(DefaultTeam, KindReview, "k1", Spec{Harness: "claude", Folder: "/x", Prompt: "hi"}, Links{}); !errors.Is(err, ErrKeyConflict) {
+	if _, _, err := q.Create(DefaultTeam, KindApply, "k1", Spec{Harness: "claude", Folder: "/x", Prompt: "hi"}, Links{}); !errors.Is(err, ErrKeyConflict) {
 		t.Fatalf("other kind: %v", err)
 	}
 	list, err := q.List(DefaultTeam, Filter{}, 10)
@@ -602,7 +601,7 @@ func TestTurnsAhead(t *testing.T) {
 	first := job(t, q, "")
 	mk := func() Job {
 		c.add(time.Millisecond)
-		j, _, err := q.CreateTurnLinked(DefaultTeam, "", Spec{Session: first.Session, Prompt: "next"}, Links{}, Limits{}, "", Maker{})
+		j, _, err := q.CreateTurnLinked(DefaultTeam, "", Spec{Session: first.Session, Prompt: "next"}, Links{}, Limits{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -643,48 +642,9 @@ func TestTurnsAhead(t *testing.T) {
 	}
 }
 
-// A review runs its turn in a session of its own. A turn sent to that
-// session waits behind the review, and is not taken beside it.
-func TestTurnWaitsBehindReviewInItsSession(t *testing.T) {
-	q, c := open(t)
-	r := runner(t, q, 4)
-	rv, _, err := q.create(DefaultTeam, KindReview, "", Spec{Harness: "codex", Prompt: "review"}, Links{}, Limits{}, "reviewed", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, ra := take(t, q, r)
-	if _, _, err := q.Start(r.ID, ra.ID, ra.Number, lease); err != nil {
-		t.Fatal(err)
-	}
-	if busy, err := q.SessionHasWork(DefaultTeam, "rev1"); err != nil || busy {
-		t.Fatalf("before its turn started: %v %v", busy, err)
-	}
-	if _, _, err := q.AddEvents(r.ID, ra.ID, ra.Number, 1, []AttemptEvent{{Seq: 1, Time: time.Now(), Kind: "turn.created",
-		Data: json.RawMessage(`{"session":"rev1","turn":"` + ra.ID + `"}`)}}); err != nil {
-		t.Fatal(err)
-	}
-	if busy, err := q.SessionHasWork(DefaultTeam, "rev1"); err != nil || !busy {
-		t.Fatalf("while the review runs: %v %v", busy, err)
-	}
-	c.add(time.Millisecond)
-	next, _, err := q.CreateTurnLinked(DefaultTeam, "", Spec{Session: "rev1", Prompt: "and this?"}, Links{}, Limits{}, "", Maker{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ahead, err := q.TurnsAhead(DefaultTeam, next.ID)
-	if err != nil || len(ahead) != 1 || ahead[0].ID != rv.ID {
-		t.Fatalf("ahead %v %v, want the review", ahead, err)
-	}
-	if _, ok, err := takeAny(q, r); ok || err != nil {
-		t.Fatalf("took the turn beside the review: %v %v", ok, err)
-	}
-	if _, err := q.End(r.ID, ra.ID, ra.Number, Finish{Status: Finished, Result: json.RawMessage(`{"session":"rev1","reply_text":"x"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if j, _ := take(t, q, r); j.ID != next.ID {
-		t.Fatalf("took %s, want the waiting turn", j.ID)
-	}
-}
+// B15: TestTurnWaitsBehindReviewInItsSession retired. The review kind and its
+// lane clause are gone — a review is a normal turn in its own session, held by
+// the ordinary session lane like any turn.
 
 // An accepted finish is the attempt's one finish: another finish is refused
 // before control writes anything for it. Its lease no longer counts: past

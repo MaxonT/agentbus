@@ -22,6 +22,7 @@ import (
 	"errors"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -30,9 +31,20 @@ import (
 // command-MCP tools (B4, B5).
 const WhereControl = "control"
 
-// What a tool's run is. Only api for now: a call on the AgentBus API, run on
-// control. mcp and script come later (B4, B5).
-const RunAPI = "api"
+// What a tool's run is.
+//   - api: one call on the AgentBus API, run on control.
+//   - app: an Arazzo workflow, several API operations in order, outputs passed
+//     forward (B15). An api tool is the one-step case; an app is the many-step
+//     case, and nothing else about the record differs.
+//
+// mcp and script come later (B4, B5).
+const (
+	RunAPI = "api"
+	RunApp = "app"
+)
+
+// MaxSteps bounds how many steps an app's workflow may have.
+const MaxSteps = 32
 
 // MaxTools bounds how many tools are kept.
 const MaxTools = 500
@@ -78,6 +90,40 @@ type Run struct {
 	// id and not in Query. False sends no body, as a GET or a bodyless POST
 	// does.
 	Body bool `json:"body,omitempty" doc:"Whether the request carries a JSON body of the inputs that are not the id and not in query."`
+	// App is the workflow an app runs; present only when Kind is app. Its
+	// shape is one Arazzo workflow over AgentBus's own openapi.json.
+	App *App `json:"app,omitempty" doc:"The workflow an app runs: an Arazzo workflow over the AgentBus API. Present only when kind is app."`
+}
+
+// App is one Arazzo workflow: ordered steps over AgentBus API operations, each
+// step passing its outputs to the next, and the workflow's own outputs read
+// from step outputs. The single source is AgentBus's own openapi.json, so a
+// step names an operation by its operationId alone.
+type App struct {
+	// Steps run in order. A failed step stops the app.
+	Steps []Step `json:"steps" doc:"The workflow's steps, run in order. A step that fails stops the app."`
+	// Outputs are the app's own result, each an expression reading a step
+	// output ($steps.<id>.outputs.<name>).
+	Outputs map[string]string `json:"outputs,omitempty" doc:"The app's result: each value reads a step output, $steps.<id>.outputs.<name>."`
+}
+
+// Step is one step of a workflow: an API operation named by its operationId,
+// its request built from values and runtime expressions, and the outputs it
+// extracts from the reply for later steps.
+type Step struct {
+	// StepID is unique within the workflow; later steps and the workflow's
+	// outputs reference it.
+	StepID string `json:"stepId" doc:"The step's id, unique within the workflow. Later steps read its outputs as $steps.<stepId>.outputs.<name>."`
+	// OperationID names an operation in AgentBus's openapi.json.
+	OperationID string `json:"operationId" doc:"The AgentBus API operation this step calls, by its operationId (such as startTurn)."`
+	// RequestBody holds the body fields, each a literal value or a runtime
+	// expression ($inputs.<name>, $steps.<id>.outputs.<name>, $caller.session).
+	RequestBody map[string]any `json:"requestBody,omitempty" doc:"The request body fields: each value a literal or a runtime expression."`
+	// Parameters hold path and query parameters, same forms as RequestBody.
+	Parameters map[string]any `json:"parameters,omitempty" doc:"The path and query parameters: each value a literal or a runtime expression."`
+	// Outputs name values the step exposes, each a JSON Pointer into the
+	// reply body ($response.body#/<pointer>).
+	Outputs map[string]string `json:"outputs,omitempty" doc:"The values this step exposes: each a JSON Pointer into its reply, $response.body#/<pointer>."`
 }
 
 // Errors.
@@ -98,6 +144,13 @@ var nameShape = regexp.MustCompile(`^[a-z]+(_[a-z]+)+$`)
 var methods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
 
 // Check says what is wrong with t, or "". It fills Where when absent.
+//
+// Check is the structural gate: it checks what toolreg can see on its own. It
+// does NOT know the route table, so for an app it cannot say an operationId
+// exists, is callable by a turn token, or that a step field is a real field of
+// its operation — the api package checks those against the generated spec at
+// save (api.checkApp). Check and that spec check together make an accepted tool
+// callable.
 func Check(t *Tool) string {
 	t.Name = strings.TrimSpace(t.Name)
 	switch {
@@ -109,21 +162,42 @@ func Check(t *Tool) string {
 		return "a tool needs a description, written for a model"
 	case t.Where != "" && t.Where != WhereControl:
 		return "where must be control"
-	case t.Run.Kind != RunAPI:
-		return "run kind must be api"
+	case !objectSchema(t.Inputs):
+		return "inputs must be a JSON Schema object: type object, with properties that are each a schema object, and required a list of its property names"
+	}
+	var why string
+	switch t.Run.Kind {
+	case RunAPI:
+		why = checkAPIRun(t)
+	case RunApp:
+		why = checkAppRun(t)
+	default:
+		return "run kind must be api or app"
+	}
+	if why != "" {
+		return why
+	}
+	if t.Where == "" {
+		t.Where = WhereControl
+	}
+	return ""
+}
+
+// checkAPIRun validates an api tool's run: one route, built from the fields and
+// the call's arguments.
+func checkAPIRun(t *Tool) string {
+	switch {
+	case t.Run.App != nil:
+		return "an api tool has no app; set run.app only when kind is app"
 	case !methods[t.Run.Method]:
 		return "run method must be GET, POST, PUT, PATCH or DELETE"
 	case !strings.HasPrefix(t.Run.Path, "/api/"):
 		return "run path must be an AgentBus API path, such as /api/v0/turns"
 	case strings.Contains(t.Run.Path, "{id}") != (t.Run.IDInput != ""):
 		return "run id_input must be set exactly when the path has {id}"
-	case !objectSchema(t.Inputs):
-		return "inputs must be a JSON Schema object: type object, with properties that are each a schema object, and required a list of its property names"
 	}
 	// Every input the run references must be a property, so a call can supply
-	// it and the serving path accepts it: the id and the query inputs. (The
-	// required names are checked by objectSchema; a body field is any input
-	// that is neither.) Without this an accepted tool could never be called.
+	// it and the serving path accepts it: the id and the query inputs.
 	props, _ := t.Inputs["properties"].(map[string]any)
 	if t.Run.IDInput != "" {
 		if _, ok := props[t.Run.IDInput]; !ok {
@@ -135,11 +209,213 @@ func Check(t *Tool) string {
 			return "every run query input must be one of the inputs (a property of inputs)"
 		}
 	}
-	if t.Where == "" {
-		t.Where = WhereControl
+	return ""
+}
+
+// checkAppRun validates an app's run on what toolreg can see: the steps exist
+// and are well formed, step ids are unique, and every expression refers to a
+// name in scope (an input, an earlier step's declared output, or the caller).
+// The operationId's existence and the fields' validity are the api package's
+// to check against the spec.
+func checkAppRun(t *Tool) string {
+	r := t.Run
+	switch {
+	case r.Method != "" || r.Path != "" || r.IDInput != "" || r.OwnSession || len(r.Query) > 0 || r.Body:
+		return "an app's run uses app, not the api fields (method, path, id_input, own_session, query, body)"
+	case r.App == nil || len(r.App.Steps) == 0:
+		return "an app's run needs app.steps: at least one step"
+	case len(r.App.Steps) > MaxSteps:
+		return "an app has too many steps"
+	}
+	props, _ := t.Inputs["properties"].(map[string]any)
+	seen := map[string]bool{}            // step ids declared so far
+	outs := map[string]map[string]bool{} // step id -> its declared output names
+	for i := range r.App.Steps {
+		s := &r.App.Steps[i]
+		switch {
+		case !stepIDShape.MatchString(s.StepID):
+			return "every step needs a stepId of letters, digits, _ and - (step " + strconv.Itoa(i+1) + ")"
+		case seen[s.StepID]:
+			return "two steps share the stepId " + quote(s.StepID)
+		case !operationShape.MatchString(s.OperationID):
+			return "step " + quote(s.StepID) + " needs an operationId, such as startTurn"
+		}
+		// A step's request values may read inputs, earlier steps or the caller.
+		for field, v := range s.RequestBody {
+			if why := checkValueExpr(v, props, seen, outs, s.StepID); why != "" {
+				return "step " + quote(s.StepID) + " requestBody." + field + ": " + why
+			}
+		}
+		for field, v := range s.Parameters {
+			if why := checkValueExpr(v, props, seen, outs, s.StepID); why != "" {
+				return "step " + quote(s.StepID) + " parameters." + field + ": " + why
+			}
+		}
+		// A step's outputs read from its own reply.
+		mine := map[string]bool{}
+		for name, expr := range s.Outputs {
+			if !responseExpr.MatchString(expr) {
+				return "step " + quote(s.StepID) + " output " + quote(name) + " must read $response.body#/<pointer>"
+			}
+			mine[name] = true
+		}
+		seen[s.StepID] = true
+		outs[s.StepID] = mine
+	}
+	// The app's own outputs read declared step outputs.
+	for name, expr := range r.App.Outputs {
+		if why := checkStepsExpr(expr, seen, outs); why != "" {
+			return "app output " + quote(name) + ": " + why
+		}
 	}
 	return ""
 }
+
+// Expression grammar for an app's workflow (Arazzo's, with one addition):
+//   - $inputs.<name>              a tool-call argument
+//   - $steps.<stepId>.outputs.<name>  an earlier step's declared output
+//   - $caller.session             the calling turn's session (the addition)
+//   - $response.body#/<pointer>   a value in a step's own reply (step outputs only)
+//
+// A request value is a literal, a full expression (the whole string is one
+// $... reference), or a string with {$...} references embedded in text.
+var (
+	stepIDShape    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	operationShape = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	inputsRef      = regexp.MustCompile(`^\$inputs\.([A-Za-z_][A-Za-z0-9_]*)$`)
+	stepsRef       = regexp.MustCompile(`^\$steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z_][A-Za-z0-9_]*)$`)
+	callerRef      = regexp.MustCompile(`^\$caller\.session$`)
+	responseExpr   = regexp.MustCompile(`^\$response\.body#/[^\s]+$`)
+	embedded       = regexp.MustCompile(`\{(\$[^{}]+)\}`)
+)
+
+// Ref is one parsed reference expression.
+type Ref struct {
+	// Kind is inputs, steps, caller or response.
+	Kind string
+	// A is the input name, the step id or the response JSON Pointer; B is the
+	// step's output name (steps only).
+	A, B string
+}
+
+// Reference kinds.
+const (
+	RefInputs   = "inputs"
+	RefSteps    = "steps"
+	RefCaller   = "caller"
+	RefResponse = "response"
+)
+
+// ParseRef parses one $... reference, or false if s is not a single reference.
+func ParseRef(s string) (Ref, bool) {
+	switch {
+	case inputsRef.MatchString(s):
+		return Ref{Kind: RefInputs, A: inputsRef.FindStringSubmatch(s)[1]}, true
+	case stepsRef.MatchString(s):
+		m := stepsRef.FindStringSubmatch(s)
+		return Ref{Kind: RefSteps, A: m[1], B: m[2]}, true
+	case callerRef.MatchString(s):
+		return Ref{Kind: RefCaller}, true
+	case responseExpr.MatchString(s):
+		return Ref{Kind: RefResponse, A: strings.TrimPrefix(s, "$response.body#")}, true
+	}
+	return Ref{}, false
+}
+
+// IsFullExpr says s is exactly one $... reference (no surrounding text).
+func IsFullExpr(s string) bool {
+	return strings.HasPrefix(s, "$") && !strings.ContainsAny(s, "{}")
+}
+
+// Interpolations are the inner $... expressions a string embeds as {$...}, in
+// order, or nil when it embeds none.
+func Interpolations(s string) []string {
+	var out []string
+	for _, m := range embedded.FindAllStringSubmatch(s, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// Interpolate replaces every {$...} in s with resolve(inner) in ONE pass over
+// the original string, so a value that resolves to text containing {$...} is
+// never itself re-scanned (found in review 2026-11-19: sequential replaces let
+// one input's value capture another's placeholder).
+func Interpolate(s string, resolve func(expr string) string) string {
+	return embedded.ReplaceAllStringFunc(s, func(m string) string {
+		return resolve(m[1 : len(m)-1]) // m is "{$...}"; drop the braces
+	})
+}
+
+// checkValueExpr validates one request value's expressions against the names in
+// scope: the input properties, the step ids declared so far and their outputs.
+// A reference to $response, or to a later/own step, is refused. A literal
+// (non-string, or a string with no expression) is always fine.
+func checkValueExpr(v any, props map[string]any, seen map[string]bool, outs map[string]map[string]bool, self string) string {
+	s, ok := v.(string)
+	if !ok {
+		return "" // a literal number, bool, object or array
+	}
+	if IsFullExpr(s) {
+		return checkRef(s, props, seen, outs, self)
+	}
+	for _, e := range Interpolations(s) {
+		if why := checkRef(e, props, seen, outs, self); why != "" {
+			return why
+		}
+	}
+	return "" // a plain literal string
+}
+
+// checkRef validates a single reference used in a request value.
+func checkRef(expr string, props map[string]any, seen map[string]bool, outs map[string]map[string]bool, self string) string {
+	ref, ok := ParseRef(expr)
+	if !ok {
+		return quote(expr) + " is not a valid expression ($inputs.x, $steps.id.outputs.x or $caller.session)"
+	}
+	switch ref.Kind {
+	case RefInputs:
+		if _, ok := props[ref.A]; !ok {
+			return quote(expr) + " names an input the tool does not have"
+		}
+	case RefSteps:
+		if why := checkStepsRef(ref, seen, outs, self); why != "" {
+			return why
+		}
+	case RefCaller:
+		// $caller.session is always in scope.
+	case RefResponse:
+		return "$response may be used only in a step's outputs, not in a request value"
+	}
+	return ""
+}
+
+// checkStepsExpr validates a full $steps... expression (an app output).
+func checkStepsExpr(expr string, seen map[string]bool, outs map[string]map[string]bool) string {
+	ref, ok := ParseRef(expr)
+	if !ok || ref.Kind != RefSteps {
+		return "must read a step output, $steps.<id>.outputs.<name>"
+	}
+	return checkStepsRef(ref, seen, outs, "")
+}
+
+// checkStepsRef validates that a $steps reference names an earlier step and an
+// output that step declares. self is the current step ("" for an app output),
+// so a step cannot read its own or a later step's output.
+func checkStepsRef(ref Ref, seen map[string]bool, outs map[string]map[string]bool, self string) string {
+	if ref.A == self {
+		return quote("$steps."+ref.A+".outputs."+ref.B) + " reads the step's own output; read an earlier step"
+	}
+	if !seen[ref.A] {
+		return quote("$steps."+ref.A+".outputs."+ref.B) + " names a step that does not run before this one"
+	}
+	if !outs[ref.A][ref.B] {
+		return quote("$steps."+ref.A+".outputs."+ref.B) + " names an output step " + quote(ref.A) + " does not declare"
+	}
+	return ""
+}
+
+func quote(s string) string { return strconv.Quote(s) }
 
 // objectSchema says s is a structurally consistent object schema: one this
 // service can serve and call. The whole rule, so a schema that is accepted is

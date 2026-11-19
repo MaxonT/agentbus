@@ -24,7 +24,6 @@ func TestBlobBodyLimits(t *testing.T) {
 		{"POST", "/api/v0/runner/attempts/t_1/finish", jobs.MaxBody},
 		{"POST", "/api/v0/runner/attempts/t_1/record", jobs.MaxBody},
 		{"POST", "/api/v0/turns", MaxRunBody},
-		{"POST", "/api/v0/turns/t_1/review", MaxBody},
 		{"PATCH", "/api/v0/sessions/s1", MaxBody},
 	} {
 		if got := bodyLimit(httptest.NewRequest(c.method, c.path, nil)); got != c.want {

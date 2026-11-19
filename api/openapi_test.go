@@ -272,11 +272,11 @@ func TestOneEndpointStartsEveryTurn(t *testing.T) {
 	// a standing instruction (a turn completes -> deliver its reply) and remove
 	// it (B13). 72 with POST /api/v0/files/read, POST /api/v0/files/list and
 	// POST /api/v0/files/write, folder access through tools (B8).
-	if len(ops) != 72 {
-		t.Errorf("%d endpoints, want 72: %v", len(ops), ops)
+	if len(ops) != 71 {
+		t.Errorf("%d endpoints, want 71: %v", len(ops), ops)
 	}
 	for _, want := range []string{"POST /api/v0/turns", "GET /api/v0/turns", "GET /api/v0/turns/{id}", "POST /api/v0/turns/{id}/stop",
-		"GET /api/v0/turns/{id}/diff", "POST /api/v0/turns/{id}/apply", "POST /api/v0/turns/{id}/review",
+		"GET /api/v0/turns/{id}/diff", "POST /api/v0/turns/{id}/apply",
 		"GET /api/v0/turns/{id}/calls/{call}", "GET /api/v0/turns/{id}/calls/{call}/pieces/{n}", "GET /api/v0/sessions/{id}/events"} {
 		if !slices.Contains(ops, want) {
 			t.Errorf("%s is not in the description", want)
@@ -385,7 +385,6 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"OneTurn":       reflect.TypeFor[OneTurn](),
 		"OneSession":    reflect.TypeFor[OneSession](),
 		"SessionCopy":   reflect.TypeFor[SessionCopy](),
-		"ReviewRequest": reflect.TypeFor[ReviewRequest](),
 		"SessionUpdate": reflect.TypeFor[SessionUpdate](),
 		"Started":       reflect.TypeFor[Started](),
 		"EventRequest":  reflect.TypeFor[EventRequest](),

@@ -123,27 +123,35 @@ func TestMCPInitialize(t *testing.T) {
 	}
 }
 
-// Every token sees the same tool list now (read-only retired, B12): the apps,
-// such as ask_agent. The read-tool copies are gone — reading is done through
-// agentbus-api, not tools — so none is listed, and neither is continue_session.
+// B15 (his call, 2026-11-19): apps are for agents only. A turn token sees the
+// apps (ask_agent, review_turn); the MAIN token does not — it reaches the API
+// directly. The read-tool copies are gone (read via agentbus-api), so none of
+// those is listed, nor continue_session.
 func TestMCPToolListFollowsTheToken(t *testing.T) {
 	e := mcpEnv(t)
-	all := toolNames(t, e, token)
-	if !slices.Contains(all, "ask_agent") {
-		t.Errorf("main token: ask_agent missing from %v", all)
+	// A turn token sees the apps.
+	turn := toolNames(t, e, mcpWriteTok)
+	for _, app := range []string{"ask_agent", "review_turn"} {
+		if !slices.Contains(turn, app) {
+			t.Errorf("turn token: %s missing from %v", app, turn)
+		}
+	}
+	// The main token sees no app.
+	main := toolNames(t, e, token)
+	for _, app := range []string{"ask_agent", "review_turn"} {
+		if slices.Contains(main, app) {
+			t.Errorf("main token lists the app %s; apps are for agents only: %v", app, main)
+		}
 	}
 	for _, gone := range []string{"continue_session", "list_agents", "list_turns", "get_turn",
 		"turn_diff", "turn_changes", "turn_calls", "turn_tools", "turn_context", "search_history", "session_context"} {
-		if slices.Contains(all, gone) {
+		if slices.Contains(turn, gone) {
 			t.Errorf("%s is listed as a tool: it is an API route, not a tool now", gone)
 		}
 	}
-	// A write turn and the second turn see the same list as the main token.
-	if w := toolNames(t, e, mcpWriteTok); !slices.Equal(w, all) {
-		t.Errorf("write turn: %v, want %v", w, all)
-	}
-	if ro := toolNames(t, e, mcpReadTok); !slices.Equal(ro, all) {
-		t.Errorf("second turn: %v, want %v", ro, all)
+	// A write turn and the second turn see the same list.
+	if ro := toolNames(t, e, mcpReadTok); !slices.Equal(ro, turn) {
+		t.Errorf("second turn: %v, want %v", ro, turn)
 	}
 }
 
@@ -152,11 +160,20 @@ func TestMCPToolListFollowsTheToken(t *testing.T) {
 // removed the write route copies, so there is no apply_turn to gate off.)
 func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 	e := mcpEnv(t)
-	g := &run.Grant{Session: "s1", Root: "s1"}
+	// A real turn token: it has a turn, so it may see the apps (listedApp).
+	g := &run.Grant{Session: "s1", Root: "s1", Turn: "t_1"}
+	// Apps list to a turn token whose tool server is on; route tools follow the
+	// gateway rules (B16). Both read the same rules now.
 	names := func(rules gateway.Rules) []string {
 		var out []string
 		for _, st := range e.api.toolSnap.Load().list {
-			if listedRoute(st.rt, g, false, rules, false) {
+			visible := false
+			if st.rt == nil { // an app has no single route (apps.go)
+				visible = listedApp(g, false, rules)
+			} else {
+				visible = listedRoute(st.rt, g, false, rules, false)
+			}
+			if visible {
 				out = append(out, st.def.Name)
 			}
 		}
@@ -271,17 +288,15 @@ func TestMCPToolSchemas(t *testing.T) {
 	}
 }
 
-// The OpenAPI description names an operation's tools (by name; a tool carries
-// no effect since 0.6). ask_agent is the one built-in app, on POST /turns.
+// The OpenAPI description names an operation's route tools (by name; a tool
+// carries no effect since 0.6). B15: ask_agent is a default APP, not a route
+// tool, so POST /turns (startTurn) names no tool of its own.
 func TestOpenAPINamesTools(t *testing.T) {
 	doc := loadSpec(t)
 	op := doc.Paths.Value("/api/v0/turns").Post
 	b, _ := json.Marshal(op.Extensions["x-agentbus-tools"])
-	if !strings.Contains(string(b), `"ask_agent"`) {
-		t.Errorf("start turn's tools: %s", b)
-	}
-	if strings.Contains(string(b), "effect") {
-		t.Errorf("x-agentbus-tools still carries an effect: %s", b)
+	if strings.Contains(string(b), `"ask_agent"`) {
+		t.Errorf("start turn still names ask_agent as a route tool; it is an app now: %s", b)
 	}
 	// The read-tool copies retired in 0.6 (B12): the read routes name no tool.
 	for _, p := range []string{"/api/v0/turns/{id}/diff", "/api/v0/turns/{id}/changes"} {

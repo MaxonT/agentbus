@@ -4,7 +4,6 @@ package api
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -84,55 +83,10 @@ func TestSearchLeavesOutTheSearchingTurn(t *testing.T) {
 	}
 }
 
-// A review is a turn: POST /turns/{id}/review answers it at once, and GET
-// /turns/{id} shows it as kind review of the reviewed turn, with its verdict
-// once it ends.
-func TestReviewIsATurn(t *testing.T) {
-	e, dir := askEnv(t)
-	folder := t.TempDir()
-	os.WriteFile(filepath.Join(folder, "a.txt"), []byte("one\n"), 0o644)
-	w := startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"work"}`)
-	tokenOf(t, dir, "work")
-	os.WriteFile(filepath.Join(pwdOf(t, dir, "work"), "a.txt"), []byte("two\n"), 0o644)
-	// Running: it cannot be reviewed yet.
-	if code, out := as(t, e, token, "POST", "/api/v0/turns/"+w.Turn+"/review", `{"agent":"codex"}`); code != 409 {
-		t.Errorf("review of a running turn: %d %s", code, out)
-	}
-	release(dir, "work")
-	waitEnded(t, e, w.Turn)
-	code, out := as(t, e, token, "POST", "/api/v0/turns/"+w.Turn+"/review", `{"agent":"codex","idempotency_key":"rv-1"}`)
-	var rv Started
-	if code != 202 || json.Unmarshal([]byte(out), &rv) != nil || rv.Turn == "" || rv.Turn == w.Turn || rv.Session == w.Session || rv.Existing {
-		t.Fatalf("review: %d %s", code, out)
-	}
-	if code, out := as(t, e, token, "POST", "/api/v0/turns/"+w.Turn+"/review", `{"agent":"codex","idempotency_key":"rv-1"}`); code != 202 ||
-		!strings.Contains(out, rv.Turn) || !strings.Contains(out, `"existing":true`) {
-		t.Errorf("a retry of the review: %d %s", code, out)
-	}
-	// The same key with other fields is another request, and says so.
-	if code, out := as(t, e, token, "POST", "/api/v0/turns/"+w.Turn+"/review", `{"agent":"codex","model":"other-model","idempotency_key":"rv-1"}`); code != 409 ||
-		!strings.Contains(out, "already used for a different request") {
-		t.Errorf("the key with another model: %d %s", code, out)
-	}
-	waitEnded(t, e, rv.Turn)
-	var one OneTurn
-	if code := getJSON(t, e, "/api/v0/turns/"+rv.Turn, &one); code != 200 || one.Turn.Kind != queue.KindReview || one.Turn.Reviews != w.Turn ||
-		one.Turn.Session != rv.Session || one.Turn.Verdict == nil || one.Turn.Findings == nil {
-		t.Fatalf("the review turn: %d %+v", code, one.Turn)
-	}
-	// Findings is a list once the review ended, [] when it named nothing,
-	// never null.
-	if _, out := as(t, e, token, "GET", "/api/v0/turns/"+rv.Turn, ""); strings.Contains(out, `"findings":null`) || !strings.Contains(out, `"findings":[`) {
-		t.Errorf("the review's findings: %s", out)
-	}
-	if _, out := as(t, e, token, "GET", "/api/v0/turns/"+w.Turn, ""); strings.Contains(out, `"findings"`) {
-		t.Errorf("a turn that is not a review has findings: %s", out)
-	}
-	var list TurnList
-	if code := getJSON(t, e, "/api/v0/turns?session="+rv.Session, &list); code != 200 || len(list.Turns) != 1 || list.Turns[0].Kind != queue.KindReview {
-		t.Fatalf("the review's session: %d %+v", code, list.Turns)
-	}
-}
+// B15: TestReviewIsATurn retired with the review route and kind. Review is now
+// a default app (review_turn), exercised end to end by TestReviewTurnAppDelivers
+// in asked_integration_test.go; a review turn shows as an ordinary turn with no
+// verdict or findings field on it.
 
 // PATCH /sessions/{id} closed true closes a session once no turn of it runs:
 // GET /sessions/{id} shows its copy closed, the copy is named after the

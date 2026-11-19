@@ -107,21 +107,12 @@ func turnsOrReviews(n int) string {
 
 // CreateTurnLinked makes a turn job, with links and the caps held to lim,
 // checked in the same transaction. A turn of a session whose turn runs waits
-// behind it in the queue. When deliverTo is set (an ask), an on is registered
-// for the new turn in the same transaction, delivering its reply to deliverTo
-// on completion, so the turn and its on are durable together (on.go). maker is
-// who asked, for the delivery's agent and the record; deliverTo "" registers
-// no on (a turn the person started).
-func (q *Queue) CreateTurnLinked(team, key string, spec Spec, links Links, lim Limits, deliverTo string, maker Maker) (Job, bool, error) {
-	return q.create(team, KindTurn, key, spec, links, lim, spec.Session, onRegFor(deliverTo, maker))
-}
-
-// onRegFor is the onReg an ask registers, or nil when deliverTo is empty.
-func onRegFor(deliverTo string, maker Maker) *onReg {
-	if deliverTo == "" {
-		return nil
-	}
-	return &onReg{session: deliverTo, maker: maker}
+// behind it in the queue. B15 (his call (a), 2026-11-19): if deliver is set, it
+// records the delivery on in that same transaction, so starting the turn and
+// arranging its reply are one atomic write under one authorization. A nil
+// deliver registers no on; POST /api/v0/ons registers one separately.
+func (q *Queue) CreateTurnLinked(team, key string, spec Spec, links Links, lim Limits, deliver *Delivery) (Job, bool, error) {
+	return q.create(team, KindTurn, key, spec, links, lim, spec.Session, deliver)
 }
 
 // SessionRoot is the root of the request tree a session was started in: the
@@ -130,17 +121,29 @@ func onRegFor(deliverTo string, maker Maker) *onReg {
 // it makes the job (Links.ReviewSession).
 // "" for a session the person started, or one the queue does not know.
 func (q *Queue) SessionRoot(team, session string) (string, error) {
-	var root sql.NullString
-	err := q.db.QueryRow(`SELECT json_extract(links, '$.chain.root') FROM jobs j WHERE team = ?
-		AND ((kind = 'turn' AND session = ?) OR (kind = 'review' AND json_extract(links, '$.review_session') = ?))
-		AND json_extract(links, '$.chain.root') IS NOT NULL ORDER BY created, id LIMIT 1`, team, session, session).Scan(&root)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+	root, _, err := q.SessionChain(team, session)
+	return root, err
+}
+
+// SessionChain is the request tree a session's own turns belong to: the root and
+// depth of its first rooted turn job, or ("", 0) for a session the person
+// started (which has no tree). A delivered result joins the RECEIVING session's
+// tree with these, so it counts against that tree's caps like any other turn
+// (his rule, 2026-11-19: every turn is a turn; a delivered answer is no
+// exception). B15 dropped the review kind, so only turn jobs carry a chain here.
+func (q *Queue) SessionChain(team, session string) (root string, depth int, err error) {
+	var r sql.NullString
+	var d sql.NullInt64
+	e := q.db.QueryRow(`SELECT json_extract(links, '$.chain.root'), json_extract(links, '$.chain.depth')
+		FROM jobs WHERE team = ? AND kind = 'turn' AND session = ?
+		AND json_extract(links, '$.chain.root') IS NOT NULL ORDER BY created, id LIMIT 1`, team, session).Scan(&r, &d)
+	if errors.Is(e, sql.ErrNoRows) {
+		return "", 0, nil
 	}
-	if err != nil {
-		return "", fmt.Errorf("queue: read session root: %w", err)
+	if e != nil {
+		return "", 0, fmt.Errorf("queue: read session chain: %w", e)
 	}
-	return root.String, nil
+	return r.String, int(d.Int64), nil
 }
 
 // TreeSessions are the sessions work in root's request tree ran in: each
@@ -181,30 +184,9 @@ func (q *Queue) SessionFolder(team, session string) (ref, machine string, repo b
 	return sp.FolderRef, sp.Machine, false, nil
 }
 
-// IsReview reports whether session is a review's own session (Links.ReviewSession):
-// a review runs in a session of its own, created when its job is made. A review
-// is a leaf (B12): control refuses a review's token asking for, reviewing,
-// applying or stopping further work, so its one turn and its copy are all it has.
-func (q *Queue) IsReview(team, session string) (bool, error) {
-	var one int
-	err := q.db.QueryRow(`SELECT 1 FROM jobs WHERE team = ? AND kind = 'review'
-		AND json_extract(links, '$.review_session') = ? LIMIT 1`, team, session).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("queue: read review session: %w", err)
-	}
-	return true, nil
-}
-
-// ReviewLinked is ReviewAs with links: for a review an agent asked for, its
-// Chain, held to lim in the same transaction. deliverTo and maker register the
-// on that delivers the verdict to the asking session, in that same transaction
-// (CreateTurnLinked).
-func (q *Queue) ReviewLinked(team, id string, as Spec, key string, includeReply bool, links Links, lim Limits, deliverTo string, maker Maker) (Job, bool, error) {
-	return q.review(team, id, as, key, includeReply, links, lim, onRegFor(deliverTo, maker))
-}
+// B15: IsReview and ReviewLinked retired with the review kind. A review is a
+// normal turn (the review_turn app), so there is no "is this a review session"
+// query and no review-specific create path.
 
 // deliverResult builds and queues the turn that carries job j's result to
 // toSession, on the agent the asking turn ran (resolved now from askingTurn,
@@ -217,7 +199,7 @@ func (q *Queue) ReviewLinked(team, id string, as Spec, key string, includeReply 
 // agent, and control names this one. name gives a saved agent's name for the
 // prompt; nil names it by id. agent nil runs it on the asking turn's agent as
 // that turn was asked.
-func (q *Queue) deliverResult(team, toSession, askingTurn string, j Job, name func(id string) string, agent AgentOf) (string, string, error) {
+func (q *Queue) deliverResult(team, onID, toSession, askingTurn string, j Job, name func(id string) string, agent AgentOf) (string, string, error) {
 	c, err := q.changesOf(j)
 	if err != nil {
 		return "", "", err
@@ -251,15 +233,24 @@ func (q *Queue) deliverResult(team, toSession, askingTurn string, j Job, name fu
 	spec.Harness, spec.AgentID, spec.Access, spec.KeyEnv, spec.AgentModel = from.Harness, from.AgentID, from.Access, from.KeyEnv, from.AgentModel
 	res := &ResultOf{Job: j.ID, Kind: j.Kind, Session: resultSession(j), Turn: j.Turn, Agent: agentName(j.Spec)}
 	links := Links{ResultOf: res}
-	// The delivery carries the subject's request tree. This is safe because an
-	// on delivers only within that tree: the ask path registers an on for its
-	// own session, and the public route refuses a delivery session outside the
-	// subject's tree (api/on.go). So toSession's tree is always the subject's,
-	// and the old delivery's invariant (delivery stays in one tree) holds.
-	if j.Links.Chain != nil {
-		links.Chain = &Chain{Root: j.Links.Chain.Root, Depth: j.Links.Chain.Depth}
+	// The delivery is a turn in toSession, so it joins toSession's OWN request
+	// tree — its root and depth, never the subject's and never none (his rule,
+	// 2026-11-19: a delivered answer is a turn like any other of the receiving
+	// tree). Because its Chain.Root is that tree, its cost counts toward the
+	// tree's cost limit (TreeSessions reads it) and work IT asks for counts
+	// against the tree; it is not itself asked work, though, so the asked-work
+	// caps (checkAsked, keyed on Chain.By) skip it — By is empty on a delivery.
+	// The tree choice is right in every case: the ordinary ask (toSession is the
+	// asking session) carries that session's own root and depth; a main-token
+	// delivery to an unrelated session the person started carries no tree, so it
+	// cannot be pulled into the subject's tree; a delivery to a session already
+	// in another tree keeps THAT tree (found across three review rounds).
+	if root, depth, err := q.SessionChain(team, toSession); err != nil {
+		return "", "", err
+	} else if root != "" {
+		links.Chain = &Chain{Root: root, Depth: depth}
 	}
-	d, _, err := q.create(team, KindTurn, ResultKey(j.ID), spec, links, Limits{}, spec.Session, nil)
+	d, _, err := q.create(team, KindTurn, ResultKey(onID, j.ID, toSession), spec, links, Limits{}, spec.Session, nil)
 	var removed *RunnerRemovedError
 	switch {
 	case errors.As(err, &removed):
@@ -284,18 +275,46 @@ func (q *Queue) deliverResult(team, toSession, askingTurn string, j Job, name fu
 // run, such as "agent X was removed, pick another".
 type AgentOf func(asking Spec) (Spec, string)
 
+// quoteBlock puts text in a fenced block (moved here from review.go, B15).
+func quoteBlock(s string) string { return fenced(s, "") }
+
+// fenced puts s in a fenced block whose fence is longer than any run of
+// backticks in s, so no line of s can close it and read as the prompt's own
+// text. info names the block's language.
+func fenced(s, info string) string {
+	run, longest := 0, 0
+	for _, c := range s {
+		if c == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	f := strings.Repeat("`", max(3, longest+1))
+	if !strings.HasSuffix(s, "\n") {
+		s += "\n"
+	}
+	return f + info + "\n" + s + f + "\n"
+}
+
 // ResultKey is the idempotency key of the turn job that delivers job id's
-// result. It holds a "/", which no key a caller sends may hold, so no request
-// can take it first.
-func ResultKey(id string) string { return "result/" + id }
+// result to session for on. It is scoped to the ON (his call, 2026-11-19):
+// several ons may watch one turn, each a distinct instruction that delivers its
+// own turn, so a key on (source, session) alone would make two distinct ons
+// share one delivery and the second silently do nothing. Scoping to the on also
+// keeps delivery to different sessions distinct. It holds a "/", which no key a
+// caller sends may hold, so no request can take it first. One on's own retry
+// keeps the same (on, id, session) and so delivers once; crash-safety across
+// ons is on_fires, keyed per on.
+func ResultKey(on, id, session string) string { return "result/" + on + "/" + id + "/" + session }
 
 // hashLinks is links as a job's request hash sees them: for asked work, its
 // request tree only. A retry with the same key from a later turn of the same
 // tree then gets the job the key first made; one from another tree gets
 // ErrKeyConflict.
 func hashLinks(l Links) Links {
-	l.ReviewSession = "" // named by control, not asked for
-	l.ApplyBy = nil      // who asked, not what
+	l.ApplyBy = nil // who asked, not what
 	if l.Chain != nil && l.Chain.By != "" {
 		l.Chain = &Chain{Root: l.Chain.Root}
 	}
@@ -345,11 +364,10 @@ const MaxResultPrompt = 32 << 10
 func ResultPrompt(j Job, c *workspace.Changes, reply string, name func(id string) string) string {
 	r, _ := ReadResult(j.Result)
 	var b strings.Builder
-	what := "the turn you asked for"
-	if j.Kind == KindReview {
-		what = "the review you asked for"
-	}
-	fmt.Fprintf(&b, "[AgentBus] This message is from AgentBus, not from the person: %s has ended, and this is its result.\n\n", what)
+	// B15: a review is a normal turn (the review_turn app), so a delivered
+	// result is always "the turn you asked for"; its verdict, if any, is the
+	// reviewer's reply, not a field core parses.
+	fmt.Fprintf(&b, "[AgentBus] This message is from AgentBus, not from the person: the turn you asked for has ended, and this is its result.\n\n")
 	id := agentName(j.Spec)
 	var about []string
 	agent := id
@@ -384,27 +402,7 @@ func ResultPrompt(j Job, c *workspace.Changes, reply string, name func(id string
 	if msg := firstOf(r.Refused, r.Error); msg != "" {
 		fmt.Fprintf(&b, "Error: %s\n", short(msg))
 	}
-	if j.Kind == KindReview {
-		v := "none"
-		if j.Verdict != nil {
-			v = *j.Verdict
-		}
-		fmt.Fprintf(&b, "Verdict: %s\n", v)
-		if len(j.Findings) > 0 {
-			b.WriteString("Findings:\n")
-			for i, f := range j.Findings {
-				if i == MaxResultFiles {
-					fmt.Fprintf(&b, "- (%d more)\n", len(j.Findings)-i)
-					break
-				}
-				loc := f.File
-				if f.Line > 0 {
-					loc = fmt.Sprintf("%s:%d", f.File, f.Line)
-				}
-				fmt.Fprintf(&b, "- %s %s %s\n", short(f.Severity), short(loc), short(f.Summary))
-			}
-		}
-	} else if c != nil {
+	if c != nil {
 		fmt.Fprintf(&b, "Changed files: %d\n", c.Count)
 		for i, f := range c.Files {
 			if i == MaxResultFiles {

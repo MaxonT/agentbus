@@ -101,17 +101,8 @@ func queueTurn(t *testing.T, svc *service, tok string, spec map[string]any) queu
 	return j
 }
 
-// reviewTurn sends POST /api/v0/turns/{turn}/review and answers its status
-// and the review's job, from svc's own queue.
-func reviewTurn(t *testing.T, svc *service, tok, turn string, body map[string]any) (int, queue.Job) {
-	t.Helper()
-	var st struct{ Turn string }
-	code := callAPI(t, svc, tok, "POST", "/api/v0/turns/"+turn+"/review", body, &st)
-	if code/100 != 2 {
-		return code, queue.Job{}
-	}
-	return code, jobOfTurn(t, svc, st.Turn)
-}
+// B15: the reviewTurn helper retired with the review route. Review is the
+// review_turn app; its end-to-end coverage is in the api package.
 
 // jobOfTurn is the job of a turn, from svc's own queue.
 func jobOfTurn(t *testing.T, svc *service, turn string) queue.Job {

@@ -66,6 +66,51 @@ func newJobsEnvAt(t *testing.T, now func() time.Time) *env {
 // the enrollment token and runner tokens, never the main token or the turns
 // token. A turn asked for through the client API is the job a runner takes,
 // with the same turn id. The jobs API is gone.
+// An invalid wait refuses before any turn is queued or its idempotency key
+// consumed (found in review 2026-11-19): a later valid create with the same key
+// still starts a fresh turn.
+func TestTurnWaitInvalidQueuesNothing(t *testing.T) {
+	e := newJobsEnv(t)
+	ref, conn := e.folderRef(t, "/tmp")
+	body := `{"agent":"claude","folder_ref":"` + ref + `","connector":"` + conn + `","prompt":"hi","idempotency_key":"k-wait-1"}`
+	if resp, raw := do(t, e.req(t, "POST", "/api/v0/turns?wait=bogus", strings.NewReader(body))); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST ?wait=bogus: %d %s, want 400", resp.StatusCode, raw)
+	}
+	// No turn was queued by the refused request.
+	resp, raw := do(t, e.req(t, "GET", "/api/v0/turns", nil))
+	var list TurnList
+	if json.Unmarshal([]byte(raw), &list) != nil || len(list.Turns) != 0 {
+		t.Fatalf("turns after a refused create: %s", raw)
+	}
+	// The key is free: a valid create with the same key starts a fresh turn.
+	resp, raw = do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(body)))
+	var st Started
+	if resp.StatusCode != http.StatusAccepted || json.Unmarshal([]byte(raw), &st) != nil || st.Turn == "" || st.Existing {
+		t.Fatalf("valid create reusing the key: %d %s, want a fresh turn", resp.StatusCode, raw)
+	}
+}
+
+// A wait=false retry of a turn stopped before it started reports the stop, not
+// a stale "queued" (found in review 2026-11-19): the async reply reads the
+// turn's real state.
+func TestTurnWaitFalseRetryAfterStop(t *testing.T) {
+	e := newJobsEnv(t)
+	ref, conn := e.folderRef(t, "/tmp")
+	body := `{"agent":"claude","folder_ref":"` + ref + `","connector":"` + conn + `","prompt":"hi","idempotency_key":"k-stop-1"}`
+	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns?wait=false", strings.NewReader(body)))
+	var st Started
+	if resp.StatusCode != http.StatusAccepted || json.Unmarshal([]byte(raw), &st) != nil || st.State != "queued" || st.Turn == "" {
+		t.Fatalf("wait=false create: %d %s, want queued", resp.StatusCode, raw)
+	}
+	if resp, raw := do(t, e.req(t, "POST", "/api/v0/turns/"+st.Turn+"/stop", strings.NewReader(`{}`))); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("stop the queued turn: %d %s", resp.StatusCode, raw)
+	}
+	// The retry must not say queued: the turn was stopped before it started.
+	if resp, raw := do(t, e.req(t, "POST", "/api/v0/turns?wait=false", strings.NewReader(body))); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("wait=false retry after stop: %d %s, want 409 (stopped before it started)", resp.StatusCode, raw)
+	}
+}
+
 func TestRunnerProtocolOnTheOneAPI(t *testing.T) {
 	e := newJobsEnv(t)
 	ref, conn := e.folderRef(t, "/tmp")
@@ -116,7 +161,7 @@ func TestRunnerProtocolOnTheOneAPI(t *testing.T) {
 // API's own, and every answer allows any origin.
 func TestTurnsCORS(t *testing.T) {
 	e := newJobsEnv(t)
-	r, _ := http.NewRequest("OPTIONS", e.srv.URL+"/api/v0/turns/t_x/review", nil)
+	r, _ := http.NewRequest("OPTIONS", e.srv.URL+"/api/v0/turns/t_x/stop", nil)
 	r.Header.Set("Origin", "http://localhost:5199")
 	r.Header.Set("Access-Control-Request-Method", "POST")
 	r.Header.Set("Access-Control-Request-Headers", "authorization, content-type")
@@ -140,9 +185,9 @@ func TestJobsOff(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound || !strings.Contains(raw, "no job queue") {
 		t.Fatalf("POST /api/v0/runner/take: %d %s", resp.StatusCode, raw)
 	}
-	resp, raw = do(t, e.req(t, "POST", "/api/v0/turns/t_1/review", strings.NewReader(`{"agent":"claude"}`)))
+	resp, raw = do(t, e.req(t, "POST", "/api/v0/turns/t_1/stop", strings.NewReader(`{}`)))
 	if resp.StatusCode != http.StatusNotFound || !strings.Contains(raw, "no queue") {
-		t.Fatalf("POST /api/v0/turns/t_1/review: %d %s", resp.StatusCode, raw)
+		t.Fatalf("POST /api/v0/turns/t_1/stop: %d %s", resp.StatusCode, raw)
 	}
 }
 

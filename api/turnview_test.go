@@ -183,12 +183,12 @@ func TestQueuedTurnOrigin(t *testing.T) {
 	e := newJobsEnv(t)
 	asked, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "", queue.Spec{Harness: "claude", Prompt: "asked"},
 		queue.Links{Chain: &queue.Chain{Root: "s_ask", Depth: 1, By: "t_ask", BySession: "s_ask"}},
-		queue.Limits{MaxDepth: 2, MaxPerTurn: 10, MaxPerTree: 30}, "", queue.Maker{})
+		queue.Limits{MaxDepth: 2, MaxPerTurn: 10, MaxPerTree: 30}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, _, err := e.q.Create(queue.DefaultTeam, queue.KindTurn, "", queue.Spec{Session: "s_ask", Prompt: "[AgentBus] done"},
-		queue.Links{ResultOf: &queue.ResultOf{Job: "job_x", Kind: queue.KindReview, Session: "s_work", Turn: "t_work", Agent: "codex"}})
+		queue.Links{ResultOf: &queue.ResultOf{Job: "job_x", Kind: queue.KindTurn, Session: "s_work", Turn: "t_work", Agent: "codex"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestQueuedTurnOrigin(t *testing.T) {
 		t.Fatalf("an asked turn, queued: %d %+v", code, one.Turn.Origin)
 	}
 	if code := getJSON(t, e, "/api/v0/turns/"+result.Turn, &one); code != 200 || one.Turn.Origin == nil ||
-		*one.Turn.Origin != (event.Origin{Kind: event.OriginResult, Session: "s_work", Turn: "t_work", TurnKind: queue.KindReview, Agent: "codex"}) {
+		*one.Turn.Origin != (event.Origin{Kind: event.OriginResult, Session: "s_work", Turn: "t_work", TurnKind: queue.KindTurn, Agent: "codex"}) {
 		t.Fatalf("a delivered result, queued: %d %+v", code, one.Turn.Origin)
 	}
 }
@@ -230,38 +230,8 @@ func TestTurnNumber(t *testing.T) {
 	}
 }
 
-// A review's refusals: a reviewer of the wrong shape, an unknown field, a
-// turn this service does not know, and a turn that has not ended.
-func TestReviewRefusals(t *testing.T) {
-	e := newJobsEnv(t)
-	ref, conn := e.folderRef(t, "/tmp")
-	resp, raw := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(`{"agent":"claude","folder_ref":"`+ref+`","connector":"`+conn+`","prompt":"x"}`)))
-	var st Started
-	if resp.StatusCode != 202 || json.Unmarshal([]byte(raw), &st) != nil {
-		t.Fatalf("POST /turns: %d %s", resp.StatusCode, raw)
-	}
-	for _, c := range []struct {
-		turn, body string
-		want       int
-		says       string
-	}{
-		{st.Turn, `{}`, 400, "agent is required"},
-		{st.Turn, `{"model":"m"}`, 400, "agent is required"},
-		{st.Turn, `{"agent":"-x"}`, 400, "agent must match"},
-		{st.Turn, `{"agent":"claude","model":"a b"}`, 400, "model must match"},
-		{st.Turn, `{"agent":"claude","extra":1}`, 400, ""},
-		{st.Turn, `{"agent":"claude","idempotency_key":"a b"}`, 400, ""},
-		{st.Turn, `not json`, 400, ""},
-		{"t_none", `{"agent":"claude"}`, 404, ""},
-		// Queued: it has not ended, so it cannot be reviewed.
-		{st.Turn, `{"agent":"claude"}`, 409, ""},
-	} {
-		if resp, raw := do(t, e.req(t, "POST", "/api/v0/turns/"+c.turn+"/review", strings.NewReader(c.body))); resp.StatusCode != c.want || !strings.Contains(raw, c.says) {
-			t.Errorf("review %s %s: %d %s, want %d %q", c.turn, c.body, resp.StatusCode, raw, c.want, c.says)
-		}
-	}
-}
-
+// B15: TestReviewRefusals retired with the review route. Its request-validation
+// is now the review_turn app's input schema plus each step's own route checks.
 // The runner protocol is described on its own, never in the client API's
 // description, and both pages and both plain files are served without the
 // token.

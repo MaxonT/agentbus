@@ -605,7 +605,7 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request, rn queue.Runner) 
 // now (credentials.Plug.Ready), or "". A job whose agent control cannot
 // tell yet gets "": the relay says why on its first call.
 func (s *Server) signin(j queue.Job) string {
-	if j.Kind != queue.KindTurn && j.Kind != queue.KindReview {
+	if j.Kind != queue.KindTurn {
 		return ""
 	}
 	r, ok := s.cfg.Credentials.(interface{ Ready(credentials.Need) string })
@@ -682,21 +682,21 @@ type FinishCall struct {
 	Number    int              `json:"number"`
 	Status    string           `json:"status"`
 	Reason    string           `json:"reason,omitempty"`
-	Verdict   *string          `json:"verdict,omitempty"`
 	Result    json.RawMessage  `json:"result,omitempty"`
 	LastSeq   int64            `json:"last_seq"`
 	Session   string           `json:"session,omitempty"`
 	Workspace *queue.Workspace `json:"workspace,omitempty"`
 }
 
-// Finishing is the body of finish for the attempt numbered number.
+// Finishing is the body of finish for the attempt numbered number. B15: no
+// verdict on the wire — a review is a normal turn.
 func Finishing(number int, f queue.Finish) FinishCall {
-	return FinishCall{Number: number, Status: f.Status, Reason: f.Reason, Verdict: f.Verdict, Result: f.Result,
+	return FinishCall{Number: number, Status: f.Status, Reason: f.Reason, Result: f.Result,
 		LastSeq: f.LastSeq, Session: f.Session, Workspace: f.Workspace}
 }
 
 func (b FinishCall) finish() queue.Finish {
-	return queue.Finish{Status: b.Status, Reason: b.Reason, Verdict: b.Verdict, Result: b.Result, LastSeq: b.LastSeq,
+	return queue.Finish{Status: b.Status, Reason: b.Reason, Result: b.Result, LastSeq: b.LastSeq,
 		Session: b.Session, Workspace: b.Workspace}
 }
 

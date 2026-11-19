@@ -23,12 +23,9 @@ package api
 // their SHA-256, and revokes each when its turn's child exits.
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 
@@ -54,9 +51,6 @@ const (
 	treeTurn
 	// askTurn: POST /api/v0/turns. The handler checks the rest (askChecks).
 	askTurn
-	// askReview: {id} is a turn of a session in the token's request tree, to
-	// review.
-	askReview
 	// askedTurn: {id} is a turn that work in the token's request tree asked
 	// for, to stop.
 	askedTurn
@@ -86,10 +80,9 @@ const (
 const (
 	turnWriteRefused = "a turn token cannot call this route; it takes the main token. " +
 		"A turn token reads its request tree's sessions and turns, lists agents, " +
-		"and asks for work with POST /api/v0/turns and POST /api/v0/turns/{id}/review"
+		"and asks for work with POST /api/v0/turns"
 	turnSessionRefused  = "a turn token reads only its own session and the sessions its request tree started"
 	turnCallRefused     = "a turn token reads only the calls of its own session and the sessions its request tree started"
-	turnReviewLeaf      = "a review reviews the turn and reports a verdict; it cannot ask for work, review another turn, apply changes or stop work. Read the record and reply with your verdict."
 	turnContinueRefused = "a turn token does not continue sessions: ask_agent starts a new one, and its result comes back to your session " +
 		"as a later turn; to follow up, ask again with what the result said"
 	turnFolderRefused = "a turn token starts sessions only in its own session's folder, or a folder inside it; " +
@@ -192,21 +185,11 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 	if msg := turnRefusal(rt, rules, apply); msg != "" {
 		return refuse(msg)
 	}
-	// A review is a leaf (B12): it reviews the turn and reports a verdict, so
-	// its token never asks for, reviews, applies or stops further work. Its one
-	// turn runs in a copy that is torn down at the end, so there is nothing for
-	// a later turn to run in. Reading the record is allowed. (Read-only turns
-	// retired, but a review stays a leaf at the token, not at the harness.)
-	switch rt.turn {
-	case askTurn, askReview, applyTurnTok, askedTurn:
-		if a.cfg.Queue != nil {
-			if isReview, err := a.cfg.Queue.IsReview(queue.DefaultTeam, g.Session); err != nil {
-				return failed(err)
-			} else if isReview {
-				return refuse(turnReviewLeaf)
-			}
-		}
-	}
+	// B15 (his call, 2026-11-19): no leaf rule. A review is a normal turn, so
+	// there is no "is this a review" branch here; the ordinary asked-work caps
+	// (depth, jobs, cost) bound it like any asked turn. The old IsReview leaf
+	// check retired with the review kind.
+	//
 	// A turn token reaches its own request tree, always: its own session,
 	// the tree's root and every session work in the tree started. Start and
 	// continue are told apart by the body: askChecks.
@@ -255,7 +238,7 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 		} else if !ok {
 			return refuse(turnSessionRefused)
 		}
-	case askReview, applyTurnTok:
+	case applyTurnTok:
 		if a.cfg.Queue == nil {
 			return failed(queue.ErrNotFound)
 		}
@@ -285,28 +268,9 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 	default:
 		return refuse(turnWriteRefused)
 	}
-	if rt.turn == askReview {
-		// The review's idempotency key, read from its body and put back: a
-		// retry of a review already made is not new work.
-		var key struct {
-			Key string `json:"idempotency_key"`
-		}
-		if r.Body != nil {
-			b, err := io.ReadAll(r.Body)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "the body could not be read")
-				return nil, false
-			}
-			r.Body = io.NopCloser(bytes.NewReader(b))
-			_ = json.Unmarshal(b, &key)
-		}
-		if msg, err := a.overBudget(g, perm, key.Key); err != nil {
-			a.internal(w)
-			return nil, false
-		} else if msg != "" {
-			return refuse(msg)
-		}
-	}
+	// B15: the review route's own budget gate retired with it. A review is now a
+	// normal asked turn, so its cost cap is applied by the startTurn path (the
+	// app's first step), overBudget in askChecks, like any ask_agent turn.
 	ctx := context.WithValue(r.Context(), grantKey{}, &turnCall{g: g, perm: perm})
 	return r.WithContext(ctx), true
 }

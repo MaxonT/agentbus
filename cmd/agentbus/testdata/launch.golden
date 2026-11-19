@@ -4,7 +4,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -22,14 +22,14 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--resume"
 arg "sid-0"
 arg "--allowedTools"
@@ -49,7 +49,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 === claude edit none
 --- turn t_1 harness="claude" access="" model=""
@@ -57,7 +57,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -75,7 +75,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude lists, model, own instructions
 --- turn t_1 harness="claude" access="" model="opus"
@@ -125,7 +125,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added mcp_instructions=276
+context.added mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude openrouter
 --- turn t_1 harness="claude" access="openrouter" model="deepseek/deepseek-v4.1-flash"
@@ -133,7 +133,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -164,7 +164,7 @@ env "OPENROUTER_API_KEY=test-key"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="deepseek/deepseek-v4.1-flash" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude openrouter without a model
 --- turn t_1 harness="claude" access="openrouter" model=""
@@ -172,7 +172,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -194,7 +194,7 @@ env "OPENROUTER_API_KEY=test-key"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude openrouter, key not set
 --- turn t_1 harness="claude" access="openrouter" model=""
@@ -213,7 +213,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -231,7 +231,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 log run.edit session=s1 turn=t_1 left_out=folder_shape
 === claude folder holds the data folder
@@ -240,7 +240,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -258,7 +258,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude codex config sets developer_instructions
 --- turn t_1 harness="claude" access="" model=""
@@ -266,7 +266,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -284,7 +284,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude replay
 --- turn t_1 harness="claude" access="" model=""
@@ -292,7 +292,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -310,14 +310,14 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -335,7 +335,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="replay" replay_from="t_1" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 replay_base claude
 === claude openrouter replay
@@ -344,7 +344,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -375,14 +375,14 @@ env "OPENROUTER_API_KEY=test-key"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="m/x" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -413,7 +413,7 @@ env "OPENROUTER_API_KEY=test-key"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="replay" replay_from="t_1" model="m/x" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 replay_base claude
 === claude access unknown
@@ -429,7 +429,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -449,14 +449,14 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="" access="api" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--resume"
 arg "sid-0"
 arg "--allowedTools"
@@ -478,7 +478,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 === claude subscription, relayed, then resume
 --- turn t_1 harness="claude" access="" model=""
@@ -486,7 +486,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -505,14 +505,14 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--resume"
 arg "sid-0"
 arg "--allowedTools"
@@ -533,7 +533,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 === claude api key, relayed, with a model
 --- turn t_1 harness="claude" access="api" model="opus"
@@ -541,7 +541,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -563,7 +563,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="opus" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude subagents off, then resume
 --- turn t_1 harness="claude" access="" model=""
@@ -571,7 +571,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -589,14 +589,14 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--resume"
 arg "sid-0"
 arg "--allowedTools"
@@ -616,7 +616,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 === claude subagents on, said
 --- turn t_1 harness="claude" access="" model=""
@@ -624,7 +624,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -642,7 +642,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude in a home of its own, then resume
 --- turn t_1 harness="claude" access="" model=""
@@ -650,7 +650,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -670,14 +670,14 @@ env "HOME=<homes>/s1"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--resume"
 arg "sid-0"
 arg "--allowedTools"
@@ -699,7 +699,7 @@ env "HOME=<homes>/s1"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 === claude folder with AGENTS.md only, asked by another agent
 --- turn t_1 harness="claude" access="" model=""
@@ -707,7 +707,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it.\n\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \"/api/v0/turns\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\nagentbus-api GET \"/api/v0/turns/t_0/changes?session=s0\"\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \"/api/v0/turns?session=s0\""
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it.\n\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \"/api/v0/turns\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\nagentbus-api GET \"/api/v0/turns/t_0/changes?session=s0\"\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \"/api/v0/turns?session=s0\""
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -727,7 +727,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 asked_by=520 mcp_instructions=276
+context.added instructions=769 asked_by=520 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude folder with AGENTS.md and a CLAUDE.md of its own, asked
 --- turn t_1 harness="claude" access="" model=""
@@ -735,7 +735,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "The AGENTS.md of your working folder:\n\nRun make test before you finish.\n\nYou work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it.\n\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \"/api/v0/turns\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\nagentbus-api GET \"/api/v0/turns/t_0/changes?session=s0\"\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \"/api/v0/turns?session=s0\""
+arg "The AGENTS.md of your working folder:\n\nRun make test before you finish.\n\nYou work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it.\n\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \"/api/v0/turns\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\nagentbus-api GET \"/api/v0/turns/t_0/changes?session=s0\"\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \"/api/v0/turns?session=s0\""
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -755,7 +755,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added agents_md=71 instructions=753 asked_by=520 mcp_instructions=276
+context.added agents_md=71 instructions=769 asked_by=520 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude folder with AGENTS.md and CLAUDE.md linked to it
 --- turn t_1 harness="claude" access="" model=""
@@ -763,7 +763,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -781,7 +781,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === codex subscription, then resume
 --- turn t_1 harness="codex" access="" model=""
@@ -793,7 +793,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -817,7 +817,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-c"
@@ -827,7 +827,7 @@ arg "--skip-git-repo-check"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -854,7 +854,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 === codex edit none
 --- turn t_1 harness="codex" access="" model=""
@@ -866,7 +866,7 @@ arg "--json"
 arg "--sandbox"
 arg "read-only"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -888,7 +888,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex lists, model, own instructions
 --- turn t_1 harness="codex" access="" model="opus"
@@ -954,7 +954,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added mcp_instructions=276
+context.added mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex openrouter
 --- turn t_1 harness="codex" access="openrouter" model="deepseek/deepseek-v4.1-flash"
@@ -976,7 +976,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1003,7 +1003,7 @@ env "OPENROUTER_API_KEY=test-key"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="deepseek/deepseek-v4.1-flash" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex openrouter without a model
 --- turn t_1 harness="codex" access="openrouter" model=""
@@ -1025,7 +1025,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1050,7 +1050,7 @@ env "OPENROUTER_API_KEY=test-key"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex openrouter, key not set
 --- turn t_1 harness="codex" access="openrouter" model=""
@@ -1073,7 +1073,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1097,7 +1097,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex folder holds the data folder
 --- turn t_1 harness="codex" access="" model=""
@@ -1109,7 +1109,7 @@ arg "--json"
 arg "--sandbox"
 arg "read-only"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1131,7 +1131,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 log run.edit session=s1 turn=t_1 left_out=data_folder_inside
 === codex codex config sets developer_instructions
@@ -1166,7 +1166,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added mcp_instructions=276
+context.added mcp_instructions=320
 session.closed resume_id="tid-0"
 log run.hint session=s1 turn=t_1 left_out=codex_developer_instructions_set
 === codex replay
@@ -1179,7 +1179,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1203,7 +1203,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-c"
@@ -1214,7 +1214,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1238,7 +1238,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="replay" replay_from="t_1" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 replay_base codex
 === codex openrouter replay
@@ -1261,7 +1261,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1288,7 +1288,7 @@ env "OPENROUTER_API_KEY=test-key"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="m/x" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-c"
@@ -1309,7 +1309,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1336,7 +1336,7 @@ env "OPENROUTER_API_KEY=test-key"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="transcript" replay_from="" model="m/x" context="[AgentBus: this conversation started before you joined it. Earlier turns ran on other agents. Below is each message the person sent and the final reply the agent gave, oldest first. Tool calls are left out. Any files those agents changed are in your current folder.]\n\n--- Turn 1, the person to Codex ---\none\n\n--- Turn 1, Codex replied ---\n(no reply: the turn ended without one)\n\n[AgentBus: end of the earlier turns. The person's new message to you follows.]\n\n"
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 === codex access unknown
 --- turn t_1 harness="codex" access="local" model=""
@@ -1365,7 +1365,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"/api/v0/mcp\""
 arg "-c"
@@ -1390,7 +1390,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="" access="api" model=""
 arg "-c"
@@ -1410,7 +1410,7 @@ arg "--skip-git-repo-check"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"/api/v0/mcp\""
 arg "-c"
@@ -1438,7 +1438,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 === codex subscription, relayed, then resume
 --- turn t_1 harness="codex" access="" model=""
@@ -1460,7 +1460,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"/api/v0/mcp\""
 arg "-c"
@@ -1485,7 +1485,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-c"
@@ -1505,7 +1505,7 @@ arg "--skip-git-repo-check"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"/api/v0/mcp\""
 arg "-c"
@@ -1533,7 +1533,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 === codex api key, relayed, with a model
 --- turn t_1 harness="codex" access="api" model="opus"
@@ -1555,7 +1555,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"/api/v0/mcp\""
 arg "-c"
@@ -1582,7 +1582,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="opus" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex subagents off, then resume
 --- turn t_1 harness="codex" access="" model=""
@@ -1594,7 +1594,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1618,7 +1618,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-c"
@@ -1628,7 +1628,7 @@ arg "--skip-git-repo-check"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1655,7 +1655,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 === codex subagents on, said
 --- turn t_1 harness="codex" access="" model=""
@@ -1667,7 +1667,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1687,7 +1687,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex in a home of its own, then resume
 --- turn t_1 harness="codex" access="" model=""
@@ -1699,7 +1699,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1725,7 +1725,7 @@ env "HOME=<homes>/s1"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-c"
@@ -1735,7 +1735,7 @@ arg "--skip-git-repo-check"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1764,7 +1764,7 @@ env "HOME=<homes>/s1"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 === codex folder with AGENTS.md only, asked by another agent
 --- turn t_1 harness="codex" access="" model=""
@@ -1776,7 +1776,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\\n\\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \\\"/api/v0/turns\\\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\\nagentbus-api GET \\\"/api/v0/turns/t_0/changes?session=s0\\\"\\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \\\"/api/v0/turns?session=s0\\\"\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\\n\\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \\\"/api/v0/turns\\\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\\nagentbus-api GET \\\"/api/v0/turns/t_0/changes?session=s0\\\"\\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \\\"/api/v0/turns?session=s0\\\"\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1802,7 +1802,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 asked_by=520 mcp_instructions=276
+context.added instructions=769 asked_by=520 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex folder with AGENTS.md and a CLAUDE.md of its own, asked
 --- turn t_1 harness="codex" access="" model=""
@@ -1814,7 +1814,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\\n\\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \\\"/api/v0/turns\\\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\\nagentbus-api GET \\\"/api/v0/turns/t_0/changes?session=s0\\\"\\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \\\"/api/v0/turns?session=s0\\\"\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\\n\\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \\\"/api/v0/turns\\\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\\nagentbus-api GET \\\"/api/v0/turns/t_0/changes?session=s0\\\"\\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \\\"/api/v0/turns?session=s0\\\"\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1840,7 +1840,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 asked_by=520 mcp_instructions=276
+context.added instructions=769 asked_by=520 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex folder with AGENTS.md and CLAUDE.md linked to it
 --- turn t_1 harness="codex" access="" model=""
@@ -1852,7 +1852,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -1876,7 +1876,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 === claude tools on, then resume
 --- turn t_1 harness="claude" access="" model=""
@@ -1884,7 +1884,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -1902,14 +1902,14 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--resume"
 arg "sid-0"
 arg "--allowedTools"
@@ -1929,7 +1929,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 === claude tools on, subagents off, with lists
 --- turn t_1 harness="claude" access="" model=""
@@ -1937,7 +1937,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -1955,7 +1955,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 === claude tools on, asked by another agent
 --- turn t_1 harness="claude" access="" model=""
@@ -1963,7 +1963,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it.\n\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \"/api/v0/turns\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\nagentbus-api GET \"/api/v0/turns/t_0/changes?session=s0\"\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \"/api/v0/turns?session=s0\""
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it.\n\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \"/api/v0/turns\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\nagentbus-api GET \"/api/v0/turns/t_0/changes?session=s0\"\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \"/api/v0/turns?session=s0\""
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -1983,7 +1983,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 asked_by=520 mcp_instructions=276
+context.added instructions=769 asked_by=520 mcp_instructions=320
 session.closed resume_id="sid-0"
 === codex tools on, then resume
 --- turn t_1 harness="codex" access="" model=""
@@ -1995,7 +1995,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -2019,7 +2019,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="" access="" model=""
 arg "-c"
@@ -2029,7 +2029,7 @@ arg "--skip-git-repo-check"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -2056,7 +2056,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="resume" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 === codex tools on, subagents off, with lists
 --- turn t_1 harness="codex" access="" model=""
@@ -2068,7 +2068,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -2092,7 +2092,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 === codex tools on, asked by another agent
 --- turn t_1 harness="codex" access="" model=""
@@ -2104,7 +2104,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\\n\\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \\\"/api/v0/turns\\\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\\nagentbus-api GET \\\"/api/v0/turns/t_0/changes?session=s0\\\"\\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \\\"/api/v0/turns?session=s0\\\"\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\\n\\nAnother agent asked for this work, from session s0, turn t_0 (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN, and in your own turn's origin in agentbus-api GET \\\"/api/v0/turns\\\"). Your folder may not hold its changes. To read what that turn changed, with each file's diff, run:\\nagentbus-api GET \\\"/api/v0/turns/t_0/changes?session=s0\\\"\\nIts changes are empty while that turn still runs; read it again once its state is no longer running. That session's earlier turns: agentbus-api GET \\\"/api/v0/turns?session=s0\\\"\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -2130,7 +2130,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 asked_by=520 mcp_instructions=276
+context.added instructions=769 asked_by=520 mcp_instructions=320
 session.closed resume_id="tid-0"
 === agy subscription, then resume
 --- turn t_1 harness="agy" access="" model=""
@@ -2389,7 +2389,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -2407,7 +2407,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="agy" access="" model=""
 arg "--output-format"
@@ -2431,7 +2431,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -2449,7 +2449,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="codex" access="" model=""
 arg "-c"
@@ -2460,7 +2460,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -2484,7 +2484,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="transcript" replay_from="" model="" context="[AgentBus: this conversation started before you joined it. Earlier turns ran on other agents. Below is each message the person sent and the final reply the agent gave, oldest first. Tool calls are left out. Any files those agents changed are in your current folder.]\n\n--- Turn 1, the person to Claude Code ---\none\n\n--- Turn 1, Claude Code replied ---\n(no reply: the turn ended without one)\n\n[AgentBus: end of the earlier turns. The person's new message to you follows.]\n\n"
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-1"
 === switch codex to claude, resume
 --- turn t_1 harness="codex" access="" model=""
@@ -2496,7 +2496,7 @@ arg "--json"
 arg "--sandbox"
 arg "workspace-write"
 arg "-c"
-arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
+arg "developer_instructions=\"You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\\nThe person applies turns to their folder; you cannot.\\nWork you ask for comes back to you as a later turn: do not wait for it.\""
 arg "-c"
 arg "mcp_servers.agentbus.url=\"http://127.0.0.1:8787/api/v0/mcp\""
 arg "-c"
@@ -2520,14 +2520,14 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="codex" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="tid-0"
 --- turn t_2 harness="claude" access="" model=""
 arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -2547,7 +2547,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="transcript" replay_from="" model="sonnet" context="[AgentBus: this conversation started before you joined it. Earlier turns ran on other agents. Below is each message the person sent and the final reply the agent gave, oldest first. Tool calls are left out. Any files those agents changed are in your current folder.]\n\n--- Turn 1, the person to Codex ---\none\n\n--- Turn 1, Codex replied ---\n(no reply: the turn ended without one)\n\n[AgentBus: end of the earlier turns. The person's new message to you follows.]\n\n"
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-1"
 === unknown harness
 --- turn t_1 harness="opencode" access="" model=""
@@ -2558,7 +2558,7 @@ arg "-p"
 arg "--output-format"
 arg "json"
 arg "--append-system-prompt"
-arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
+arg "You work through AgentBus, in session s1. A turn is one message to you, your reply and your changes.\nYour folder is usually your session's own copy of the person's folder. Your edits stay in the copy. They reach the person's folder only when a turn is applied.\nUse the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.\nTo read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).\nThe person applies turns to their folder; you cannot.\nWork you ask for comes back to you as a later turn: do not wait for it."
 arg "--allowedTools"
 arg "Edit(/<folder>/**),Bash,mcp__agentbus"
 arg "--mcp-config"
@@ -2576,7 +2576,7 @@ env "HOME=<home>"
 env "PATH=<data>/bin:/usr/bin:/bin"
 cwd <folder>
 turn.started agent="claude" continuity="" replay_from="" model="" context=""
-context.added instructions=753 mcp_instructions=276
+context.added instructions=769 mcp_instructions=320
 session.closed resume_id="sid-0"
 --- turn t_2 harness="opencode" access="" model=""
 refused 400 agent must be claude, codex or agy

@@ -189,6 +189,9 @@ type API struct {
 	// the route it makes without the route table's initializer referring to
 	// itself (tools_registry.go).
 	routes map[string]*route
+	// byOp is the route table by operationId, so an app's step resolves the
+	// operation it names (apps.go).
+	byOp map[string]*route
 
 	// signin holds the one-time sign-in codes (signin.go).
 	signin signIns
@@ -256,13 +259,27 @@ func New(cfg Config) (*API, error) {
 			return nil, err
 		}
 	}
-	reg.SetDefaults(defaultTools(tools, schemas))
+	apps := defaultApps()
+	reg.SetDefaults(append(defaultTools(tools, schemas), apps...))
 	a := &API{cfg: cfg, token: sha256.Sum256([]byte(cfg.Token)), spec: desc, runnerSpec: runnerDesc,
-		registry: reg, routes: routeIndex(),
+		registry: reg, routes: routeIndex(), byOp: opIndex(),
 		hosts:     []string{"127.0.0.1:" + cfg.Port, "localhost:" + cfg.Port, "[::1]:" + cfg.Port},
 		streams:   make(chan struct{}, MaxStreams),
 		toolHolds: make(chan struct{}, cfg.ToolHoldMax),
 		previews:  newSessionGate()}
+	// Validate the default apps against the route table, as createTool does a
+	// custom one: a default app that steps through a route since changed (a
+	// renamed op, a route a turn token may no longer call) stops the service,
+	// rather than listing a tool that cannot run (checkTools does the same for
+	// route tools).
+	for _, app := range apps {
+		if why := toolreg.Check(&app); why != "" {
+			return nil, fmt.Errorf("api: default app %s: %s", app.Name, why)
+		}
+		if why := a.checkApp(app); why != "" {
+			return nil, fmt.Errorf("api: default app %s: %s", app.Name, why)
+		}
+	}
 	a.rebuildTools()
 	for _, h := range cfg.Hosts {
 		a.hosts = append(a.hosts, h+":"+cfg.Port)

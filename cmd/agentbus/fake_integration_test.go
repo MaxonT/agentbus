@@ -208,8 +208,9 @@ func fakeAgent() {
 		}
 	}
 	// With AGENTBUS_FAKE_ASK, a turn whose prompt is "ask someone" asks
-	// another agent through the API, with its own token, as agentbus-api
-	// does: POST /api/v0/turns with that body.
+	// another agent through the API, with its own token, as the ask_agent app
+	// does (B15): POST /api/v0/turns to start the turn, then POST /api/v0/ons to
+	// register the on that delivers its reply to this session.
 	if b := os.Getenv("AGENTBUS_FAKE_ASK"); b != "" && len(os.Args) > 1 && os.Args[len(os.Args)-1] == "ask someone" {
 		req, _ := http.NewRequest("POST", os.Getenv("AGENTBUS_URL")+"/api/v0/turns", strings.NewReader(b))
 		req.Header.Set("Content-Type", "application/json")
@@ -217,6 +218,17 @@ func fakeAgent() {
 		if resp, err := http.DefaultClient.Do(req); err == nil {
 			out, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			var started struct {
+				Turn string `json:"turn"`
+			}
+			if json.Unmarshal(out, &started) == nil && started.Turn != "" {
+				on, _ := http.NewRequest("POST", os.Getenv("AGENTBUS_URL")+"/api/v0/ons", strings.NewReader(`{"turn":"`+started.Turn+`"}`))
+				on.Header.Set("Content-Type", "application/json")
+				on.Header.Set("Authorization", "Bearer "+os.Getenv("AGENTBUS_TOKEN"))
+				if r2, err := http.DefaultClient.Do(on); err == nil {
+					r2.Body.Close()
+				}
+			}
 			if p := os.Getenv("AGENTBUS_FAKE_ASKED"); p != "" {
 				os.WriteFile(p, []byte(fmt.Sprintf("%d %s", resp.StatusCode, out)), 0o600)
 			}

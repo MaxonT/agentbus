@@ -148,14 +148,12 @@ func (f *finisher) await(ctx context.Context, team, id, attempt string, wait tim
 // first (keepOutcomes), from the saved finish alone, then the job's end
 // (queue.End), the commit point. Only the finisher calls it.
 func endAccepted(rec Recorder, q *queue.Queue, a queue.AcceptedFinish) (queue.Job, error) {
-	kept, verdict, findings, err := keepOutcomes(rec, a.Job, a.Finish)
+	kept, err := keepOutcomes(rec, a.Job, a.Finish)
 	if err != nil {
 		return queue.Job{}, errOutcome
 	}
 	fin := a.Finish
 	fin.Kept = kept
-	fin.ReviewVerdict = verdict
-	fin.ReviewFindings = findings
 	return q.End(a.Runner, a.Attempt, a.Number, fin)
 }
 

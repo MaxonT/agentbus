@@ -40,6 +40,31 @@ type Maker struct {
 	Turn    string `json:"turn"`
 }
 
+// Delivery, set on a turn create, records a turn.completed on in the SAME
+// transaction as the turn: when the turn completes, its reply is delivered to
+// Session, run on Maker.Turn's agent. Start and deliver are then one write under
+// the one authorization that starts the turn (his call (a), 2026-11-19), so no
+// later, separately-authorized step can be lost — closing the two-step app's
+// token-lifetime window found across three review rounds. The ask_agent and
+// review_turn apps set it; POST /api/v0/ons stays for every other case.
+type Delivery struct {
+	Session string
+	Maker   Maker
+}
+
+// deliveryKey namespaces a turn's idempotency key for the delivery on recorded
+// atomically with it, so that on cannot collide with a standalone POST /ons that
+// used the same key (found in review 2026-11-19): a caller's key can never hold
+// "/", so "delivery/"+key is unreachable by one. The turn's own key still covers
+// both — a retry dedups the turn and this on together — and a keyless turn gives
+// a keyless (always-new) on.
+func deliveryKey(turnKey string) string {
+	if turnKey == "" {
+		return ""
+	}
+	return "delivery/" + turnKey
+}
+
 // On is a registered standing instruction.
 type On struct {
 	ID      string `json:"id"`
@@ -51,39 +76,23 @@ type On struct {
 	Created int64  `json:"created"`
 }
 
-// onReg is an on to register in the same transaction as the turn it watches,
-// so the two are durable together: an ask registers one for the turn it starts
-// (api/runs.go, api/review.go), and a control stop between the two writes can
-// no longer leave an asked turn with no on and strand its result. Event is
-// always turn.completed; the subject is the turn create assigns.
-type onReg struct {
-	session string
-	maker   Maker
-}
-
-// insertOn writes the on row for turnID inside tx, idempotent per subject so a
-// retry of the same ask does not add a second. "" turnID is a no-op.
-func insertOn(tx *sql.Tx, team, turnID string, on *onReg, now int64) error {
-	if on == nil || turnID == "" {
-		return nil
-	}
-	mk, err := json.Marshal(on.maker)
-	if err != nil {
-		return fmt.Errorf("queue: register on: %w", err)
-	}
-	if _, err := tx.Exec(`INSERT INTO ons(id, team, event, subject, session, maker, created) VALUES(?,?,?,?,?,?,?)
-		ON CONFLICT(team, event, subject) DO NOTHING`, NewID("on_"), team, OnTurnCompleted, turnID, on.session, string(mk), now); err != nil {
-		return fmt.Errorf("queue: register on: %w", err)
-	}
-	return nil
-}
+// B15 (his call (a), 2026-11-19): a turn create MAY record its delivery on in
+// the same transaction, when POST /api/v0/turns is given a delivery (see
+// create and Delivery). That is how the ask_agent and review_turn apps deliver,
+// in one atomic write. RegisterOn below is the separate, public path POST
+// /api/v0/ons uses for every other case.
 
 // RegisterOn stores an on and returns it. event must be known; subject (the
 // turn watched) and session (where the action starts its turn) are required.
-// It is idempotent per (event, subject): registering the same subject again
-// returns the on already stored, unchanged, so the ask path may register on
-// both the first request and a retry.
-func (q *Queue) RegisterOn(team, event, subject, session string, maker Maker) (On, error) {
+//
+// Dedup is by idempotency_key ONLY, the SAME mechanism POST /api/v0/turns uses
+// (his call, 2026-11-19): a non-empty key already used returns the on it made
+// (same subject and session), so an app's registerOn step, run with a key
+// derived from the tool call, is a no-op on a retry; a reused key with other
+// fields is ErrKeyConflict. There is no one-on-per-subject rule — several ons
+// may watch one turn — so a key is never left unbound by a subject collision
+// (the round-3 finding). A keyless on is always a new registration.
+func (q *Queue) RegisterOn(team, event, subject, session, key string, maker Maker) (On, error) {
 	if event != OnTurnCompleted {
 		return On{}, fmt.Errorf("%w: %q", ErrUnknownEvent, event)
 	}
@@ -95,25 +104,39 @@ func (q *Queue) RegisterOn(team, event, subject, session string, maker Maker) (O
 		return On{}, fmt.Errorf("queue: register on: %w", err)
 	}
 	o := On{ID: NewID("on_"), Team: team, Event: event, Subject: subject, Session: session, Maker: maker, Created: nanos(q.now())}
-	res, err := q.db.Exec(`INSERT INTO ons(id, team, event, subject, session, maker, created) VALUES(?,?,?,?,?,?,?)
-		ON CONFLICT(team, event, subject) DO NOTHING`,
-		o.ID, o.Team, o.Event, o.Subject, o.Session, string(mk), o.Created)
+	// The insert and the dedup are ONE atomic statement: ON CONFLICT on the key
+	// index, not a read-then-insert. Two concurrent requests with the same key
+	// then both land here, one inserts and the other does nothing (never a
+	// uniqueness error, the round-4 finding). A keyless on never conflicts (the
+	// index is partial on idem_key != '') and is always new.
+	res, err := q.db.Exec(`INSERT INTO ons(id, team, event, subject, session, maker, idem_key, created) VALUES(?,?,?,?,?,?,?,?)
+		ON CONFLICT(team, idem_key) WHERE idem_key != '' DO NOTHING`,
+		o.ID, o.Team, o.Event, o.Subject, o.Session, string(mk), key, o.Created)
 	if err != nil {
 		return On{}, fmt.Errorf("queue: register on: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
-		return o, nil
+		return o, nil // inserted: a new on, or a keyless one
 	}
-	// Already registered for this subject: return the stored one.
-	return q.onBySubject(team, event, subject)
+	// The key was already used: return that on when it is the same registration
+	// (same subject and session, so a retry is a no-op), else a conflict — the
+	// rule POST /api/v0/turns applies to a key with other fields.
+	existing, err := q.onByKey(team, key)
+	if err != nil {
+		return On{}, err
+	}
+	if existing.Subject != subject || existing.Session != session {
+		return On{}, ErrKeyConflict
+	}
+	return existing, nil
 }
 
-// GetOn reads an on by id, off or not; ErrNotFound if none.
-func (q *Queue) GetOn(team, id string) (On, error) {
-	o := On{ID: id, Team: team}
+// onByKey reads the on registered with idempotency key, or ErrNotFound.
+func (q *Queue) onByKey(team, key string) (On, error) {
+	o := On{Team: team}
 	var mk string
-	switch err := q.db.QueryRow(`SELECT event, subject, session, maker, created FROM ons WHERE id = ? AND team = ?`,
-		id, team).Scan(&o.Event, &o.Subject, &o.Session, &mk, &o.Created); {
+	switch err := q.db.QueryRow(`SELECT id, event, subject, session, maker, created FROM ons WHERE team = ? AND idem_key = ?`,
+		team, key).Scan(&o.ID, &o.Event, &o.Subject, &o.Session, &mk, &o.Created); {
 	case errors.Is(err, sql.ErrNoRows):
 		return On{}, ErrNotFound
 	case err != nil:
@@ -125,12 +148,12 @@ func (q *Queue) GetOn(team, id string) (On, error) {
 	return o, nil
 }
 
-// onBySubject reads the on registered for (event, subject).
-func (q *Queue) onBySubject(team, event, subject string) (On, error) {
-	o := On{Team: team, Event: event, Subject: subject}
+// GetOn reads an on by id, off or not; ErrNotFound if none.
+func (q *Queue) GetOn(team, id string) (On, error) {
+	o := On{ID: id, Team: team}
 	var mk string
-	switch err := q.db.QueryRow(`SELECT id, session, maker, created FROM ons WHERE team = ? AND event = ? AND subject = ?`,
-		team, event, subject).Scan(&o.ID, &o.Session, &mk, &o.Created); {
+	switch err := q.db.QueryRow(`SELECT event, subject, session, maker, created FROM ons WHERE id = ? AND team = ?`,
+		id, team).Scan(&o.Event, &o.Subject, &o.Session, &mk, &o.Created); {
 	case errors.Is(err, sql.ErrNoRows):
 		return On{}, ErrNotFound
 	case err != nil:
@@ -248,7 +271,7 @@ func (q *Queue) FireOns(team string, name func(id string) string, agent AgentOf)
 		if err != nil {
 			return n, err
 		}
-		did, why, err := q.deliverResult(team, p.session, mk.Turn, j, name, agent)
+		did, why, err := q.deliverResult(team, p.id, p.session, mk.Turn, j, name, agent)
 		if errors.Is(err, ErrFull) {
 			return n, nil // the queue is full: try again later, the on is still live
 		}

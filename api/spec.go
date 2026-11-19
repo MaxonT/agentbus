@@ -81,8 +81,6 @@ var turnTokenDoc = map[int]string{
 		"A new session must be in the turn's own folder or one inside it (the person's folder when absent), always isolated. " +
 		"A session it continues must be one its request tree started, never its own or the person's. " +
 		"The turn's result comes back to the asking session as a later turn. Caps: " + askCaps,
-	askReview: "A turn token may call this for a turn of a session in its request tree, its own session's turns included. " +
-		"The review's result comes back to the asking session as a later turn. Caps: " + askCaps,
 	askedTurn:     "A turn token may stop only a turn its request tree asked for.",
 	anyRead:       "A turn token may call this too.",
 	applyTurnTok:  "A turn token may call this for a turn of a session in its request tree only when the Agents may apply switch is on in Settings (Permissions) (off by default).",

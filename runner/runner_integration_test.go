@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/folders"
 	"github.com/staysup/agentbus/isolation"
 	"github.com/staysup/agentbus/jobs"
@@ -448,83 +447,9 @@ func TestBadBaseIsSetup(t *testing.T) {
 	}
 }
 
-// A review of a worktree job runs as a normal turn (read-only retired, B12) in
-// its OWN copy of the reviewed worktree, in a session of its own — never in the
-// author's worktree, so its edits cannot reach the author's workspace or the
-// person's folder. The verdict is read from the reviewer's last reply.
-func TestReviewRunsInItsOwnCopy(t *testing.T) {
-	repo := t.TempDir()
-	mustGit(t, repo, "init", "-q", "-b", "main")
-	write(t, filepath.Join(repo, "app.txt"), "v1\n")
-	mustGit(t, repo, "add", ".")
-	mustGit(t, repo, "commit", "-q", "-m", "one")
-	// A record-backed control, so the review's verdict is read from the record.
-	w := newWorld(t, 2, true)
-	w.release()
-	author := w.create(t, queue.Spec{Harness: "claude", Repo: repo, Base: "main", Prompt: "write app.txt v2"})
-	waitFor(t, "finished", func() bool { return w.job(t, author.ID).Ended != nil })
-
-	// The reviewer's reply, as the gateway would store it: written into the
-	// record as soon as the review's turn has started, before it ends. The
-	// review's prompt is the control plane's, so the fake holds by file.
-	os.Remove(w.log + ".go")
-	write(t, w.log+".hold", "")
-	rev, _, err := w.q.Review(queue.DefaultTeam, author.ID, "claude", "sonnet", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var revTurn string
-	waitFor(t, "the review's turn", func() bool {
-		j := w.job(t, rev.ID)
-		if len(j.Attempts) == 0 || len(w.runs()) < 2 {
-			return false
-		}
-		revTurn = j.Turn
-		return true
-	})
-	list, _ := w.st.Turns(store.TurnQuery{Turn: revTurn, Limit: 1})
-	if len(list.Turns) != 1 {
-		t.Fatal("no review turn in the record")
-	}
-	reply := "Checked app.txt.\n```json\n{\"verdict\":\"pass\",\"findings\":[{\"severity\":\"P2\",\"file\":\"app.txt\",\"line\":1,\"summary\":\"no test\"}]}\n```"
-	// The reviewer's reply is the reply to its last model call, so a
-	// model.requested precedes it, as a real review records (store.TurnText).
-	if _, _, err := w.st.Append(event.Event{ID: "evt_q1", Kind: event.ModelRequested, Time: time.Now().UTC(),
-		Session: list.Turns[0].Session, Turn: revTurn, Exchange: "x1", Model: "sonnet"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := w.st.Append(event.Event{ID: "evt_r1", Kind: event.ModelResponded, Time: time.Now().UTC(),
-		Session: list.Turns[0].Session, Turn: revTurn, Exchange: "x1", Text: reply}); err != nil {
-		t.Fatal(err)
-	}
-	w.release()
-	waitFor(t, "review finished", func() bool { return w.job(t, rev.ID).Ended != nil })
-	got := w.job(t, rev.ID)
-	if got.Verdict == nil || *got.Verdict != queue.VerdictPass || len(got.Findings) != 1 || got.Findings[0].Severity != "P2" {
-		t.Fatalf("review: %+v %s", got, got.Result)
-	}
-	r := w.runs()[1]
-	args := strings.Join(r.Args, " ")
-	res := result(t, got)
-	if res.Session == author.Session || res.Session == "" {
-		t.Fatalf("the review ran in session %q, the author's is %q", res.Session, author.Session)
-	}
-	// B12: the review runs in its OWN copy (named after its session), not the
-	// author's worktree, and as a normal turn (no --tools lockdown).
-	if strings.Contains(r.Cwd, author.Session) || !strings.Contains(r.Cwd, res.Session) {
-		t.Fatalf("the review did not run in its own copy: %q (own %q, author %q)", r.Cwd, res.Session, author.Session)
-	}
-	if strings.Contains(args, "--tools Read,Grep,Glob") || !strings.Contains(args, "--model sonnet") || strings.Contains(args, "--resume") {
-		t.Fatalf("review args %q", args)
-	}
-	// The copy is removed once the review ends (cleanup is async), so nothing
-	// is left behind.
-	waitFor(t, "the review's copy to be removed", func() bool {
-		_, err := os.Stat(r.Cwd)
-		return os.IsNotExist(err)
-	})
-}
-
+// B15: TestReviewRunsInItsOwnCopy retired. A review is a normal turn (the
+// review_turn app), running in a fresh copy like any asked turn and reading the
+// reviewed turn's diff through agentbus-api; there is no review kind or verdict.
 // An attempt whose lease ran out is stale: its next heartbeat says so, and
 // the runner stops its turn and finishes nothing, as the queue has already
 // failed the job with runner_lost.
