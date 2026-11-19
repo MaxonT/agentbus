@@ -113,6 +113,11 @@ func (a *API) rebuildTools() {
 // method — a GET only reads — not from any claim the tool makes about itself,
 // since nothing about a tool is trusted (his decision, DESIGN_0_6_tools.md #9).
 func (a *API) resolveServed(def toolreg.Tool) (servedTool, bool) {
+	if def.Run.Kind == toolreg.RunApp {
+		// An app has no single route; it runs several (apps.go). It is not
+		// read-only: it does something, so the MCP hint says so.
+		return servedTool{def: def, rt: nil, annot: annotations(false)}, true
+	}
 	rt := a.routeFor(def.Run.Method, def.Run.Path)
 	if rt == nil {
 		return servedTool{}, false
@@ -264,6 +269,15 @@ func (a *API) createTool(w http.ResponseWriter, r *http.Request) {
 	if t.Run.Kind == toolreg.RunAPI {
 		if rt := a.routeFor(t.Run.Method, t.Run.Path); rt == nil || (len(rt.tools) == 0 && !rt.wrappable) {
 			writeError(w, http.StatusBadRequest, toolRoute0)
+			return
+		}
+	}
+	// An app's workflow is validated against the route table: the spec-aware
+	// half toolreg.Check cannot do (apps.go). A step's operation must exist, be
+	// callable by a turn token, and its fields and outputs must be real.
+	if t.Run.Kind == toolreg.RunApp {
+		if why := a.checkApp(t); why != "" {
+			writeError(w, http.StatusBadRequest, why)
 			return
 		}
 	}

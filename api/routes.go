@@ -167,22 +167,16 @@ var routes = slices.Concat([]route{
 			"it runs when a runner is free, and GET /api/v0/turns/{id} follows it.\n\n" +
 			"A session whose turn runs, or has turns waiting, is never refused: the new turn queues behind them and runs next, in order. " +
 			"It answers 202 at once with state queued and ahead, how many of the session's turns are before it.",
-		body: TurnRequest{},
-		turn: askTurn,
-		tools: []tool{
-			{name: "ask_agent",
-				// No folder: the new session is always on the asking
-				// session's folder. An agent on a runner cannot know the
-				// person's folder path, and its own copy's path is refused
-				// (his runner, 2026-11-11: it sent its working folder, got
-				// 403, tried mkdir, then left folder out).
-				fields:   []string{"agent", "prompt", "model", "idempotency_key"},
-				required: []string{"agent", "prompt"},
-				doc: "Ask a saved AgentBus agent (from GET /api/v0/agents, any vendor) to do work. " +
-					"It starts a new session on that agent, in its own copy of your folder. " +
-					"The reply names the new turn and session at once. Its result comes back to your session as a later turn: do not wait or poll for it. " +
-					"This is not your harness's own subagent: it is recorded, and can be another vendor. " +
-					"Each ask is a new session: to follow up, ask again with what the result said."}},
+		body:  TurnRequest{},
+		query: []param{{name: "wait", doc: "false returns once the turn is recorded (state queued), without waiting for a runner to start it; the reply still names the turn. Absent or true waits up to 30 seconds, as above. The ask_agent and review_turn apps send false, so a turn and the on for its reply are recorded in one call that never blocks."}},
+		turn:  askTurn,
+		// B15: ask_agent is no longer a tool on this route; it is a default app
+		// (apps.go, askAgentApp) that calls this operation (startTurn) in ONE step,
+		// with delivery set so the reply's on is recorded in the same write. The
+		// route stays — the app and an agent's own agentbus-api both call it — but
+		// ships no tool of its own. "A turn is a turn." It stays wrappable, so a
+		// person may still build a custom tool (or app step) on it.
+		wrappable: true,
 		replies: []reply{ok(202, Started{}, "The turn: running, or queued behind the session's earlier turns or for a runner."), turnRefused,
 			fail(403, "A turn token's request is refused: error says why, such as a cap on asked work."),
 			fail(404, "This service keeps no queue, or the session sent has no events."),
@@ -239,15 +233,15 @@ var routes = slices.Concat([]route{
 		summary: "Register an on",
 		doc: "Register a standing instruction: when the turn you name completes, its reply is delivered to a session as that session's next turn.\n\n" +
 			"This is the one primitive every reaction is built on; for now the only event is a turn completing. " +
-			"The turn must be asked work (a turn an agent started), so it sits in a request tree, and the reply is delivered inside that tree. " +
 			"A turn token may name only a turn its own turn started, and the reply goes to its own session, so it leaves session out. " +
-			"The main token names the session to deliver to, which must be in the watched turn's tree. " +
+			"The main token may watch any turn and names the session to deliver to. " +
 			"It is a row on control plus control's own check: nothing waits, and the reply arrives as a later turn. " +
-			"Registering the same turn again returns the on already registered. ask_agent registers one of these for itself.",
+			"Dedup is by idempotency_key only: the same key for the same turn and session returns the on already registered, the same key with other fields is 409, and a request with no key always registers a new on (several ons may watch one turn). ask_agent registers one of these for itself.",
 		body: OnRequest{},
 		replies: []reply{ok(201, OnView{}, "The on."), turnRefused,
 			fail(403, "A turn token named a turn its tree did not start, or a session not its own."),
-			fail(404, "This service keeps no queue, or no turn has this id.")},
+			fail(404, "This service keeps no queue, or no turn has this id."),
+			fail(409, "The idempotency_key was already used to register an on for a different turn or session.")},
 		turn:  onRegister,
 		serve: plain((*API).registerOn)},
 	{method: "DELETE", path: "/api/v0/ons/{id}", op: "removeOn",
@@ -349,25 +343,9 @@ var routes = slices.Concat([]route{
 			tooMany, fail(503, "The runner of the folder's machine has not been seen for a minute. Nothing was written and no apply was made."), storeFailed},
 		turn:  applyTurnTok,
 		serve: (*API).applyTurn},
-	{method: "POST", path: "/api/v0/turns/{id}/review", op: "reviewTurn",
-		idDoc:   "The id of the turn to review (such as t_cf58baf9ca42cb1d), never the turn's number in its session. Another shape gets 404.",
-		tag:     "Turns",
-		summary: "Review a turn",
-		doc: "Ask another agent to review a turn: this starts a review turn, by agent, in a session of its own, in the reviewed turn's copy as it is. " +
-			"It runs as a normal turn (read-only retired in 0.6); its own edits stay in that copy and are never applied automatically.\n\n" +
-			"The review reads the reviewed turn and its diff itself through agentbus-api; its prompt names that turn and how to read it, rather than carrying the history. include_reply nudges it toward the author's reply. " +
-			"When the review ends, its verdict (pass, fail or unknown) and findings are on it: GET /api/v0/turns/{id} of the review turn. Any P1 finding makes it fail. " +
-			"The reviewed turn must have ended, with its changed files recorded. " +
-			"A retry with the same idempotency_key and fields answers with the same review turn.",
-		body: ReviewRequest{},
-		replies: []reply{ok(202, Started{}, "The review turn, queued."),
-			badRequest, fail(403, "A turn token's request is refused: error says why, such as a cap on asked work."),
-			fail(404, "This service keeps no queue, or no turn of this service has this id."),
-			fail(409, "The turn cannot be reviewed: it has not ended, it recorded no changed files, its session is closed, its session's machine was removed, or the key names another turn."),
-			fail(http.StatusTooManyRequests, "Too many turns are waiting; wait for some to end."), storeFailed},
-		turn:  askReview,
-		turns: true,
-		serve: (*API).reviewTurn},
+	// B15: the review route is removed. Review is a default app (review_turn,
+	// apps.go) — ask_agent with a review prompt — so core holds no review route,
+	// kind, verdict or recipe. A review is a normal turn.
 	{method: "GET", path: "/api/v0/turns/{id}/calls/{call}", op: "callContext",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",

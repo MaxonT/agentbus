@@ -23,14 +23,11 @@ type Turn struct {
 	// Prompt and Reply are the whole text, served only by GET /api/v0/turns/{id}
 	// (the single turn), read from the record at request time. The turn list
 	// leaves them empty: it carries facts only.
-	Prompt   string           `json:"prompt,omitempty" doc:"Only on GET /api/v0/turns/{id}: the person's whole words from the turn's turn.started. Absent on the turn list, and absent here when the turn has no prompt text. For a queued turn it is the prompt it was asked with."`
-	Reply    string           `json:"reply,omitempty" doc:"Only on GET /api/v0/turns/{id}: the whole text of the reply to the turn's last model call, read from the record. Absent on the turn list, and absent here while that reply has not come, when it carried no text, or when the turn has no calls."`
-	Kind     string           `json:"kind" doc:"turn, or review: a turn that reviews another, by POST /api/v0/turns/{id}/review."`
-	Reviews  string           `json:"reviews,omitempty" doc:"For a review: the turn it reviews."`
-	Verdict  *string          `json:"verdict,omitempty" doc:"For a review that has ended: pass, fail or unknown. Any P1 finding makes it fail."`
-	Findings *[]queue.Finding `json:"findings,omitempty" doc:"For a review that has ended: what the reviewer named, [] when it named nothing. Absent for any other turn."`
-	Asked    *time.Time       `json:"asked,omitempty" doc:"When the turn was asked for. Absent for a turn this service did not run."`
-	Ahead    int              `json:"ahead,omitempty" doc:"For a queued turn: how many of its session's turns are before it."`
+	Prompt string     `json:"prompt,omitempty" doc:"Only on GET /api/v0/turns/{id}: the person's whole words from the turn's turn.started. Absent on the turn list, and absent here when the turn has no prompt text. For a queued turn it is the prompt it was asked with."`
+	Reply  string     `json:"reply,omitempty" doc:"Only on GET /api/v0/turns/{id}: the whole text of the reply to the turn's last model call, read from the record. Absent on the turn list, and absent here while that reply has not come, when it carried no text, or when the turn has no calls."`
+	Kind   string     `json:"kind" doc:"turn. (B15: review is a normal turn — a review_turn app — not a kind of its own.)"`
+	Asked  *time.Time `json:"asked,omitempty" doc:"When the turn was asked for. Absent for a turn this service did not run."`
+	Ahead  int        `json:"ahead,omitempty" doc:"For a queued turn: how many of its session's turns are before it."`
 }
 
 // TurnList is a page of turns.
@@ -54,12 +51,9 @@ const (
 	maxTurnLimit     = 1000
 )
 
-// turnSession is the session a job's turn runs in: a review's own, which
-// control named for it, or the turn job's.
+// turnSession is the session a job's turn runs in. B15: with the review kind
+// gone, every turn job runs in its own session.
 func turnSession(j queue.Job) string {
-	if j.Kind == queue.KindReview {
-		return j.Links.ReviewSession
-	}
 	return j.Session
 }
 
@@ -81,20 +75,6 @@ func (a *API) view(t store.Turn, j *queue.Job) Turn {
 	// as the stop says.
 	if j.Ended == nil && v.State != queue.TurnQueued && v.State != queue.TurnStopped {
 		v.State, v.Ended = queue.TurnRunning, nil
-	}
-	if j.Kind == queue.KindReview {
-		v.Verdict = j.Verdict
-		if j.Verdict != nil {
-			// A list once the review has ended, empty when it named nothing.
-			f := j.Findings
-			if f == nil {
-				f = []queue.Finding{}
-			}
-			v.Findings = &f
-		}
-		if r, err := a.cfg.Queue.Get(queue.DefaultTeam, j.Links.ReviewsJob); err == nil {
-			v.Reviews = r.Turn
-		}
 	}
 	return v
 }

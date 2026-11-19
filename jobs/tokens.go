@@ -169,13 +169,11 @@ func (s *Server) TurnGrant(tok string) (run.Grant, bool) {
 }
 
 // assignedSession is the session control assigned a job when it made it: a
-// turn's own, or the one it named for a review. Any other job has none.
+// turn's own. Any other job (apply, folder) has none. B15: a review is a normal
+// turn, so it has no separate review session.
 func assignedSession(j queue.Job) string {
-	switch j.Kind {
-	case queue.KindTurn:
+	if j.Kind == queue.KindTurn {
 		return j.Session
-	case queue.KindReview:
-		return j.Links.ReviewSession
 	}
 	return ""
 }

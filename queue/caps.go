@@ -284,6 +284,7 @@ func addColumns(db *sql.DB) error {
 		{"runners", "removed", "INTEGER"},
 		{"sessions", "snapshot", "TEXT NOT NULL DEFAULT ''"},
 		{"jobs", "turn", "TEXT"},
+		{"ons", "idem_key", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		var n int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, c.table, c.column).Scan(&n); err != nil {
@@ -309,6 +310,18 @@ func addColumns(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_turn ON jobs(turn) WHERE turn IS NOT NULL`); err != nil {
 		return fmt.Errorf("queue: index jobs.turn: %w", err)
+	}
+	// One on per idempotency key (B15): added after the column exists, since a
+	// fresh queue has it from the schema and an older one gets it from the ALTER
+	// above. A partial index, so the empty key (an on with none) never collides.
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ons_idem ON ons(team, idem_key) WHERE idem_key != ''`); err != nil {
+		return fmt.Errorf("queue: index ons.idem_key: %w", err)
+	}
+	// B15: an on is deduped by its key only, so the pre-B15 one-on-per-subject
+	// uniqueness is dropped — several ons may watch one turn. An older queue
+	// that has the ons_subject index loses it here.
+	if _, err := db.Exec(`DROP INDEX IF EXISTS ons_subject`); err != nil {
+		return fmt.Errorf("queue: drop ons_subject: %w", err)
 	}
 	return nil
 }

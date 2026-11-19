@@ -23,7 +23,9 @@ import (
 	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/gateway"
 	"github.com/staysup/agentbus/harness"
+	"github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/settings"
+	"github.com/staysup/agentbus/toolreg"
 )
 
 // mcpVersions are the protocol versions this server speaks, newest first. A
@@ -158,7 +160,7 @@ func (a *API) mcp(w http.ResponseWriter, r *http.Request) {
 			reply(req.ID, nil, &rpcError{rpcInvalidParams, "no such tool; tools/list names them"})
 			return
 		}
-		reply(req.ID, a.callTool(r, st, p.Arguments), nil)
+		reply(req.ID, a.callTool(r, st, p.Arguments, string(req.ID)), nil)
 	default:
 		reply(req.ID, nil, &rpcError{rpcMethodNotFound, "this server answers initialize, ping, tools/list and tools/call"})
 	}
@@ -198,13 +200,37 @@ func (a *API) toolList(r *http.Request) []mcpTool {
 	out := []mcpTool{}
 	apply := perm.AgentAPI.Apply != nil && *perm.AgentAPI.Apply
 	for _, st := range a.toolSnap.Load().list {
-		if !listedRoute(st.rt, g, turnsOnly, rules, apply) {
-			continue
+		title := ""
+		if st.rt == nil {
+			// An app has no one route; it is listed when the caller may use
+			// the tool server at all, and each step authorizes itself.
+			if !listedApp(g, turnsOnly, rules) {
+				continue
+			}
+		} else {
+			if !listedRoute(st.rt, g, turnsOnly, rules, apply) {
+				continue
+			}
+			title = st.rt.summary
 		}
-		out = append(out, mcpTool{Name: st.def.Name, Title: st.rt.summary, Description: st.def.Description,
+		out = append(out, mcpTool{Name: st.def.Name, Title: title, Description: st.def.Description,
 			InputSchema: st.def.Inputs, Annotations: st.annot})
 	}
 	return out
+}
+
+// listedApp says an app (a tool with no single route) is in a caller's list.
+// Apps are for agents only: a turn token (g.Turn set) whose tool server is on.
+// The main token and the turns token have no turn grant and never see or run an
+// app; they reach the API directly. (Each app's steps need a turn's folder and
+// session, which only a turn token carries.) B16: "tools on" is a gateway rule
+// (tool:* not refused), not an [agent_api] switch any more.
+func listedApp(g *run.Grant, _ bool, rules gateway.Rules) bool {
+	if g == nil || g.Turn == "" {
+		return false
+	}
+	dec, _ := gateway.DecideTool(rules, "tool:*")
+	return dec != gateway.Refuse
 }
 
 // toolsListed stores the turn's tools.listed at its first tools/list: the
@@ -260,7 +286,13 @@ func annotations(readOnly bool) map[string]any {
 
 // callTool sends one tool call through ServeHTTP, as the HTTP request it
 // names, and answers what that request answered.
-func (a *API) callTool(r *http.Request, st servedTool, args map[string]any) toolResult {
+func (a *API) callTool(r *http.Request, st servedTool, args map[string]any, callID string) toolResult {
+	if st.def.Run.Kind == toolreg.RunApp {
+		// An app is several operations in order: its own runner gates it by
+		// name, then runs each step with the caller's token (apps.go). callID is
+		// the MCP request id: it tells a retry (same id) from a fresh call.
+		return a.runApp(r, st, args, callID)
+	}
 	fail := func(msg string) toolResult {
 		return toolResult{Content: []textContent{{"text", msg}}, IsError: true}
 	}

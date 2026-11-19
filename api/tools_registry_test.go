@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -34,6 +35,26 @@ func callText(t *testing.T, e *env, tok, name, args string) (bool, string) {
 		t.Fatalf("%s: %v", name, v)
 	}
 	return dig(v, "result", "isError") == true, c[0].(map[string]any)["text"].(string)
+}
+
+// Apps are for agents only (B15, his call 2026-11-19): the main token neither
+// lists nor runs them. It is hidden from the list and refused on a call, so the
+// main token cannot drive an app that would need a turn's folder and session.
+func TestMainTokenCannotRunApp(t *testing.T) {
+	e := mcpEnv(t)
+	if slices.Contains(toolNames(t, e, token), "ask_agent") {
+		t.Errorf("the main token lists ask_agent; apps are agents-only")
+	}
+	isErr, text := callText(t, e, token, "ask_agent", `{"agent":"a_x","prompt":"x"}`)
+	if !isErr || !strings.Contains(text, "agent's turn") {
+		t.Errorf("main token ran ask_agent: isErr=%v text=%q", isErr, text)
+	}
+	// A turn token is not refused for being an agent (it reaches the gate; here
+	// a missing field is refused before the gate, proving it is not the main-
+	// token refusal).
+	if isErr, text := callText(t, e, mcpWriteTok, "ask_agent", `{"prompt":"x"}`); !isErr || strings.Contains(text, "agent's turn") {
+		t.Errorf("turn token wrongly got the agents-only refusal: %q", text)
+	}
 }
 
 // listToolSummaries reads GET /api/v0/tools with the main token: the list, as
@@ -72,18 +93,19 @@ func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 	e := mcpEnv(t)
 	// The built-in apps: ask_agent and folder access tools (read_file,
 	// list_folder, write_file) in B8.
-	if got := len(listToolSummaries(t, e)); got != 4 {
-		t.Fatalf("%d built-in tools, want 4", got)
+	if got := len(listToolSummaries(t, e)); got != 5 {
+		t.Fatalf("%d built-in tools, want 5", got)
 	}
-	before := toolEntry(t, e, token, "ask_agent")
+	before := toolEntry(t, e, mcpWriteTok, "ask_agent")
 	if before == nil {
 		t.Fatal("ask_agent not listed")
 	}
-	_, beforeCall := callText(t, e, token, "ask_agent", `{"agent":"a_x","prompt":"x"}`)
+	_, beforeCall := callText(t, e, mcpWriteTok, "ask_agent", `{"prompt":"x"}`)
 
-	// The stored definition of ask_agent, from the single tool route.
+	// The stored definition of ask_agent: B15 makes it a default app (a workflow
+	// over the API), not a route tool.
 	def := getToolDef(t, e, "ask_agent")
-	if def.Run.Method != "POST" || def.Run.Path != "/api/v0/turns" {
+	if def.Run.Kind != toolreg.RunApp || def.Run.App == nil || len(def.Run.App.Steps) == 0 {
 		t.Fatalf("ask_agent definition: %+v", def)
 	}
 
@@ -92,7 +114,7 @@ func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 	if resp.StatusCode != 204 {
 		t.Fatalf("DELETE ask_agent: %d %s", resp.StatusCode, body)
 	}
-	if toolEntry(t, e, token, "ask_agent") != nil {
+	if toolEntry(t, e, mcpWriteTok, "ask_agent") != nil {
 		t.Fatal("ask_agent still listed after removal")
 	}
 
@@ -103,11 +125,11 @@ func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 		t.Fatalf("POST ask_agent: %d %s", resp.StatusCode, body)
 	}
 
-	after := toolEntry(t, e, token, "ask_agent")
+	after := toolEntry(t, e, mcpWriteTok, "ask_agent")
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("list entry changed after re-add:\nbefore %v\nafter  %v", before, after)
 	}
-	if _, afterCall := callText(t, e, token, "ask_agent", `{"agent":"a_x","prompt":"x"}`); afterCall != beforeCall {
+	if _, afterCall := callText(t, e, mcpWriteTok, "ask_agent", `{"prompt":"x"}`); afterCall != beforeCall {
 		t.Errorf("call result changed: %q vs %q", beforeCall, afterCall)
 	}
 }
@@ -145,9 +167,10 @@ func TestToolListFactsOnly(t *testing.T) {
 		}
 	}
 
-	// The single tool route carries the full definition.
+	// The single tool route carries the full definition: for an app, its inputs
+	// and its workflow.
 	def := getToolDef(t, e, "ask_agent")
-	if def.Name != "ask_agent" || def.Run.Path != "/api/v0/turns" || def.Inputs == nil {
+	if def.Name != "ask_agent" || def.Run.Kind != toolreg.RunApp || def.Run.App == nil || def.Inputs == nil {
 		t.Fatalf("single tool not full: %+v", def)
 	}
 

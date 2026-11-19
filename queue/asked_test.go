@@ -16,7 +16,7 @@ func asked(session, turn, root string, depth int) Links {
 // queue test drives FireOns the way the API drives it.
 func onFor(t *testing.T, q *Queue, child Job, l Links) {
 	t.Helper()
-	if _, err := q.RegisterOn(DefaultTeam, OnTurnCompleted, child.Turn, l.Chain.BySession, Maker{Session: l.Chain.BySession, Turn: l.Chain.By}); err != nil {
+	if _, err := q.RegisterOn(DefaultTeam, OnTurnCompleted, child.Turn, l.Chain.BySession, "", Maker{Session: l.Chain.BySession, Turn: l.Chain.By}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -27,7 +27,7 @@ const MaxDepth, MaxAskedPerTurn, MaxAskedPerRoot = 2, 10, 30
 var testLimits = Limits{MaxDepth: MaxDepth, MaxPerTurn: MaxAskedPerTurn, MaxPerTree: MaxAskedPerRoot}
 
 func askTurn(q *Queue, l Links, key string) (Job, error) {
-	j, _, err := q.CreateTurnLinked(DefaultTeam, key, Spec{Harness: "claude", Folder: "/x", Isolate: true, Prompt: "hi"}, l, testLimits, "", Maker{})
+	j, _, err := q.CreateTurnLinked(DefaultTeam, key, Spec{Harness: "claude", Folder: "/x", Isolate: true, Prompt: "hi"}, l, testLimits, nil)
 	return j, err
 }
 
@@ -165,9 +165,13 @@ func TestDeliver(t *testing.T) {
 	if d == nil {
 		t.Fatal("no delivery")
 	}
+	// The delivery runs in the person's root session (parent), which has no
+	// request tree of its own, so the delivery is a root-level turn with no
+	// Chain — his rule: a delivered turn joins the RECEIVING session's tree, and
+	// a root session has none.
 	if d.State != Queued || d.Spec.Session != parent.Session || d.Spec.Harness != "claude" || d.Links.ResultOf.Job != child.ID ||
 		d.Links.ResultOf.Session != child.Session || d.Links.ResultOf.Turn != child.Turn || d.Links.ResultOf.Agent != "claude" ||
-		d.Links.Chain == nil || d.Links.Chain.Depth != 1 || d.Links.Chain.By != "" {
+		d.Links.Chain != nil {
 		t.Fatalf("delivery: %+v %+v", d, d.Links)
 	}
 	for _, want := range []string{"[AgentBus]", "not from the person", "Agent: claude", "Folder: /w/1", "Changed files: 2",
@@ -194,16 +198,14 @@ func TestDeliver(t *testing.T) {
 	_ = pj
 }
 
-// A review's result says its verdict and findings; a reply past the cap is
-// cut; a refused start says why.
+// A delivered result names the agent; a reply past the cap is cut; a refused
+// start says why. (B15: no review verdict in the prompt — a review is a turn.)
 func TestResultPrompt(t *testing.T) {
-	v := VerdictFail
-	p := ResultPrompt(Job{ID: "job_1", Kind: KindReview, State: Finished, Verdict: &v, Spec: Spec{AgentID: "codex", Model: "m-1"},
-		Findings: []Finding{{Severity: "P1", File: "a.go", Line: 3, Summary: "bad\nthing"}},
-		Result:   json.RawMessage(`{"session":"rs"}`)}, nil, "", func(id string) string { return map[string]string{"codex": "Codex"}[id] })
-	for _, want := range []string{"the review you asked for", "Agent: Codex (id codex, model m-1)", "Verdict: fail", "- P1 a.go:3 bad thing", "Session: rs"} {
+	p := ResultPrompt(Job{ID: "job_1", Kind: KindTurn, State: Finished, Spec: Spec{AgentID: "codex", Model: "m-1"},
+		Result: json.RawMessage(`{"session":"rs"}`)}, nil, "", func(id string) string { return map[string]string{"codex": "Codex"}[id] })
+	for _, want := range []string{"the turn you asked for", "Agent: Codex (id codex, model m-1)", "Session: rs"} {
 		if !strings.Contains(p, want) {
-			t.Errorf("review prompt lacks %q:\n%s", want, p)
+			t.Errorf("result prompt lacks %q:\n%s", want, p)
 		}
 	}
 	// The reply is read from the record and passed in; a reply past the cap is cut.
@@ -287,8 +289,8 @@ func TestDeliverKeyIsOurs(t *testing.T) {
 		t.Fatal(err)
 	}
 	onFor(t, q, child, links)
-	if strings.Trim(ResultKey(child.ID), "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-") == "" {
-		t.Fatalf("%s is a key a caller may send", ResultKey(child.ID))
+	if strings.Trim(ResultKey("on_1", child.ID, "s_x"), "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-") == "" {
+		t.Fatalf("%s is a key a caller may send", ResultKey("on_1", child.ID, "s_x"))
 	}
 	for _, k := range []string{"result_" + child.ID, "result:" + child.ID} {
 		if _, _, err := q.Create(DefaultTeam, KindTurn, k, Spec{Session: parent.Session, Harness: "claude", Prompt: "squat"}, Links{}); err != nil {
@@ -320,91 +322,16 @@ func TestAskedRetryAcrossTurns(t *testing.T) {
 	}
 }
 
-// An asked review's own session is in its tree from the moment it is asked
-// for: control names that session when it makes the job, so the asking turn
-// can read its queued review.
-func TestSessionRootOfReview(t *testing.T) {
-	q, _ := open(t)
-	r := runner(t, q, 5)
-	j := job(t, q, "")
-	_, a := take(t, q, r)
-	if _, _, err := q.Start(r.ID, a.ID, a.Number, lease); err != nil {
-		t.Fatal(err)
-	}
-	res := `{"session":"` + j.Session + `","changes":{"kind":"snapshot","count":0,"files":[]}}`
-	if _, err := q.End(r.ID, a.ID, a.Number, Finish{Status: Finished, Result: json.RawMessage(res),
-		Session: j.Session, Workspace: &Workspace{Kind: WorkspaceFolder, Folder: "/x"}}); err != nil {
-		t.Fatal(err)
-	}
-	rv, _, err := q.ReviewLinked(DefaultTeam, j.ID, Spec{Harness: "codex"}, "", false, asked(j.Session, "t_1", j.Session, 1), testLimits, "", Maker{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	own := rv.Links.ReviewSession
-	if root, err := q.SessionRoot(DefaultTeam, own); err != nil || root != j.Session {
-		t.Fatalf("queued review's session root: %q %v", root, err)
-	}
-	_, ra := take(t, q, r)
-	if _, _, err := q.Start(r.ID, ra.ID, ra.Number, lease); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := q.End(r.ID, ra.ID, ra.Number, Finish{Status: Finished, Result: json.RawMessage(`{"session":"` + own + `","reply_text":"x"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if root, err := q.SessionRoot(DefaultTeam, own); err != nil || root != j.Session {
-		t.Fatalf("review session root after: %q %v", root, err)
-	}
-	if root, err := q.SessionRoot(DefaultTeam, "s_other"); err != nil || root != "" {
-		t.Fatalf("a session no job names: %q %v", root, err)
-	}
-}
+// B15: TestSessionRootOfReview and TestReviewIsALeaf retired. A review is a
+// normal turn (the review_turn app), so there is no review kind, no review
+// session named by control, and no IsReview leaf — the asked-work tree and caps
+// cover a review exactly as they cover any asked turn.
 
-// A review's own session is a leaf (B12): IsReview names it, and it resolves no
-// folder of its own, since control refuses a review asking for work (so there
-// is no asked turn to start in a folder).
-func TestReviewIsALeaf(t *testing.T) {
-	q, _ := open(t)
-	r := runner(t, q, 5)
-	author, _, err := q.Create(DefaultTeam, KindTurn, "", Spec{Harness: "claude", FolderRef: "fld_x", Prompt: "hi"}, Links{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, a := take(t, q, r)
-	if _, _, err := q.Start(r.ID, a.ID, a.Number, lease); err != nil {
-		t.Fatal(err)
-	}
-	res := `{"session":"` + author.Session + `","changes":{"kind":"snapshot","count":0,"files":[]}}`
-	if _, err := q.End(r.ID, a.ID, a.Number, Finish{Status: Finished, Result: json.RawMessage(res),
-		Session: author.Session, Workspace: &Workspace{Kind: WorkspaceFolder, Folder: "/x"}}); err != nil {
-		t.Fatal(err)
-	}
-	rv, _, err := q.Review(DefaultTeam, author.ID, "codex", "", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	own := rv.Links.ReviewSession
-	if ok, err := q.IsReview(DefaultTeam, own); err != nil || !ok {
-		t.Fatalf("IsReview(review session): %v %v, want true", ok, err)
-	}
-	if ok, err := q.IsReview(DefaultTeam, author.Session); err != nil || ok {
-		t.Fatalf("IsReview(author session): %v %v, want false", ok, err)
-	}
-	// A review resolves no folder of its own: it is a leaf, it never asks.
-	if ref, _, _, err := q.SessionFolder(DefaultTeam, own); err != nil || ref != "" {
-		t.Fatalf("review session folder: %q %v, want empty", ref, err)
-	}
-}
-
-// However large a review's findings, the delivered prompt stays bounded and
-// holds no NUL byte, so its turn can start.
+// However large a delivered result, the prompt stays bounded and holds no NUL
+// byte, so its turn can start.
 func TestResultPromptBounded(t *testing.T) {
-	v := VerdictFail
-	var fs []Finding
-	for range 200 {
-		fs = append(fs, Finding{Severity: "P1", File: strings.Repeat("d/", 2000), Summary: strings.Repeat("y\x00", 5000)})
-	}
-	p := ResultPrompt(Job{Kind: KindReview, State: Finished, Verdict: &v, Findings: fs,
-		Result: json.RawMessage(`{"error":"` + strings.Repeat("e", 100000) + `"}`)}, nil, "", nil)
+	p := ResultPrompt(Job{Kind: KindTurn, State: Finished,
+		Result: json.RawMessage(`{"error":"` + strings.Repeat("e", 100000) + `"}`)}, nil, strings.Repeat("y\x00", 50000), nil)
 	if len(p) > MaxResultPrompt+100 || strings.IndexByte(p, 0) >= 0 {
 		t.Fatalf("prompt of %d bytes, NUL %v", len(p), strings.IndexByte(p, 0) >= 0)
 	}

@@ -803,22 +803,9 @@ func TestRunnerHomePerSession(t *testing.T) {
 	if homeOf(repB) == homeA || len(repB.Seen) != 0 {
 		t.Fatalf("session B: home %q, seen %q", homeOf(repB), repB.Seen)
 	}
-	// A review runs in a home of its own too, removed once it ends.
-	code, rev := reviewTurn(t, ns.server, ns.tok, a.Turn, map[string]any{"agent": ag["id"]})
-	if code != http.StatusAccepted {
-		t.Fatalf("review: %d", code)
-	}
-	if rev = waitJob(t, ns.server, ns.tok, rev.ID); rev.State != queue.Finished {
-		t.Fatalf("review %s %s %s", rev.State, rev.Reason, rev.Result)
-	}
-	b, _ := os.ReadFile(ns.report)
-	var repR fakeReport
-	json.Unmarshal(b, &repR)
-	homeR := homeOf(repR)
-	if homeR == homeA || filepath.Dir(homeR) != filepath.Dir(homeA) || len(repR.Seen) != 0 {
-		t.Fatalf("the review's home %q, seen %q", homeR, repR.Seen)
-	}
-	waitFor(t, "the review's home removed", func() bool { _, err := os.Stat(homeR); return os.IsNotExist(err) })
+	// B15: the review-home step retired. A review is a normal turn with its
+	// session's own home like any asked turn, so there is no review-only home
+	// to assert here. The runner user's real home still holds nothing.
 	if left, _ := os.ReadDir(realHome); len(left) != 0 {
 		t.Fatalf("the runner user's home holds %v", left)
 	}

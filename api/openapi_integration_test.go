@@ -121,8 +121,6 @@ func TestOpenAPIResponsesMatch(t *testing.T) {
 	check(t, doc, e, "GET", "/api/v0/sessions/nobody", "", true, 404)
 	check(t, doc, e, "PATCH", "/api/v0/sessions/s1", `{"title":"Named"}`, true, 200)
 	check(t, doc, e, "PATCH", "/api/v0/sessions/s1", `{"closed":false}`, true, 400)
-	check(t, doc, e, "POST", "/api/v0/turns/t_1/review", `{"agent":"-x"}`, true, 400)
-	check(t, doc, e, "POST", "/api/v0/turns/t_none/review", `{"agent":"claude"}`, true, 404)
 	check(t, doc, e, "POST", "/api/v0/turns/t_none/stop", "", true, 404)
 	check(t, doc, e, "GET", "/api/v0/turns?limit=0", "", true, 400)
 	check(t, doc, e, "GET", "/api/v0/sessions/s1/events?turn=t_1&store=st_other&after=0", "", true, 409)

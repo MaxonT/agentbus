@@ -27,23 +27,24 @@ Your folder is usually your session's own copy of the person's folder. Your edit
 `
 
 // ToolsText is what {tools} becomes for a turn with the agentbus MCP tools.
-// B12 retired read-only turns and the read-tool copies, so the tools now cover
-// asking other agents (ask_agent); reading turns and diffs, searching, review,
-// apply and stop go through agentbus-api. apply is [agent_api] apply: whether
-// the turn may apply turns.
+// B15: review is the review_turn app, not a route — the tools cover asking
+// another agent (ask_agent) and asking one to review a turn (review_turn);
+// reading turns and diffs, searching, apply and stop go through agentbus-api.
+// apply is [agent_api] apply: whether the turn may apply turns.
 func ToolsText(apply bool) string {
-	write := `To read turns and their diffs, search this session, or review or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/stop).
+	write := `To read turns and their diffs, search this session, or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/stop).
 The person applies turns to their folder; you cannot.`
 	if apply {
-		write = `To read turns and their diffs, search this session, or review, apply or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/review, POST /api/v0/turns/T/apply, POST /api/v0/turns/T/stop).`
+		write = `To read turns and their diffs, search this session, or apply or stop a turn, use agentbus-api (GET /api/v0/turns, GET /api/v0/turns/T/diff, POST /api/v0/turns/T/apply, POST /api/v0/turns/T/stop).`
 	}
-	return `Use the agentbus MCP tools to ask other saved agents (any vendor) for work. AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.
+	return `Use the agentbus MCP tools to ask other saved agents (any vendor) for work (ask_agent) or to have one review a turn (review_turn). AgentBus agents are saved setups across vendors, not your harness's own agents or subagents.
 ` + write + `
 Work you ask for comes back to you as a later turn: do not wait for it.`
 }
 
 // APIText is what {tools} becomes for a turn without them. apply is as for
-// ToolsText.
+// ToolsText. B15: ask and review are apps (tools), so an agent without the tool
+// server asks by starting a turn directly (POST /api/v0/turns).
 func APIText(apply bool) string {
 	line := "- The person applies turns to their folder; you cannot.\n"
 	if apply {
@@ -51,25 +52,24 @@ func APIText(apply bool) string {
 	}
 	return `Call AgentBus with agentbus-api METHOD PATH [JSON]. Replace T with a turn id.
 - List this session's turns, with each id, number, state and cost: agentbus-api GET /api/v0/turns
-` + line + `- Ask another agent to review a turn: agentbus-api POST /api/v0/turns/T/review '{"agent":"<agent id>"}'. Pick an agent other than the one that did the turn. List the agents: agentbus-api GET /api/v0/agents. These are AgentBus agents, not your harness's own agents or subagents.
-- Read a turn, its state, cost and a review's verdict: agentbus-api GET /api/v0/turns/T
+` + line + `- Ask another agent to do work and get its reply back here: agentbus-api POST /api/v0/turns '{"agent":"<agent id>","prompt":"<what to do>","delivery":"{session}"}' — delivery is this session, so the new turn's reply comes back here as a later turn when it ends, recorded with the turn in the one call. The reply names the new turn T2. To have one review a turn, ask it to read that turn and its diff (GET /api/v0/turns/T, GET /api/v0/turns/T/diff). Pick an agent other than the one that did the turn. List the agents: agentbus-api GET /api/v0/agents. These are AgentBus agents, not your harness's own agents or subagents.
+- Read a turn, its state and cost: agentbus-api GET /api/v0/turns/T
 - Stop a turn: agentbus-api POST /api/v0/turns/T/stop
 - Search this session's history: agentbus-api GET "/api/v0/sessions/{session}/search?q=<text>", with <text> URL-encoded.
-Work you ask for comes back to you as a later turn: do not wait for it. More: agentbus-api GET /docs/llms.txt`
+A reply you asked to be delivered comes back as a later turn: do not wait for it. More: agentbus-api GET /docs/llms.txt`
 }
 
 // ToolServerInstructions is the tool server's own instructions (POST
 // /api/v0/mcp, initialize), which a harness may show its model. apply says
-// whether the caller may apply turns ([agent_api] apply). B12 removed the read
-// tool copies too (read-only turns retired), so reading the record, reviewing,
-// applying and stopping all go through agentbus-api; the tools are the apps,
-// such as ask_agent.
+// whether the caller may apply turns ([agent_api] apply). B15: the tools are the
+// apps (ask_agent, review_turn); reading the record, applying and stopping go
+// through agentbus-api.
 func ToolServerInstructions(apply bool) string {
-	write := "To read turns, search history, review or stop a turn, use agentbus-api. The person applies turns to their folder."
+	write := "To read turns, search history or stop a turn, use agentbus-api. The person applies turns to their folder."
 	if apply {
-		write = "To read turns, search history, review, apply or stop a turn, use agentbus-api."
+		write = "To read turns, search history, apply or stop a turn, use agentbus-api."
 	}
-	return "AgentBus tools: ask other saved agents (any vendor) for work. " +
+	return "AgentBus tools: ask other saved agents (any vendor) for work (ask_agent) or have one review a turn (review_turn). " +
 		"Your folder is your session's own copy. " + write + " Work you ask for comes back to your session as a later turn."
 }
 

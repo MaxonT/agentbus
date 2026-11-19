@@ -72,10 +72,10 @@ const (
 	Lost = "lost"
 )
 
-// Job kinds.
+// Job kinds. B15: there is no review kind — a review is a normal turn, run by
+// the review_turn app (ask_agent with a review prompt).
 const (
-	KindTurn   = "turn"
-	KindReview = "review"
+	KindTurn = "turn"
 	// KindApply puts a session's changes, up to one turn, into the person's
 	// folder, on the runner of the folder's machine (apply.go). It starts no
 	// turn.
@@ -150,8 +150,6 @@ CREATE TABLE IF NOT EXISTS jobs (
 	session      TEXT,
 	cancel       INTEGER NOT NULL DEFAULT 0,
 	reason       TEXT NOT NULL DEFAULT '',
-	verdict      TEXT,
-	findings     TEXT,
 	result       TEXT,
 	created      INTEGER NOT NULL,
 	updated      INTEGER NOT NULL,
@@ -210,19 +208,23 @@ CREATE TABLE IF NOT EXISTS deliveries (
 -- control loop's check; nothing waits. off is set when it is removed or, for a
 -- one-shot, once it has fired.
 CREATE TABLE IF NOT EXISTS ons (
-	id      TEXT PRIMARY KEY,
-	team    TEXT NOT NULL REFERENCES teams(id),
-	event   TEXT NOT NULL,
-	subject TEXT NOT NULL,
-	session TEXT NOT NULL,
-	maker   TEXT NOT NULL,
-	off     INTEGER,
-	created INTEGER NOT NULL
+	id       TEXT PRIMARY KEY,
+	team     TEXT NOT NULL REFERENCES teams(id),
+	event    TEXT NOT NULL,
+	subject  TEXT NOT NULL,
+	session  TEXT NOT NULL,
+	maker    TEXT NOT NULL,
+	idem_key TEXT NOT NULL DEFAULT '',
+	off      INTEGER,
+	created  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ons_live ON ons(team, event, off);
--- One standing instruction per (event, subject): the ask path may register the
--- same delivery again on a retry, and this makes that a no-op.
-CREATE UNIQUE INDEX IF NOT EXISTS ons_subject ON ons(team, event, subject);
+-- B15 (his call, 2026-11-19): an on is deduped by its idempotency_key ONLY, the
+-- one mechanism POST /api/v0/turns uses — several ons may watch one turn, the
+-- same key returns the same on, a reused key with other fields is a conflict.
+-- The pre-B15 one-on-per-subject uniqueness is dropped (addColumns drops the
+-- ons_subject index for an older queue); the idem_key column and its ons_idem
+-- unique index are added there too, after the ALTER that gives the column.
 -- One row per time an on fired, keyed so a fire happens exactly once even
 -- across a control restart: the same role the deliveries table plays for the
 -- old delivery. For a one-shot turn.completed on, key is the subject turn.
@@ -264,9 +266,6 @@ var (
 	ErrBadState = errors.New("queue: not allowed in this state")
 	// ErrSessionClosed: the session was closed; it takes no more jobs.
 	ErrSessionClosed = errors.New("queue: the session is closed")
-	// ErrNotReviewable: the job is not a turn that ended with its changed
-	// files recorded in a known workspace.
-	ErrNotReviewable = errors.New("queue: the job cannot be reviewed")
 	// ErrSessionBusy: the session has a job that has not ended, so it cannot
 	// be closed.
 	ErrSessionBusy = errors.New("queue: the session has a job that has not ended")
@@ -412,8 +411,6 @@ func (spec Spec) asked() Spec {
 type Links struct {
 	// ContinuesTurn: the framework turn this job's turn continues.
 	ContinuesTurn string `json:"continues_turn,omitempty"`
-	// ReviewsJob: for a review job, the job it reviews.
-	ReviewsJob string `json:"reviews_job,omitempty"`
 	// RedoOf: the job this one does again.
 	RedoOf string `json:"redo_of,omitempty"`
 	// Chain: the request tree this job is in, and (for asked work) the turn
@@ -433,10 +430,6 @@ type Links struct {
 	// AppliesTurn. ApplyBy: who asked for it.
 	AppliesTurns []string `json:"applies_turns,omitempty"`
 	ApplyBy      *By      `json:"apply_by,omitempty"`
-	// ReviewSession: for a review job, the session its turn opens, named
-	// by control when the job is made. The runner opens it, and a runner
-	// may send that turn's record for this session only.
-	ReviewSession string `json:"review_session,omitempty"`
 }
 
 // Job is one requested turn.
@@ -452,17 +445,11 @@ type Job struct {
 	// Turn, for a turn or review job: the id of the turn it runs, named when
 	// the job is made, so the turn is known while it waits. The runner
 	// starts the turn with this id, whichever attempt runs it.
-	Turn            string `json:"turn,omitempty"`
-	CancelRequested bool   `json:"cancel_requested,omitempty"`
-	Reason          string `json:"reason,omitempty"`
-	// Verdict, for a review: pass, fail or unknown, read by the control
-	// plane from the reviewer's reply. Null until the review has finished.
-	Verdict *string `json:"verdict"`
-	// Findings, for a review with a verdict: what the reviewer named.
-	Findings []Finding       `json:"findings,omitempty"`
-	Result   json.RawMessage `json:"result,omitempty"`
-	// Session: the framework session the job's turn ran in, once known; for
-	// a review, the session whose workspace it reads.
+	Turn            string          `json:"turn,omitempty"`
+	CancelRequested bool            `json:"cancel_requested,omitempty"`
+	Reason          string          `json:"reason,omitempty"`
+	Result          json.RawMessage `json:"result,omitempty"`
+	// Session: the framework session the job's turn ran in, once known.
 	Session  string     `json:"session,omitempty"`
 	Created  time.Time  `json:"created"`
 	Updated  time.Time  `json:"updated"`
@@ -558,10 +545,9 @@ type AttemptEvent struct {
 
 // Finish is how a runner ends an attempt.
 type Finish struct {
-	Status  string          `json:"status"` // Finished, Failed or Cancelled
-	Reason  string          `json:"reason,omitempty"`
-	Verdict *string         `json:"verdict,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
+	Status string          `json:"status"` // Finished, Failed or Cancelled
+	Reason string          `json:"reason,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
 	// LastSeq is the last event sequence the runner sent, so the record
 	// shows whether it is complete.
 	LastSeq int64 `json:"last_seq"`
@@ -575,13 +561,6 @@ type Finish struct {
 	// named here (the Result.*Event pointers). It is not part of the
 	// finish's hash, so a finish sent again still matches the first.
 	Kept json.RawMessage `json:"-"`
-	// ReviewVerdict and ReviewFindings carry a finished review's verdict,
-	// which control reads from the reviewer's reply in the record (not from a
-	// copy in the result) when it ends the job (jobs.keepOutcomes). Like
-	// Kept, they are set after the runner's finish and are not part of its
-	// hash. Nil for any other job.
-	ReviewVerdict  *string   `json:"-"`
-	ReviewFindings []Finding `json:"-"`
 }
 
 // CheckFinish says whether f can end job j, before anything is written:
@@ -891,20 +870,13 @@ func (q *Queue) HasKey(team, key string) (bool, error) {
 	return n > 0, nil
 }
 
-// reviewIn says review job o runs its turn in session j.session: a review
-// runs in a session of its own, which its runner names in the attempt's
-// turn.created event. A turn job sent to that session waits behind it.
-const reviewIn = `o.kind = 'review' AND EXISTS (SELECT 1 FROM attempts a JOIN attempt_events e ON e.attempt = a.id
-	WHERE a.job = o.id AND e.kind = 'turn.created' AND json_extract(e.data, '$.session') = j.session)`
-
 // laneTake is Take's one rule of a session's lane, for a job j and another
 // job o: j waits for o. A session's turns are one lane, first in, first out:
-// each waits for one that runs, and for an older one still queued. A turn job
-// sent to a review's own session waits behind the review (reviewIn).
-// Apply and folder jobs use no copy and never wait.
-const laneTake = `(o.state IN ('taken','running') AND (
-		(j.kind = 'turn' AND o.session = j.session AND o.kind = 'turn')
-		OR (j.kind = 'turn' AND (` + reviewIn + `))))
+// each waits for one that runs, and for an older one still queued.
+// Apply and folder jobs use no copy and never wait. (B15: the review lane
+// clause retired with the review kind — a review is a turn in its own session.)
+const laneTake = `(o.state IN ('taken','running') AND
+		j.kind = 'turn' AND o.session = j.session AND o.kind = 'turn')
 	OR (o.state = 'queued' AND j.kind = 'turn' AND o.session = j.session AND o.kind = 'turn'
 		AND (o.created < j.created OR (o.created = j.created AND o.id < j.id)))`
 
@@ -913,7 +885,7 @@ const laneTake = `(o.state IN ('taken','running') AND (
 func (q *Queue) SessionHasWork(team, session string) (bool, error) {
 	var n int
 	err := q.db.QueryRow(`SELECT COUNT(*) FROM jobs o, (SELECT ? AS session) j WHERE o.team = ? AND o.ended IS NULL
-		AND ((o.kind = 'turn' AND o.session = j.session) OR (`+reviewIn+`))`, session, team).Scan(&n)
+		AND o.kind = 'turn' AND o.session = j.session`, session, team).Scan(&n)
 	if err != nil {
 		return false, fmt.Errorf("queue: read session work: %w", err)
 	}
@@ -927,8 +899,7 @@ func (q *Queue) SessionHasWork(team, session string) (bool, error) {
 func (q *Queue) TurnsAhead(team, id string) ([]Job, error) {
 	rows, err := q.db.Query(`SELECT o.id FROM jobs o JOIN jobs j ON j.id = ? AND j.team = ?
 		WHERE o.team = j.team AND o.ended IS NULL AND o.id != j.id AND j.session IS NOT NULL
-		AND ((o.kind = 'turn' AND o.session = j.session AND (o.created < j.created OR (o.created = j.created AND o.id < j.id)))
-			OR (`+reviewIn+`))
+		AND o.kind = 'turn' AND o.session = j.session AND (o.created < j.created OR (o.created = j.created AND o.id < j.id))
 		ORDER BY o.created, o.id`, id, team)
 	if err != nil {
 		return nil, fmt.Errorf("queue: list turns ahead: %w", err)
@@ -961,16 +932,25 @@ func (q *Queue) TurnsAhead(team, id string) ([]Job, error) {
 // turn, the reviewed job's session for a review. A turn job that opens a new
 // session gets its id here. A session whose turn runs is never refused: Take
 // starts its turn jobs one at a time, in the order they were made.
-func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limits, session string, on *onReg) (job Job, created bool, err error) {
+func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limits, session string, deliver *Delivery) (job Job, created bool, err error) {
 	specBytes, err := spec.asked().hashBytes()
 	if err != nil {
 		return job, false, err
 	}
+	// delivery is part of the request's identity (found in review 2026-11-19):
+	// a retry that names a different destination, or adds one, must not reuse the
+	// turn — it gets 409. omitempty keeps a turn with no delivery hashing exactly
+	// as before, so no pre-B15 turn's key changes meaning.
+	deliverTo := ""
+	if deliver != nil {
+		deliverTo = deliver.Session
+	}
 	hash := hashOf(struct {
-		Kind  string          `json:"kind"`
-		Spec  json.RawMessage `json:"spec"`
-		Links Links           `json:"links"`
-	}{kind, specBytes, hashLinks(links)})
+		Kind     string          `json:"kind"`
+		Spec     json.RawMessage `json:"spec"`
+		Links    Links           `json:"links"`
+		Delivery string          `json:"delivery,omitempty"`
+	}{kind, specBytes, hashLinks(links), deliverTo})
 	err = q.tx(func(tx *sql.Tx) error {
 		if key != "" {
 			var id, h string
@@ -980,17 +960,6 @@ func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limit
 					return ErrKeyConflict
 				}
 				job.ID = id
-				// A retry of the same ask: make sure its on exists (the first
-				// try may have stopped between the job and the on). Idempotent.
-				if on != nil {
-					var turnID sql.NullString
-					if err := tx.QueryRow(`SELECT turn FROM jobs WHERE id = ?`, id).Scan(&turnID); err != nil {
-						return fmt.Errorf("queue: read turn: %w", err)
-					}
-					if err := insertOn(tx, team, turnID.String, on, nanos(q.now())); err != nil {
-						return err
-					}
-				}
 				return nil
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
@@ -1037,7 +1006,7 @@ func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limit
 		now := nanos(q.now())
 		job.ID = NewID("job_")
 		var turn any
-		if kind == KindTurn || kind == KindReview {
+		if kind == KindTurn {
 			turn = NewID("t_")
 		}
 		sb, _ := json.Marshal(spec)
@@ -1053,11 +1022,21 @@ func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limit
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, job.ID, team, kind, Queued, k, hash, string(sb), string(lb), turn, sess, now, now); err != nil {
 			return fmt.Errorf("queue: write job: %w", err)
 		}
-		// The ask's on, in the same transaction as its turn, so the two are
-		// durable together (no window where the turn exists but its on does not).
-		if t, ok := turn.(string); ok {
-			if err := insertOn(tx, team, t, on, now); err != nil {
-				return err
+		// Atomic delivery (his call (a), 2026-11-19): record the on in the SAME
+		// transaction as the turn, so start and deliver are one write under one
+		// authorization — no separate, later step that a stop or a lost token can
+		// drop. The on's key is the turn's key, namespaced (deliveryKey) so a retry
+		// dedups both yet it cannot collide with a standalone POST /ons; a keyless
+		// turn gives a keyless (always new) on.
+		if deliver != nil && kind == KindTurn && turn != nil {
+			mk, err := json.Marshal(deliver.Maker)
+			if err != nil {
+				return fmt.Errorf("queue: delivery maker: %w", err)
+			}
+			if _, err := tx.Exec(`INSERT INTO ons(id, team, event, subject, session, maker, idem_key, created) VALUES(?,?,?,?,?,?,?,?)
+				ON CONFLICT(team, idem_key) WHERE idem_key != '' DO NOTHING`,
+				NewID("on_"), team, OnTurnCompleted, turn, deliver.Session, string(mk), deliveryKey(key), now); err != nil {
+				return fmt.Errorf("queue: write delivery on: %w", err)
 			}
 		}
 		created = true
@@ -1073,29 +1052,24 @@ func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limit
 	return job, created, err
 }
 
-const jobCols = `id, team, kind, state, COALESCE(idem_key, ''), spec, links, COALESCE(attempt, ''), COALESCE(turn, ''), cancel, reason, verdict, findings, result, COALESCE(session, ''), created, updated, ended`
+// B15: the verdict and findings columns are no longer read (review is a normal
+// turn, with no verdict in core). They stay in an older DB, unreferenced.
+const jobCols = `id, team, kind, state, COALESCE(idem_key, ''), spec, links, COALESCE(attempt, ''), COALESCE(turn, ''), cancel, reason, result, COALESCE(session, ''), created, updated, ended`
 
 type scanner interface{ Scan(...any) error }
 
 func scanJob(s scanner) (Job, error) {
 	var j Job
 	var spec, links string
-	var verdict, findings, result sql.NullString
+	var result sql.NullString
 	var created, updated int64
 	var ended sql.NullInt64
 	if err := s.Scan(&j.ID, &j.Team, &j.Kind, &j.State, &j.IdempotencyKey, &spec, &links, &j.Attempt, &j.Turn, &j.CancelRequested,
-		&j.Reason, &verdict, &findings, &result, &j.Session, &created, &updated, &ended); err != nil {
+		&j.Reason, &result, &j.Session, &created, &updated, &ended); err != nil {
 		return j, err
-	}
-	if findings.Valid {
-		_ = json.Unmarshal([]byte(findings.String), &j.Findings)
 	}
 	_ = json.Unmarshal([]byte(spec), &j.Spec)
 	_ = json.Unmarshal([]byte(links), &j.Links)
-	if verdict.Valid {
-		v := verdict.String
-		j.Verdict = &v
-	}
 	if result.Valid {
 		j.Result = json.RawMessage(result.String)
 	}
@@ -1921,30 +1895,8 @@ func (q *Queue) End(runnerID, attemptID string, number int, f Finish) (Job, erro
 			WHERE id = ?`, f.Status, nanos(now), f.Reason, hash, result, f.LastSeq, a.ID); err != nil {
 			return fmt.Errorf("queue: write attempt: %w", err)
 		}
-		var verdict, findings any
-		switch {
-		case j.Kind == KindReview && f.Status == Finished:
-			// The control plane reads the verdict from the reviewer's reply in
-			// the record (jobs.keepOutcomes sets it on the finish, out of band);
-			// a runner's own is ignored. No readable verdict is unknown, never
-			// pass.
-			if f.ReviewVerdict != nil {
-				verdict = *f.ReviewVerdict
-				if f.ReviewFindings != nil {
-					b, _ := json.Marshal(f.ReviewFindings)
-					findings = string(b)
-				}
-			} else {
-				verdict = VerdictUnknown
-			}
-		case j.Kind == KindReview:
-			// A review that did not finish has no verdict: execution status
-			// and verdict are separate.
-		case f.Verdict != nil:
-			verdict = *f.Verdict
-		}
-		if _, err := tx.Exec(`UPDATE jobs SET state = ?, reason = ?, verdict = ?, findings = ?, result = ?, updated = ?, ended = ? WHERE id = ?`,
-			f.Status, f.Reason, verdict, findings, result, nanos(now), nanos(now), j.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE jobs SET state = ?, reason = ?, result = ?, updated = ?, ended = ? WHERE id = ?`,
+			f.Status, f.Reason, result, nanos(now), nanos(now), j.ID); err != nil {
 			return fmt.Errorf("queue: write job: %w", err)
 		}
 		// A session's first job ties the session to this runner. A later
@@ -2210,67 +2162,7 @@ func (q *Queue) Removed(runnerID, session, removalErr string) error {
 	return nil
 }
 
-// Review makes a review job of job id: kind review, for agent and model, in a
-// copy of the reviewed job's workspace and so on its runner, with a prompt that
-// points the reviewer at the reviewed turn through agentbus-api. The reviewed
-// job must be a turn that has ended and recorded its changed files, in a
-// session that is not closed. Several reviews of one job may run at once.
-//
-// TODO(B12 P2): a runner from before 0.6 does not make the review its own copy
-// (runner.prepare) and no longer gets read_only, so it would run the review in
-// the author's workspace with edits enabled. Upgrade runners with control; a
-// version gate on review dispatch would enforce it.
-func (q *Queue) Review(team, id, agent, model, key string, includeReply bool) (Job, bool, error) {
-	return q.ReviewAs(team, id, Spec{Harness: agent, Model: model}, key, includeReply)
-}
-
-// ReviewAs is Review with the reviewer as a saved agent: as names its
-// harness in Agent, and its AgentID, Access, KeyEnv and Model.
-func (q *Queue) ReviewAs(team, id string, as Spec, key string, includeReply bool) (Job, bool, error) {
-	return q.review(team, id, as, key, includeReply, Links{}, Limits{}, nil)
-}
-
-// review is ReviewAs with links; ReviewsJob is set here.
-func (q *Queue) review(team, id string, as Spec, key string, includeReply bool, links Links, lim Limits, on *onReg) (Job, bool, error) {
-	j, err := q.Get(team, id)
-	if err != nil {
-		return Job{}, false, err
-	}
-	if j.Kind != KindTurn || j.Ended == nil {
-		return Job{}, false, ErrNotReviewable
-	}
-	if j.Workspace == nil || j.Session == "" {
-		return Job{}, false, ErrNotReviewable
-	}
-	if j.Workspace.Closed != nil {
-		return Job{}, false, ErrSessionClosed
-	}
-	c, err := q.changesOf(j)
-	if err != nil {
-		return Job{}, false, err
-	}
-	prompt, err := ReviewPrompt(j, c, includeReply)
-	if err != nil {
-		return Job{}, false, ErrNotReviewable
-	}
-	spec := Spec{Harness: as.Harness, AgentID: as.AgentID, Access: as.Access, KeyEnv: as.KeyEnv, Model: as.Model,
-		ModelFromAgent: as.ModelFromAgent, Prompt: prompt}
-	links.ReviewsJob = j.ID
-	links.ReviewSession = NewID("")
-	// A review reads the reviewed turn through agentbus-api (B12), so its
-	// token must reach that turn's session: the review joins the reviewed
-	// turn's request tree. An agent-asked review already carries the asking
-	// turn's Chain (that same tree); a review the person asks for gets one
-	// here, rooted at the reviewed session's tree (itself when it is a root).
-	if links.Chain == nil {
-		root, err := q.SessionRoot(team, j.Session)
-		if err != nil {
-			return Job{}, false, err
-		}
-		if root == "" {
-			root = j.Session
-		}
-		links.Chain = &Chain{Root: root}
-	}
-	return q.create(team, KindReview, key, spec, links, lim, j.Session, on)
-}
+// B15: Review, ReviewAs and review retired. A review is a normal turn started
+// by the review_turn app (ask_agent with a review prompt, api/apps.go); the
+// reviewer reads the reviewed turn and its diff through agentbus-api. Core holds
+// no review job kind, prompt or workspace recipe.

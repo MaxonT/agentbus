@@ -64,6 +64,9 @@ type TurnRequest struct {
 	// IdempotencyKey makes a retry safe: a client whose request timed out
 	// sends it again with the same key and gets the same turn.
 	IdempotencyKey string `json:"idempotency_key,omitempty" doc:"Optional, 1 to 128 characters of A-Z, a-z, 0-9 and . _ : -. A retry with the same key and the same fields answers 202 with the turn the key first started, existing true, and starts nothing. The same key with other fields gets 409. A request refused with 400 used no key."`
+	// Delivery records the on for the turn's reply in the SAME write as the turn
+	// (his call (a), 2026-11-19), so starting and delivering are one atomic step.
+	Delivery string `json:"delivery,omitempty" doc:"A session to deliver this turn's reply to when it completes, recorded as a turn.completed on in the same transaction that starts the turn (the same as POST /api/v0/ons, but atomic with the start, so no separate call can be lost). A turn token may name only its own session, so it sends its own; the main token may name any. Absent: no delivery is registered. The turn's idempotency_key covers the on too, so a retry adds no second."`
 }
 
 // Started is the answer to a turn's start, and to a review's.
@@ -78,8 +81,24 @@ type Started struct {
 	Ahead    int  `json:"ahead,omitempty" doc:"With state queued: how many turns of the session, running or waiting, are before this one. Absent when the turn waits only for a runner."`
 }
 
-// idempotencyKey is the shape of TurnRequest.IdempotencyKey.
+// idempotencyKey is the shape of any idempotency_key a request sends. It
+// excludes '/', which is how the internal key namespaces (delivery/, result/,
+// apply/) stay unreachable by a caller — so every route that accepts a key must
+// check it with checkIdempotencyKey, not just this one (his call, 2026-11-19:
+// one rule, one function, after a key that could hold '/' at POST /ons let a
+// caller's on collide with a turn's delivery on).
 var idempotencyKey = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+
+// checkIdempotencyKey is the one validator every route with an idempotency_key
+// shares. It returns "" for a valid key (including an empty one, which means no
+// key) or the message to refuse with. It reads only the incoming value; keys
+// already stored are never re-checked, so this changes no existing row.
+func checkIdempotencyKey(key string) string {
+	if key != "" && !idempotencyKey.MatchString(key) {
+		return "idempotency_key must match " + idempotencyKey.String()
+	}
+	return ""
+}
 
 func (a *API) run(w http.ResponseWriter, r *http.Request) {
 	if a.cfg.Queue == nil {
@@ -121,9 +140,21 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, badRun)
 		return
 	}
-	if body.IdempotencyKey != "" && !idempotencyKey.MatchString(body.IdempotencyKey) {
-		writeError(w, http.StatusBadRequest, "idempotency_key must match "+idempotencyKey.String())
+	if msg := checkIdempotencyKey(body.IdempotencyKey); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
+	}
+	// wait is validated here, before any job is created: an invalid value must
+	// refuse without queuing a turn or consuming its idempotency key (found in
+	// review 2026-11-19). noWait returns the turn once recorded; see below.
+	noWait := false
+	if v := r.URL.Query().Get("wait"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "wait must be true or false")
+			return
+		}
+		noWait = !b
 	}
 	// A turn token asks another agent: its checks (tokens.go) fill the new
 	// session's folder, and the job names the asking turn.
@@ -258,19 +289,27 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// ask_agent as an app: start the asked turn and, in the same transaction,
-	// register the on that delivers its reply to the asking session when it
-	// completes (queue/on.go). One transaction, so a stop between the two can
-	// never leave the turn with no on and strand its result. A turn the person
-	// started (no grant) registers no on. The caps stay in core on the create.
-	var deliverTo string
-	var maker queue.Maker
-	if g := grantOf(r); g != nil {
-		deliverTo, maker = g.Session, queue.Maker{Session: g.Session, Turn: g.Turn}
+	// Atomic delivery (his call (a), 2026-11-19): if delivery is set, record the
+	// on in the SAME write as the turn, under the one authorization that starts
+	// it — the same rules POST /api/v0/ons applies, but no separate call that a
+	// stop or a lost token can drop. A turn token delivers only to its own
+	// session (the new turn is already in its tree, so the on is within its
+	// reach); the main token may name any session. The turn's key covers the on.
+	var deliver *queue.Delivery
+	if body.Delivery != "" {
+		if g := grantOf(r); g != nil {
+			if body.Delivery != g.Session {
+				writeError(w, http.StatusForbidden, "a turn token may deliver only to its own session")
+				return
+			}
+			deliver = &queue.Delivery{Session: g.Session, Maker: queue.Maker{Session: g.Session, Turn: g.Turn}}
+		} else {
+			deliver = &queue.Delivery{Session: body.Delivery}
+		}
 	}
-	// Never refused for a busy session: the job waits behind the session's
-	// turns that have not ended, as a delivered result does.
-	job, created, err := a.cfg.Queue.CreateTurnLinked(queue.DefaultTeam, body.IdempotencyKey, spec, links, queueLimits(policyOf(r)), deliverTo, maker)
+	// Never refused for a busy session: the job waits behind the session's turns
+	// that have not ended, as a delivered result does.
+	job, created, err := a.cfg.Queue.CreateTurnLinked(queue.DefaultTeam, body.IdempotencyKey, spec, links, queueLimits(policyOf(r)), deliver)
 	var limit *queue.LimitError
 	var removed *queue.RunnerRemovedError
 	switch {
@@ -294,6 +333,32 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		a.internal(w)
+		return
+	}
+	// async by default (his rule, 2026-11-19): wait=false returns once the turn
+	// is recorded, naming it, without waiting for a runner. The ask_agent and
+	// review_turn apps send it, so startTurn never blocks and registerOn runs
+	// next in the same tool call, shrinking the gap between the two steps to that
+	// one dispatch. Absent or true keeps the 30s wait.
+	if noWait {
+		// Report the turn's real state, not a hardcoded "queued": a retry whose
+		// turn was stopped or ended before it started must say so, not pretend it
+		// is still waiting to run (found in review 2026-11-19). This is awaitTurn's
+		// own first check, without the wait.
+		j, err := a.cfg.Queue.Get(queue.DefaultTeam, job.ID)
+		if err != nil {
+			a.internal(w)
+			return
+		}
+		turn := startedTurn(j)
+		switch {
+		case turn != "":
+			writeJSON(w, http.StatusAccepted, a.startedRunning(j, turn, !created))
+		case j.Ended != nil:
+			a.notStarted(w, j)
+		default:
+			writeJSON(w, http.StatusAccepted, Started{Session: j.Session, Turn: j.Turn, State: queue.TurnQueued, Existing: !created})
+		}
 		return
 	}
 	a.awaitTurn(w, r.Context(), job, !created)
@@ -345,6 +410,23 @@ func (a *API) resolveAgent(id string) (agents.Agent, error) {
 
 const noTurns = "this service starts no turns: it keeps no queue"
 
+// startedRunning is the Started for a turn a runner has started: its running
+// state, and the gateway BaseURL when this service runs the turn itself
+// (agentbus up). Both the waiting path and the wait=false path build their
+// running reply through it, so they cannot diverge on the gateway address
+// (found in review 2026-11-19: wait=false had omitted BaseURL).
+func (a *API) startedRunning(j queue.Job, turn string, existing bool) Started {
+	st := Started{Session: j.Session, Turn: turn, State: queue.TurnRunning, Existing: existing}
+	// BaseURL is the turn's gateway, which only this service serves, and only
+	// when it runs turns itself. A server runs no turns of its own: the gateway
+	// is on the runner that ran it, a machine this service does not serve, so
+	// BaseURL is left out rather than pointing at control.
+	if a.cfg.Engine != nil {
+		st.BaseURL = a.cfg.BaseURL + "/s/" + j.Session + "/t/" + turn
+	}
+	return st
+}
+
 // awaitTurn answers once the job's turn has started: 202 with the turn. A job
 // that ended before its turn started answers why, with the status the runner
 // was refused with. A job no runner took within TurnWait answers 202 with
@@ -377,16 +459,7 @@ func (a *API) awaitTurn(w http.ResponseWriter, ctx context.Context, job queue.Jo
 			return
 		}
 		if turn := startedTurn(j); turn != "" {
-			st := Started{Session: j.Session, Turn: turn, State: queue.TurnRunning, Existing: existing}
-			// BaseURL is the turn's gateway, which only this service serves,
-			// and only when it runs turns itself (agentbus up). A server runs
-			// no turns of its own: the turn's gateway is on the runner that ran
-			// it, on another machine this service does not serve, so BaseURL is
-			// left out rather than pointing at control.
-			if a.cfg.Engine != nil {
-				st.BaseURL = a.cfg.BaseURL + "/s/" + j.Session + "/t/" + turn
-			}
-			writeJSON(w, http.StatusAccepted, st)
+			writeJSON(w, http.StatusAccepted, a.startedRunning(j, turn, existing))
 			return
 		}
 		if j.Ended != nil {

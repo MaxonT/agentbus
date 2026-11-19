@@ -805,7 +805,7 @@ func (r *Runner) work(ctx context.Context, job queue.Job, a queue.Attempt) {
 	case job.Kind == queue.KindHome:
 		at.finish(ctx, r.homeWork(at))
 		return
-	case job.Kind != queue.KindTurn && job.Kind != queue.KindReview:
+	case job.Kind != queue.KindTurn:
 		// A kind this runner does not run, such as a command job (the
 		// person's "!" in 0.4, retired) a control made before.
 		at.finish(ctx, queue.Finish{Status: queue.Failed, Reason: queue.ReasonSetup,
@@ -842,22 +842,9 @@ func (r *Runner) work(ctx context.Context, job queue.Job, a queue.Attempt) {
 	// The turn's record reaches control while it runs (record.go).
 	go at.live(ctx, done)
 	r.follow(ctx, at, turn)
-	// A review takes no next turn and its own copy (B12) is throwaway: both its
-	// home and its copy go once its turn has ended.
-	if job.Kind == queue.KindReview {
-		space := at.space
-		go func() {
-			<-turn.Done()
-			if err := r.cfg.Engine.RemoveHome(turn.Session); err != nil {
-				r.cfg.Logf("review %s: its session's home could not be removed", job.ID)
-			}
-			if space != nil {
-				if err := isolation.Close(space); err != nil {
-					r.cfg.Logf("review %s: its copy could not be removed", job.ID)
-				}
-			}
-		}()
-	}
+	// B15: no review teardown here. A review is a normal turn; its session and
+	// copy follow the same lifecycle as any asked turn's (the ask app closes an
+	// asked session when it is safe, later in milestone C).
 }
 
 // request is the turn the attempt runs. Its id is the job's turn. A turn
@@ -891,14 +878,9 @@ func (r *Runner) request(at *attempt) run.Request {
 	default:
 		req.Harness, req.Folder, req.FolderRef = sp.Harness, at.folder, at.ref
 		req.AgentID, req.Access, req.KeyEnv = sp.AgentID, sp.Access, sp.KeyEnv
-		switch at.job.Kind {
-		case queue.KindTurn:
-			req.NewSession = at.job.Session
-		case queue.KindReview:
-			// The session control named for this review: its record is
-			// accepted for that session only.
-			req.NewSession = at.job.Links.ReviewSession
-		}
+		// B15: a turn job opens the session the queue named for it. (A review is
+		// a normal turn now, with no session of its own.)
+		req.NewSession = at.job.Session
 	}
 	// Work an agent asked for, and a delivered result, say so on their
 	// turn.started, and place the turn's token in its request tree.
@@ -925,22 +907,9 @@ func (r *Runner) request(at *attempt) run.Request {
 func (r *Runner) prepare(ctx context.Context, at *attempt) *queue.Result {
 	sp := at.job.Spec
 	switch {
-	case at.job.Kind == queue.KindReview && at.job.Workspace != nil:
-		// A review runs in its OWN copy of the reviewed workspace (B12: it is a
-		// normal turn now, so it may edit — but its edits must stay in the copy
-		// and never reach the author's workspace or the person's folder). The
-		// copy is named after the review's own session so it does not collide
-		// with the author's. It is removed when the review's turn ends.
-		reviewed := r.workspaceDir(*at.job.Workspace)
-		if res := r.remount(at, reviewed); res != nil {
-			return res
-		}
-		if info, err := os.Stat(reviewed); err != nil || !info.IsDir() {
-			at.folder = ""
-			return nil // the engine refuses it, in its own words
-		}
-		b, _ := isolation.Get(isolation.Copy)
-		return r.isolate(at, b, isolation.Request{ID: at.job.Links.ReviewSession, Folder: reviewed})
+	// B15: no review workspace recipe. A review is a normal turn, so it runs in
+	// a fresh copy of the folder like any asked turn and reads the reviewed
+	// turn's diff through agentbus-api, not from a copy of its workspace.
 	case sp.Repo != "" || sp.RepoRef != "":
 		repo, ok := r.folderPath(sp.Repo, sp.RepoRef, sp.Machine)
 		if !ok {

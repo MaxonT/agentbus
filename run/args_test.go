@@ -107,7 +107,7 @@ func TestInstructionsDefault(t *testing.T) {
 	// What the baseline found agents miss: their copy is not the person's
 	// folder, how to apply, and how to ask for a review.
 	for _, line := range []string{"in session abc", "own copy of the person's folder", "agentbus-api POST /api/v0/turns/T/apply",
-		"agentbus-api POST /api/v0/turns/T/review", `"/api/v0/sessions/abc/search?q=<text>"`, "not your harness's own agents"} {
+		"agentbus-api POST /api/v0/turns ", `"/api/v0/sessions/abc/search?q=<text>"`, "not your harness's own agents"} {
 		if !strings.Contains(got, line) {
 			t.Errorf("instructions lack %q", line)
 		}

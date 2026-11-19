@@ -3,9 +3,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/staysup/agentbus/folders"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/staysup/agentbus/event"
+	"github.com/staysup/agentbus/folders"
 	"github.com/staysup/agentbus/queue"
 	"github.com/staysup/agentbus/run"
 	"github.com/staysup/agentbus/settings"
@@ -32,6 +34,12 @@ func askEnv(t *testing.T) (*env, string) {
 
 // askEnvWith is askEnv with permissions.toml at perm ("" for none).
 func askEnvWith(t *testing.T, perm string) (*env, string) {
+	return askEnvCap(t, perm, 16)
+}
+
+// askEnvCap is askEnvWith with a chosen runner capacity, so a test can hold the
+// one slot and keep an asked turn queued.
+func askEnvCap(t *testing.T, perm string, maxRuns int) (*env, string) {
 	t.Helper()
 	dir := t.TempDir()
 	script := `for a; do p="$a"; done; echo '{"type":"result","session_id":"sid-'$$'"}'; ` +
@@ -42,7 +50,7 @@ func askEnvWith(t *testing.T, perm string) (*env, string) {
 		return run.Launch{Path: "/bin/sh", Args: []string{"-c", script, "sh"},
 			Env: []string{"PATH=/usr/bin:/bin", "D=" + dir, "ANTHROPIC_BASE_URL=" + baseURL}}, nil
 	}
-	return stackEnv(t, stack{wire: wire, maxRuns: 16, permissions: perm}), dir
+	return stackEnv(t, stack{wire: wire, maxRuns: maxRuns, permissions: perm}), dir
 }
 
 // tokenOf waits for the turn with this prompt and returns its token.
@@ -98,6 +106,23 @@ func gitRepo(t *testing.T) string {
 
 // deliverUntil runs the delivery loop, as agentbus up does every second,
 // until the session has want delivered-result turns, and returns them.
+// waitAskedTurn waits for an asked session's one turn to be stored, which under
+// (d) happens when a runner starts it, after startTurn returned it queued.
+func waitAskedTurn(t *testing.T, e *env, session string) store.Turn {
+	t.Helper()
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		list, err := e.store.Turns(store.TurnQuery{Session: session, Limit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list.Turns) >= 1 {
+			return list.Turns[0]
+		}
+	}
+	t.Fatalf("asked session %s stored no turn", session)
+	return store.Turn{}
+}
+
 func deliverUntil(t *testing.T, e *env, session string, want int) []store.Turn {
 	t.Helper()
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
@@ -122,6 +147,12 @@ func deliverUntil(t *testing.T, e *env, session string, want int) []store.Turn {
 	return nil
 }
 
+// ask does what the ask_agent app does over the public API: start a turn, then
+// register the on that delivers its reply to the asking session (B15: delivery
+// is no longer automatic on POST /turns; the app registers the on itself). The
+// turn token may register an on for the turn its own ask just started, so this
+// is exactly the app's two steps, here spelled out. TestAskAgentApp drives the
+// real app through MCP end to end.
 func ask(t *testing.T, e *env, tok, body string) Started {
 	t.Helper()
 	code, out := as(t, e, tok, "POST", "/api/v0/turns", body)
@@ -132,14 +163,257 @@ func ask(t *testing.T, e *env, tok, body string) Started {
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		t.Fatal(err)
 	}
+	if code, out := as(t, e, tok, "POST", "/api/v0/ons", `{"turn":"`+s.Turn+`"}`); code != 201 {
+		t.Fatalf("register delivery on for %s: %d %s", s.Turn, code, out)
+	}
 	return s
+}
+
+// callAskAgent drives the ask_agent app through the MCP endpoint with a turn's
+// own token and returns the started turn and session from the app's result.
+func callAskAgent(t *testing.T, e *env, tok, body string) (turn, session string) {
+	t.Helper()
+	code, out := as(t, e, tok, "POST", "/api/v0/mcp", body)
+	if code != 200 {
+		t.Fatalf("mcp ask_agent: %d %s", code, out)
+	}
+	var env struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("mcp reply %s: %v", out, err)
+	}
+	if env.Result.IsError || len(env.Result.Content) == 0 {
+		t.Fatalf("ask_agent app failed: %s", out)
+	}
+	var r struct{ Turn, Session string }
+	if err := json.Unmarshal([]byte(env.Result.Content[0].Text), &r); err != nil {
+		t.Fatalf("app output %q: %v", env.Result.Content[0].Text, err)
+	}
+	return r.Turn, r.Session
+}
+
+// The real ask_agent app, end to end through MCP: one tool call starts the
+// turn and registers the delivery on (its two Arazzo steps, apps.go), the
+// asked turn says who asked it, a retry returns the same turn (the derived
+// idempotency key), and the reply is delivered back to the asking session.
+func TestAskAgentAppDelivers(t *testing.T) {
+	perm := filepath.Join(t.TempDir(), settings.PolicyFile)
+	if err := os.WriteFile(perm, []byte("allow = [\"ask_agent\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, dir := askEnvWith(t, perm)
+	repo := gitRepo(t)
+	root := startTurn(t, e, `{"agent":"claude","folder":"`+repo+`","prompt":"root"}`)
+	tok := tokenOf(t, dir, "root")
+
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask_agent","arguments":{"agent":"claude","prompt":"quick"}}}`
+	turn, session := callAskAgent(t, e, tok, call)
+	if turn == "" || session == "" {
+		t.Fatalf("ask_agent returned turn=%q session=%q", turn, session)
+	}
+	// startTurn no longer waits (wait=false, (d)): the asked turn is queued at
+	// return, so wait for the runner to start it before reading its event.
+	asked := waitAskedTurn(t, e, session)
+	if o := asked.Origin; o == nil || o.Kind != event.OriginAsked || o.Turn != root.Turn {
+		t.Errorf("asked turn origin %+v, want asked by %s", o, root.Turn)
+	}
+	// A retry (the SAME JSON-RPC id) returns the same turn, not a second one.
+	if turn2, _ := callAskAgent(t, e, tok, call); turn2 != turn {
+		t.Fatalf("a retry started a new turn: %s vs %s", turn2, turn)
+	}
+	// A FRESH call (a different JSON-RPC id) with the same arguments is a new
+	// ask: a different turn, not the completed one (found in review 2026-11-19).
+	fresh := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask_agent","arguments":{"agent":"claude","prompt":"quick"}}}`
+	turn3, _ := callAskAgent(t, e, tok, fresh)
+	if turn3 == turn {
+		t.Fatalf("a fresh ask with the same args reused the completed turn: %s", turn3)
+	}
+	// Each app registered its on, so BOTH asked replies come back to the asking
+	// session as later turns.
+	release(dir, "root")
+	got := deliverUntil(t, e, root.Session, 2)
+	delivered := map[string]bool{}
+	for _, tn := range got {
+		if tn.Origin != nil {
+			delivered[tn.Origin.Turn] = true
+		}
+	}
+	if !delivered[turn] || !delivered[turn3] {
+		t.Fatalf("the asked replies were not both delivered to root (want %s and %s): %+v", turn, turn3, got)
+	}
+}
+
+// The review_turn app end to end: it starts a review turn (ask_agent with a
+// review prompt naming the reviewed turn) and delivers the reviewer's reply to
+// the asking session. The verdict is that reply; core parses nothing.
+func TestReviewTurnAppDelivers(t *testing.T) {
+	perm := filepath.Join(t.TempDir(), settings.PolicyFile)
+	if err := os.WriteFile(perm, []byte("allow = [\"review_turn\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, dir := askEnvWith(t, perm)
+	folder := t.TempDir()
+	os.WriteFile(filepath.Join(folder, "a.txt"), []byte("one\n"), 0o644)
+	// The turn to review: a normal turn that ends with a change.
+	w := startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"work"}`)
+	tokenOf(t, dir, "work")
+	os.WriteFile(filepath.Join(pwdOf(t, dir, "work"), "a.txt"), []byte("two\n"), 0o644)
+	release(dir, "work")
+	waitEnded(t, e, w.Turn)
+
+	// A live follow-up turn in that session drives the review (the real shape:
+	// you review a turn that has ended, from a turn that is still running).
+	startTurn(t, e, `{"agent":"claude","session":"`+w.Session+`","prompt":"drive"}`)
+	tok := tokenOf(t, dir, "drive")
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"review_turn","arguments":{"turn":"` + w.Turn + `","agent":"codex"}}}`
+	code, out := as(t, e, tok, "POST", "/api/v0/mcp", call)
+	if code != 200 {
+		t.Fatalf("review_turn call: %d %s", code, out)
+	}
+	var env struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if json.Unmarshal([]byte(out), &env) != nil || env.Result.IsError || len(env.Result.Content) == 0 {
+		t.Fatalf("review_turn failed: %s", out)
+	}
+	var r struct{ Turn, Session string }
+	if json.Unmarshal([]byte(env.Result.Content[0].Text), &r) != nil || r.Turn == "" {
+		t.Fatalf("review_turn output %q", env.Result.Content[0].Text)
+	}
+	// The reviewer's reply is delivered to the driving turn's session (w's),
+	// behind the drive turn, which must end first.
+	release(dir, "drive")
+	got := deliverUntil(t, e, w.Session, 1)
+	if got[0].Origin == nil || got[0].Origin.Turn != r.Turn {
+		t.Fatalf("the review reply was not delivered: %+v", got)
+	}
+}
+
+// ask_agent's startTurn step does not wait for a runner (wait=false, his (d)
+// rule 2026-11-19): it returns once the turn is recorded, so registerOn runs in
+// the same tool call even while the turn is only queued. Here the root turn
+// holds the one runner slot, so the asked turn cannot start during the call —
+// yet the app returns its id and its on is registered. When root ends and the
+// asked turn finally runs, its reply still delivers.
+func TestAskAgentAppQueuedStillGetsOn(t *testing.T) {
+	perm := filepath.Join(t.TempDir(), settings.PolicyFile)
+	if err := os.WriteFile(perm, []byte("allow = [\"ask_agent\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, dir := askEnvCap(t, perm, 1) // one runner slot: root occupies it
+	repo := gitRepo(t)
+	root := startTurn(t, e, `{"agent":"claude","folder":"`+repo+`","prompt":"root"}`)
+	tok := tokenOf(t, dir, "root") // root is running now, holding the slot
+
+	turn, _ := callAskAgent(t, e, tok,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask_agent","arguments":{"agent":"claude","prompt":"quick"}}}`)
+	if turn == "" {
+		t.Fatal("ask_agent returned no turn")
+	}
+	// The asked turn is only queued: no runner is free to start it.
+	j, err := e.q.JobByTurn(queue.DefaultTeam, turn)
+	if err != nil || j.State != queue.Queued {
+		t.Fatalf("asked turn state %q (err %v), want queued", j.State, err)
+	}
+	// Yet its on is registered, watching the queued turn, to deliver to root.
+	ons, err := e.q.ListOns(queue.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, o := range ons {
+		if o.Subject == turn && o.Session == root.Session {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no on watching the queued turn %s for %s: %+v", turn, root.Session, ons)
+	}
+	// Release root; the slot frees, the asked turn runs and ends, and its reply
+	// delivers back to root through the on registered while it was queued.
+	release(dir, "root")
+	got := deliverUntil(t, e, root.Session, 1)
+	if got[0].Origin == nil || got[0].Origin.Turn != turn {
+		t.Fatalf("the queued turn's reply did not deliver: %+v", got)
+	}
+}
+
+// Client disconnect: the caller's request context is already cancelled when the
+// handler runs, yet the atomic create records the turn AND its on server-side in
+// one write, so the reply still delivers. Before atomic delivery the on was a
+// separate step a disconnect could drop (his call (a), 2026-11-19).
+func TestAskAgentDisconnectStillDelivers(t *testing.T) {
+	perm := filepath.Join(t.TempDir(), settings.PolicyFile)
+	if err := os.WriteFile(perm, []byte("allow = [\"ask_agent\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, dir := askEnvWith(t, perm)
+	repo := gitRepo(t)
+	root := startTurn(t, e, `{"agent":"claude","folder":"`+repo+`","prompt":"root"}`)
+	tok := tokenOf(t, dir, "root")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the client is gone before the handler runs
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask_agent","arguments":{"agent":"claude","prompt":"quick"}}}`
+	req := httptest.NewRequest("POST", "http://127.0.0.1:"+e.port+"/api/v0/mcp", strings.NewReader(body)).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	e.api.ServeHTTP(httptest.NewRecorder(), req)
+	// The on was recorded atomically, despite the dead client.
+	ons, err := e.q.ListOns(queue.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ons) != 1 || ons[0].Session != root.Session {
+		t.Fatalf("want one on delivering to root, got %+v", ons)
+	}
+	release(dir, "root")
+	got := deliverUntil(t, e, root.Session, 1)
+	if got[0].Origin == nil || got[0].Origin.Turn != ons[0].Subject {
+		t.Fatalf("the reply did not deliver after the client disconnected: %+v", got)
+	}
+}
+
+// Caller stopped: the asked turn's on is recorded atomically with the turn, so
+// stopping the caller's own turn afterward cannot strand the reply — it still
+// delivers to the caller's session. This was the residual window (a stop between
+// startTurn and registerOn) before delivery became one write.
+func TestAskAgentCallerStoppedStillDelivers(t *testing.T) {
+	perm := filepath.Join(t.TempDir(), settings.PolicyFile)
+	if err := os.WriteFile(perm, []byte("allow = [\"ask_agent\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, dir := askEnvWith(t, perm)
+	repo := gitRepo(t)
+	root := startTurn(t, e, `{"agent":"claude","folder":"`+repo+`","prompt":"root"}`)
+	tok := tokenOf(t, dir, "root")
+	turn, _ := callAskAgent(t, e, tok,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask_agent","arguments":{"agent":"claude","prompt":"quick"}}}`)
+	// Stop the caller's own turn; its reply's on was already written with the turn.
+	if code, out := as(t, e, token, "POST", "/api/v0/turns/"+root.Turn+"/stop", ""); code != 202 {
+		t.Fatalf("stop the caller's turn: %d %s", code, out)
+	}
+	got := deliverUntil(t, e, root.Session, 1)
+	if got[0].Origin == nil || got[0].Origin.Turn != turn {
+		t.Fatalf("the reply did not deliver after the caller was stopped: %+v", got)
+	}
 }
 
 // The public on routes honour the caller's token: a turn token registers an
 // on only for a turn its tree started, always delivering to its own session,
 // and removes only an on its own turn made; the main token names any turn and
-// the session. A turn token's ask already registered the on for the turn it
-// started, so registering it again returns that same on.
+// the session. (B15: ons dedupe by idempotency_key only, so a keyless register
+// is a new on each time — several may watch one turn.)
 func TestOnAPIAuth(t *testing.T) {
 	e, dir := askEnv(t)
 	p := startTurn(t, e, `{"agent":"claude","folder":"`+gitRepo(t)+`","prompt":"parent"}`)
@@ -163,6 +437,14 @@ func TestOnAPIAuth(t *testing.T) {
 	if code, out := as(t, e, ptok, "POST", "/api/v0/ons", `{"turn":"`+other.Turn+`"}`); code != 403 {
 		t.Fatalf("out-of-tree register: %d %s, want 403", code, out)
 	}
+	// A key with '/' is refused, the same validator POST /turns uses: this is
+	// what reserves the internal delivery/ result/ apply/ namespaces, so a
+	// caller cannot register "delivery/<key>" and collide with a turn's own
+	// delivery on (his call, 2026-11-19; found by grok). Exercises the collision
+	// path and asserts it is closed at the route.
+	if code, out := as(t, e, ptok, "POST", "/api/v0/ons", `{"turn":"`+child.Turn+`","idempotency_key":"delivery/x"}`); code != 400 {
+		t.Fatalf("on with a '/' key: %d %s, want 400", code, out)
+	}
 	// A turn may not subscribe to its own turn (that would be a self-
 	// continuation dodging the asked-work caps).
 	if code, out := as(t, e, ptok, "POST", "/api/v0/ons", `{"turn":"`+p.Turn+`"}`); code != 403 {
@@ -176,13 +458,15 @@ func TestOnAPIAuth(t *testing.T) {
 	if resp, out := do(t, e.req(t, "POST", "/api/v0/ons", strings.NewReader(`{"turn":"t_nope","session":"`+p.Session+`"}`))); resp.StatusCode != 404 {
 		t.Fatalf("main unknown turn: %d %s, want 404", resp.StatusCode, out)
 	}
-	// The main token delivers only within the watched turn's tree: child is in
-	// p's tree, so an unrelated session is refused and p's own is allowed.
-	if resp, out := do(t, e.req(t, "POST", "/api/v0/ons", strings.NewReader(`{"turn":"`+child.Turn+`","session":"`+other.Session+`"}`))); resp.StatusCode != 403 {
-		t.Fatalf("main cross-tree: %d %s, want 403", resp.StatusCode, out)
+	// B15 (his call, 2026-11-19): the main token may watch any turn and deliver
+	// to any session it names — core no longer confines an on to the watched
+	// turn's tree (made safe by the self-retire checks, B13b). So delivering
+	// child's reply to an unrelated session is allowed now.
+	if resp, out := do(t, e.req(t, "POST", "/api/v0/ons", strings.NewReader(`{"turn":"`+other.Turn+`","session":"`+p.Session+`"}`))); resp.StatusCode != 201 {
+		t.Fatalf("main any-turn: %d %s, want 201", resp.StatusCode, out)
 	}
 	if resp, out := do(t, e.req(t, "POST", "/api/v0/ons", strings.NewReader(`{"turn":"`+child.Turn+`","session":"`+p.Session+`"}`))); resp.StatusCode != 201 {
-		t.Fatalf("main in-tree: %d %s, want 201", resp.StatusCode, out)
+		t.Fatalf("main deliver: %d %s, want 201", resp.StatusCode, out)
 	}
 	// A different turn cannot remove the parent's on; the maker can.
 	ctok := tokenOf(t, dir, "child")
@@ -278,45 +562,21 @@ func TestAskFanOutAndDeliver(t *testing.T) {
 		}
 	}
 
-	// The parent's token is gone; the result turn's own token asks for a
-	// review of a child's work, and that comes back too.
+	// B15: the review route is gone; a review is the review_turn app (its own
+	// end-to-end test). A follow-up turn still continues the asker's session, and
+	// a stop of asked work in the tree is allowed.
 	j1, err := e.q.JobByTurn(queue.DefaultTeam, c1.Turn)
 	if err != nil || j1.Ended == nil {
 		t.Fatalf("child job: %v %+v", err, j1)
 	}
-	p2 := startTurn(t, e, `{"agent":"claude","session":"`+p.Session+`","prompt":"again"}`)
+	startTurn(t, e, `{"agent":"claude","session":"`+p.Session+`","prompt":"again"}`)
 	atok := tokenOf(t, dir, "again")
-	code, out := as(t, e, atok, "POST", "/api/v0/turns/"+c1.Turn+"/review", `{"agent":"codex"}`)
-	if code != 202 {
-		t.Fatalf("review: %d %s", code, out)
-	}
-	var rs Started
-	_ = json.Unmarshal([]byte(out), &rs)
-	rj, err := e.q.JobByTurn(queue.DefaultTeam, rs.Turn)
-	if err != nil || rj.Links.Chain == nil || rj.Links.Chain.By != p2.Turn || rj.Links.Chain.Root != p.Session {
-		t.Errorf("review %+v: %v %+v", rs, err, rj.Links)
-	}
-	// A stop of asked work in the tree is allowed.
 	c3 := ask(t, e, atok, `{"agent":"claude","prompt":"three"}`)
 	if code, out := as(t, e, atok, "POST", "/api/v0/turns/"+c3.Turn+"/stop", ""); code != 202 {
 		t.Errorf("stop asked work: %d %s", code, out)
 	}
 	release(dir, "again")
-	release(dir, "three")
-	got = deliverUntil(t, e, p.Session, 4)
-	review := false
-	for _, tn := range got {
-		if tn.Origin.Turn == rs.Turn {
-			prompt, _, _, err := e.store.TurnText(tn.Session, tn.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			review = tn.Origin.TurnKind == "review" && strings.Contains(prompt, "the review you asked for") && strings.Contains(prompt, "Verdict:")
-		}
-	}
-	if !review {
-		t.Errorf("no review result delivered: %+v", got)
-	}
+	_ = got
 }
 
 // A chain of asks stops at the depth cap, and one turn's asks stop at the
@@ -407,9 +667,6 @@ func TestAskPolicyFromPermissions(t *testing.T) {
 	if code, out := as(t, e, child, "POST", "/api/v0/turns/"+started.Turn+"/stop", ""); code == 403 {
 		t.Errorf("stop a turn its tree asked for: %d %s", code, out)
 	}
-	if code, out := as(t, e, child, "POST", "/api/v0/turns/"+root.Turn+"/review", `{"agent":"claude"}`); code == 403 {
-		t.Errorf("review a turn in its tree: %d %s", code, out)
-	}
 	// Outside its tree, nothing: not to read, rename, review or stop.
 	for _, tc := range []struct {
 		name, method, path, body, want string
@@ -417,7 +674,6 @@ func TestAskPolicyFromPermissions(t *testing.T) {
 		{"read another tree", "GET", "/api/v0/sessions/" + other.Session + "/search?q=x", "", "only its own session"},
 		{"read another tree by query", "GET", "/api/v0/turns?session=" + other.Session, "", "only its own session"},
 		{"rename another tree's session", "PATCH", "/api/v0/sessions/" + other.Session, `{"title":"x"}`, "only its own session"},
-		{"review another tree's turn", "POST", "/api/v0/turns/" + other.Turn + "/review", `{"agent":"claude"}`, "only its own session"},
 		{"stop another tree's turn", "POST", "/api/v0/turns/" + other.Turn + "/stop", "", "request tree asked for"},
 		{"stop its tree's own root", "POST", "/api/v0/turns/" + root.Turn + "/stop", "", "request tree asked for"},
 	} {
