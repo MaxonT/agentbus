@@ -199,17 +199,10 @@ func (codex) WireAPI(w APIWire) (env, args []string) {
 }
 
 // Refuse: every setting of permissions.toml has a flag on codex, or the
-// gateway's guard. A read-only turn with one of the person's own MCP servers
-// whose name cannot go in a -c key is refused: it could not be turned off.
+// gateway's guard, so nothing here refuses a turn before it starts. Read-only
+// turns retired in 0.6 (B12); a review runs like any turn, with the person's
+// own MCP servers loaded, not turned off.
 func (codex) Refuse(t Turn) string {
-	if t.Writes.ReadOnly {
-		for _, n := range t.OwnServers {
-			if !serverNameShape.MatchString(n) {
-				return "an MCP server in codex's config.toml has a name AgentBus cannot turn off for a read-only turn (" +
-					"letters, digits, - and _ only), so the turn did not start. Rename it, or leave ~/.codex/config.toml out of Home files."
-			}
-		}
-	}
 	return ""
 }
 
@@ -287,17 +280,17 @@ func (codex) Args(t Turn) []string {
 		// with the thread_id (codex-cli 0.164.0, 2026-11-05).
 		a = append(a, "--json")
 	}
-	// The sandbox is always named, so a turn gets what read_only says
+	// The sandbox is always named, so a turn gets the policy's edit rule
 	// and not codex's own default, which for `codex exec` is read-only
-	// (acceptance soak, 2026-11-06: every turn with read_only false
-	// could not write). `codex exec resume` takes no --sandbox of its
-	// own. Given to exec before resume it reaches the resumed turn: the
+	// (acceptance soak, 2026-11-06: every turn that could write but was
+	// named read-only could not). `codex exec resume` takes no --sandbox of
+	// its own. Given to exec before resume it reaches the resumed turn: the
 	// turn's recorded sandbox policy follows it (codex-cli 0.164.0,
 	// 2026-11-05).
 	// workspace-write only with an edit rule: edit = "none", or a
 	// folder codex could not be kept out of the data folder's files
 	// in, runs read-only (Edit).
-	write := !t.Writes.ReadOnly && len(t.Writes.Edit) > 0
+	write := len(t.Writes.Edit) > 0
 	switch {
 	case t.Walled:
 		// Inside the runner's sandbox codex's own cannot be built: every
@@ -343,20 +336,9 @@ func (codex) Args(t Turn) []string {
 	// 0.167.0, 2026-11-14, research/2026-11-14-use-my-own-tools-design.md).
 	// Both are stable features, on by default (`codex features list`).
 	a = append(a, "--disable", "apps", "--disable", "plugins")
-	// A read-only turn (a review) turns each of the person's own MCP
-	// servers off for this run: codex's read-only sandbox limits local
-	// writes, not what a server does elsewhere. -c merges enabled = false
-	// into their entry, and codex then leaves the server off (codex-cli
-	// 0.164.0, 2026-11-11, codex mcp list with a scratch CODEX_HOME). An
-	// edit turn loads them as codex does. Before resume, so the resumed
-	// turn gets it too.
-	if t.Writes.ReadOnly {
-		for _, n := range t.OwnServers {
-			if serverNameShape.MatchString(n) {
-				a = append(a, "-c", "mcp_servers."+n+".enabled=false")
-			}
-		}
-	}
+	// Read-only turns retired in 0.6 (B12): a review loads the person's own
+	// MCP servers like any turn, as codex does, rather than turning each off
+	// for the run.
 	if t.NoSubagents {
 		a = append(a, "--disable", "multi_agent", "--disable", "multi_agent_v2")
 	}
@@ -518,7 +500,7 @@ func codexSandbox(readOnly bool) string {
 // which has it off by default. Without it a codex turn could not reach the
 // service with its turn token: curl exited 7 (acceptance soak, 2026-11-06,
 // item 2). The key is the [sandbox_workspace_write] table's network_access
-// (codex-cli 0.164.0). A read-only turn never gets it.
+// (codex-cli 0.164.0). A read-only sandbox (edit = "none") never gets it.
 func codexNetwork() []string {
 	return []string{"-c", "sandbox_workspace_write.network_access=true"}
 }

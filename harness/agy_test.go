@@ -35,8 +35,6 @@ func TestAgyArgs(t *testing.T) {
 		t           Turn
 		allow, deny []string
 	}{
-		{"read-only", Turn{Writes: Writes{ReadOnly: true, Edit: []string{"/w/f"}}, Allow: []string{"go test"}, ReadFolders: []string{"/r"}},
-			[]string{"read_file(/r)"}, []string{"write_file(*)", "edit_file(*)", "command(*)"}},
 		{"edits", Turn{Writes: edit, Allow: []string{"go test", "agentbus-api"}},
 			[]string{"mcp(*)", "write_file(/w/f)", "edit_file(/w/f)", "command(go test)", "command(agentbus-api)"},
 			[]string{"write_file(/w/f/policy.toml)", "edit_file(/w/f/policy.toml)"}},

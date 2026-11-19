@@ -99,12 +99,9 @@ func TestLaunchGolden(t *testing.T) {
 	for _, h := range []string{"claude", "codex"} {
 		cases = append(cases,
 			launchCase{name: h + " subscription, then resume", turns: []engine.Request{first(h), next("t_2")}},
-			launchCase{name: h + " read-only", turns: []engine.Request{with(first(h), func(r *engine.Request) { r.ReadOnly = true })}},
 			launchCase{name: h + " edit none", perm: "edit = \"none\"\n", turns: []engine.Request{first(h)}},
 			launchCase{name: h + " lists, model, own instructions", perm: lists, instr: strp("Be brief in {session}.\n"),
 				turns: []engine.Request{with(first(h), func(r *engine.Request) { r.Model = "opus" })}},
-			launchCase{name: h + " read-only with lists", perm: lists,
-				turns: []engine.Request{with(first(h), func(r *engine.Request) { r.ReadOnly = true })}},
 			launchCase{name: h + " empty instructions", instr: strp(""), turns: []engine.Request{first(h)}},
 			launchCase{name: h + " openrouter", env: []string{"OPENROUTER_API_KEY=test-key"},
 				turns: []engine.Request{with(first(h), func(r *engine.Request) { or(r); r.Model = "deepseek/deepseek-v4.1-flash" })}},
@@ -126,8 +123,6 @@ func TestLaunchGolden(t *testing.T) {
 			launchCase{name: h + " subscription, relayed, then resume", turns: []engine.Request{with(first(h), relayed), with(next("t_2"), relayed)}},
 			launchCase{name: h + " api key, relayed, with a model", turns: []engine.Request{with(first(h), func(r *engine.Request) { apiKey(r); r.Model = "opus" })}},
 			launchCase{name: h + " subagents off, then resume", perm: "subagents = false\n", turns: []engine.Request{first(h), next("t_2")}},
-			launchCase{name: h + " subagents off, read-only, with lists", perm: lists + "subagents = false\n",
-				turns: []engine.Request{with(first(h), func(r *engine.Request) { r.ReadOnly = true })}},
 			launchCase{name: h + " subagents on, said", perm: "subagents = true\n", turns: []engine.Request{first(h)}},
 			launchCase{name: h + " in a home of its own, then resume", homes: true, codexConfig: true,
 				env:   []string{"CLAUDE_CONFIG_DIR=<home>/.claude", "CODEX_HOME=<home>/.codex", "XDG_CONFIG_HOME=<home>/.config"},
@@ -144,8 +139,6 @@ func TestLaunchGolden(t *testing.T) {
 	for _, h := range []string{"claude", "codex"} {
 		cases = append(cases,
 			launchCase{name: h + " tools on, then resume", perm: toolsOn, turns: []engine.Request{first(h), next("t_2")}},
-			launchCase{name: h + " tools on, read-only", perm: toolsOn,
-				turns: []engine.Request{with(first(h), func(r *engine.Request) { r.ReadOnly = true })}},
 			launchCase{name: h + " tools on, subagents off, with lists", perm: lists + "subagents = false\n" + toolsOn, turns: []engine.Request{first(h)}},
 			launchCase{name: h + " tools on, asked by another agent", perm: toolsOn,
 				turns: []engine.Request{with(first(h), func(r *engine.Request) { r.Origin = asked })}},
@@ -154,8 +147,6 @@ func TestLaunchGolden(t *testing.T) {
 	allowOnly := "read_folders = [\"<readfolder>\"]\nallow = [\"go test\", \"git commit\"]\n"
 	cases = append(cases,
 		launchCase{name: "agy subscription, then resume", turns: []engine.Request{first("agy"), next("t_2")}},
-		launchCase{name: "agy read-only with lists", perm: allowOnly,
-			turns: []engine.Request{with(first("agy"), func(r *engine.Request) { r.ReadOnly = true })}},
 		launchCase{name: "agy lists, model, own instructions", perm: allowOnly, instr: strp("Be brief in {session}.\n"),
 			turns: []engine.Request{with(first("agy"), func(r *engine.Request) { r.Model = "gemini-3.8-flash-medium" })}},
 		launchCase{name: "agy edit none", perm: "edit = \"none\"\n", turns: []engine.Request{first("agy")}},
@@ -400,7 +391,7 @@ func runLaunchCase(t *testing.T, self string, c launchCase) string {
 		if req.Session == "" {
 			req.Folder = folder
 		}
-		fmt.Fprintf(&b, "--- turn %s harness=%q access=%q model=%q read_only=%t\n", req.Turn, req.Harness, req.Access, req.Model, req.ReadOnly)
+		fmt.Fprintf(&b, "--- turn %s harness=%q access=%q model=%q\n", req.Turn, req.Harness, req.Access, req.Model)
 		// Every turn names its agent: a next turn that names none here runs
 		// on the agent the turn before named, with its model, as control
 		// fills it in from the saved agent the cockpit sends.

@@ -139,10 +139,16 @@ func TestIdempotencyKey(t *testing.T) {
 	if n := wired.Load(); n != 1 {
 		t.Fatalf("the agent was wired %d times, want 1", n)
 	}
+	// Read-only turns retired (B12): read_only is accepted and dropped, so it is
+	// not part of a request's identity — a retry that adds it matches the first,
+	// never a 409.
+	roBody := `{"agent":"claude","folder":"` + dir + `","prompt":"hello","read_only":true,"idempotency_key":"job-7:a1"}`
+	if resp, out := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(roBody))); resp.StatusCode != 202 || !strings.Contains(out, `"existing":true`) {
+		t.Errorf("retry with read_only: %d %s, want 202 existing", resp.StatusCode, out)
+	}
 	for name, b := range map[string]string{
 		"another prompt": `{"agent":"claude","folder":"` + dir + `","prompt":"other","idempotency_key":"job-7:a1"}`,
 		"another model":  `{"agent":"claude","folder":"` + dir + `","prompt":"hello","model":"haiku","idempotency_key":"job-7:a1"}`,
-		"read_only":      `{"agent":"claude","folder":"` + dir + `","prompt":"hello","read_only":true,"idempotency_key":"job-7:a1"}`,
 		"with a session": `{"agent":"claude","session":"` + first.Session + `","prompt":"hello","idempotency_key":"job-7:a1"}`,
 	} {
 		if resp, out := do(t, e.req(t, "POST", "/api/v0/turns", strings.NewReader(b))); resp.StatusCode != 409 {

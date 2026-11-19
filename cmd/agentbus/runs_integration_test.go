@@ -339,47 +339,43 @@ func TestRunHoldsSessionOpenUntilChildExits(t *testing.T) {
 	}
 }
 
-func TestRunReadOnlyFlags(t *testing.T) {
+// Read-only turns retired in 0.6 (B12): an old client may still send read_only
+// (the retired step accepts it), but it is ignored — the turn gets the normal
+// args, never a restricted tool set. true, false and absent are all the same.
+func TestRunReadOnlyRetired(t *testing.T) {
 	home := t.TempDir()
 	oldToolDefaults(t, home)
 	svc := runService(t, home, nil, 0)
 	tok := readToken(t, home)
 	t.Setenv("AGENTBUS_FAKE_EXIT", "0")
 	for _, tc := range []struct {
-		agent    string
-		readOnly any
-		want     string // with BASE for the session's base URL
+		agent string
+		want  string // with BASE for the session's base URL
 	}{
-		{"claude", false, "-p --output-format json --append-system-prompt HINT --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT -- hi"},
-		{"claude", true, "-p --output-format json --append-system-prompt HINT --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config --no-chrome -- hi"},
-		{"claude", nil, "-p --output-format json --append-system-prompt HINT --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT -- hi"},
-		{"codex", nil, codexRelayArgs + ` exec --skip-git-repo-check --json --sandbox workspace-write -c developer_instructions=HINT -c sandbox_workspace_write.network_access=true --disable apps --disable plugins -- hi`},
-		{"codex", true, codexRelayArgs + ` exec --skip-git-repo-check --json --sandbox read-only -c developer_instructions=HINT --disable apps --disable plugins -- hi`},
-		// False names workspace-write with network on: codex exec's own
-		// default is read-only, and its workspace-write has no network
-		// (acceptance soak, 2026-11-06). True gets neither.
-		{"codex", false, codexRelayArgs + ` exec --skip-git-repo-check --json --sandbox workspace-write -c developer_instructions=HINT -c sandbox_workspace_write.network_access=true --disable apps --disable plugins -- hi`},
+		{"claude", "-p --output-format json --append-system-prompt HINT --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT -- hi"},
+		{"codex", codexRelayArgs + ` exec --skip-git-repo-check --json --sandbox workspace-write -c developer_instructions=HINT -c sandbox_workspace_write.network_access=true --disable apps --disable plugins -- hi`},
 	} {
-		report := filepath.Join(t.TempDir(), "report")
-		t.Setenv("AGENTBUS_FAKE_OUT", report)
-		body := map[string]any{"agent": tc.agent, "folder": t.TempDir(), "prompt": "hi"}
-		if tc.readOnly != nil {
-			body["read_only"] = tc.readOnly
+		for _, readOnly := range []any{nil, true, false} {
+			report := filepath.Join(t.TempDir(), "report")
+			t.Setenv("AGENTBUS_FAKE_OUT", report)
+			body := map[string]any{"agent": tc.agent, "folder": t.TempDir(), "prompt": "hi"}
+			if readOnly != nil {
+				body["read_only"] = readOnly
+			}
+			code, out, raw := postRun(t, svc, tok, body)
+			if code != http.StatusAccepted {
+				t.Fatalf("%s read_only %v: status %d: %s", tc.agent, readOnly, code, raw)
+			}
+			want := strings.ReplaceAll(tc.want, "BASE", out["base_url"].(string))
+			rep := readReport(t, report)
+			if got := argsOf(t, rep.Args, out["session"].(string)); got != want {
+				t.Errorf("%s read_only %v: args %q, want %q", tc.agent, readOnly, got, want)
+			}
+			if v, _ := envValue(rep.Env, "AGENTBUS_TOKEN"); !strings.HasPrefix(v, jobs.TokenPrefix) || v == tok {
+				t.Errorf("%s read_only %v: no turn token in the child's environment", tc.agent, readOnly)
+			}
+			waitClosed(t, svc.store, out["session"].(string))
 		}
-		code, out, raw := postRun(t, svc, tok, body)
-		if code != http.StatusAccepted {
-			t.Fatalf("%s %v: status %d: %s", tc.agent, tc.readOnly, code, raw)
-		}
-		want := strings.ReplaceAll(tc.want, "BASE", out["base_url"].(string))
-		rep := readReport(t, report)
-		if got := argsOf(t, rep.Args, out["session"].(string)); got != want {
-			t.Errorf("%s read_only %v: args %q, want %q", tc.agent, tc.readOnly, got, want)
-		}
-		// Both agents get a turn token, read-only or not.
-		if v, _ := envValue(rep.Env, "AGENTBUS_TOKEN"); !strings.HasPrefix(v, jobs.TokenPrefix) || v == tok {
-			t.Errorf("%s read_only %v: no turn token in the child's environment", tc.agent, tc.readOnly)
-		}
-		waitClosed(t, svc.store, out["session"].(string))
 	}
 }
 
@@ -408,7 +404,7 @@ func TestRunRefusals(t *testing.T) {
 		badFolder = "folder must be an absolute path to an existing directory, at most 4096 bytes"
 		badPrompt = "prompt must be from 1 byte to 256 KiB, with no NUL byte"
 		badModel  = "model must match ^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
-		badBody   = "the body must be one JSON object with prompt, agent and folder (or session, and optionally agent), and optionally model, read_only, isolate and idempotency_key, at most 2 MiB"
+		badBody   = "the body must be one JSON object with prompt, agent and folder (or session, and optionally agent), and optionally model, isolate and idempotency_key, at most 2 MiB"
 	)
 	for _, tc := range []struct {
 		name string

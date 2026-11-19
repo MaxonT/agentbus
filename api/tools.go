@@ -110,7 +110,7 @@ func listedRoute(rt *route, g *run.Grant, turnsOnly bool, api settings.AgentAPI)
 	case g == nil:
 		return true
 	}
-	return turnRefusal(rt.turn, *g, api) == ""
+	return turnRefusal(rt.turn, api) == ""
 }
 
 // toolSchemas are the input schemas of every tool, by name, built from

@@ -253,14 +253,16 @@ func TestRunWithSessionRunsNextTurnInSameSession(t *testing.T) {
 	}{
 		{"claude", claudeResultA, idA, nil, "haiku",
 			"-p --output-format json --append-system-prompt HINT --resume ID --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT --model haiku -- --next"},
+		// Read-only turns retired (B12): read_only is accepted and ignored, so
+		// true gets the same normal args as the default.
 		{"claude", claudeResultA, idA, true, "haiku",
-			"-p --output-format json --append-system-prompt HINT --resume ID --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config --no-chrome --model haiku -- --next"},
+			"-p --output-format json --append-system-prompt HINT --resume ID --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT --model haiku -- --next"},
 		{"claude", claudeResultA, idA, false, "",
 			"-p --output-format json --append-system-prompt HINT --resume ID --allowedTools EDIT,Bash --no-chrome --disallowedTools PROTECT -- --next"},
 		{"codex", codexEventsA, codexIDA, nil, "",
 			codexRelayArgs + ` exec --skip-git-repo-check --sandbox workspace-write -c developer_instructions=HINT -c sandbox_workspace_write.network_access=true --disable apps --disable plugins resume --json -- ID --next`},
 		{"codex", codexEventsA, codexIDA, true, "",
-			codexRelayArgs + ` exec --skip-git-repo-check --sandbox read-only -c developer_instructions=HINT --disable apps --disable plugins resume --json -- ID --next`},
+			codexRelayArgs + ` exec --skip-git-repo-check --sandbox workspace-write -c developer_instructions=HINT -c sandbox_workspace_write.network_access=true --disable apps --disable plugins resume --json -- ID --next`},
 		{"codex", codexEventsA, codexIDA, false, "gpt-5.5",
 			codexRelayArgs + ` exec --skip-git-repo-check --sandbox workspace-write -c developer_instructions=HINT -c sandbox_workspace_write.network_access=true --disable apps --disable plugins resume --json --model gpt-5.5 -- ID --next`},
 	} {
@@ -407,7 +409,7 @@ func TestRunWithSessionRefusals(t *testing.T) {
 
 	// Body refusals, as runs.
 	const badPrompt = "prompt must be from 1 byte to 256 KiB, with no NUL byte"
-	const badBody = "the body must be one JSON object with prompt, agent and folder (or session, and optionally agent), and optionally model, read_only, isolate and idempotency_key, at most 2 MiB"
+	const badBody = "the body must be one JSON object with prompt, agent and folder (or session, and optionally agent), and optionally model, isolate and idempotency_key, at most 2 MiB"
 	folder := closedFolder(t, svc, id)
 	for _, tc := range []struct {
 		name string

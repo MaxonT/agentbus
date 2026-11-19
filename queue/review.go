@@ -1,11 +1,12 @@
 package queue
 
-// Review jobs. A review is a job of kind review that runs read-only in the
-// reviewed job's workspace, on the runner that holds it, in a framework
-// session of its own: the reviewer never sees the author's conversation. The
-// control plane builds its prompt from what the reviewed job left in its
-// result (its task, its changed files, the diff), and reads the verdict from
-// the reviewer's reply when the review ends.
+// Review jobs. A review is a job of kind review that runs in the reviewed job's
+// workspace, on the runner that holds it, in a framework session of its own:
+// the reviewer never sees the author's conversation. Read-only turns retired in
+// 0.6 (B12): a review is a normal turn in its own copy of the folder, and reads
+// the reviewed turn and its diff through agentbus-api like any agent, rather
+// than being handed the history in its prompt. Its verdict is read from its
+// reply when the review ends.
 
 import (
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/staysup/agentbus/workspace"
@@ -140,67 +142,44 @@ const VerdictFormat = "```json\n" +
 // characters: enough for context, never the whole reply.
 const ReviewReplyPreview = 500
 
-// ReviewPrompt is the prompt of a review of job j, which changed c. It says
-// what changed and asks for a review in a fixed format. It carries no
-// conclusion of the author's: authorReply is the author's whole reply, read
-// from the record, and empty when the review is to leave it out. Only its
-// first ReviewReplyPreview characters are shown.
-func ReviewPrompt(j Job, c *workspace.Changes, authorReply string) (string, error) {
+// ReviewPrompt is the prompt of a review of job j, which changed c. The review
+// is a normal turn now (read-only retired, B12): it reads the record itself
+// through agentbus-api, so the prompt names the reviewed turn and session and
+// how to read them, rather than control handing it the history. c is still
+// required, so a turn that recorded no changed files is not reviewable.
+// includeReply nudges the review toward the author's reply; off by default, a
+// reviewer handed the author's conclusion tends to confirm it.
+//
+// TODO(B12 P2): a review runs with the default edit rule (session), so codex
+// gets network and can reach agentbus-api. Under edit = "none" codex has no
+// network and cannot reach it; such a review still reads the changed files from
+// its own copy (named below) but loses the diff and task the API would give.
+func ReviewPrompt(j Job, c *workspace.Changes, includeReply bool) (string, error) {
 	if _, err := ReadResult(j.Result); len(j.Result) == 0 || err != nil || c == nil {
 		return "", fmt.Errorf("queue: the job recorded no changed files")
 	}
+	turn, session := j.Turn, j.Session
+	get := func(path string) string { return "  agentbus-api GET " + strconv.Quote(path) }
+	q := "?session=" + session
 	var b strings.Builder
-	b.WriteString("Review a change another agent made in this folder. You can read every file here; you cannot change any.\n\n")
-	b.WriteString("## The task the author was given\n\n")
-	b.WriteString(quoteBlock(j.Spec.Prompt))
-	if authorReply != "" {
-		b.WriteString("\n## The author's reply (first 500 characters)\n\n")
-		b.WriteString(quoteBlock(firstRunes(authorReply, ReviewReplyPreview)))
+	b.WriteString("Review a change another agent made in this folder. You can read every file here; your own edits stay in your copy and are never applied to the person's folder.\n\n")
+	b.WriteString("## The change to review\n\n")
+	b.WriteString("It is turn " + turn + " in session " + session + ". Read the record through AgentBus yourself; do not rely on this prompt for the details.\n\n")
+	b.WriteString("- the task the author was given, with the turn's cost and state:\n" + get("/api/v0/turns/"+turn+q) + "\n")
+	b.WriteString("- what changed, in summary (how many files, the model and tool call counts):\n" + get("/api/v0/turns/"+turn+"/diff"+q) + "\n")
+	b.WriteString("- each changed file, with its diff against the folder's state when the job started:\n" + get("/api/v0/turns/"+turn+"/changes"+q) + "\n")
+	b.WriteString("- the author's earlier turns in that session:\n" + get("/api/v0/turns"+q) + "\n")
+	b.WriteString("\nThe changed files are also here in your copy of the folder; read them directly for the full context around a diff.\n")
+	if includeReply {
+		b.WriteString("\nThe author's own reply is on the turn above; you may read it, but weigh the change itself.\n")
+	} else {
+		b.WriteString("\nReview the change on its own merits. A reviewer handed the author's conclusion tends to confirm it, so weigh the change, not the author's claim about it.\n")
 	}
-	fmt.Fprintf(&b, "\n## What changed\n\n%d file(s) changed in this folder during the author's job, "+
-		"against the folder's state when the job started.\n", c.Count)
-	if c.Partial {
-		b.WriteString("The author's turn may not have ended when this was recorded, so the list may be incomplete.\n")
-	}
-	b.WriteString("\n")
-	for _, f := range c.Files {
-		fmt.Fprintf(&b, "- %s (%s, %d bytes)\n", f.Path, f.Change, f.Size)
-	}
-	if c.Truncated {
-		b.WriteString("- (more files changed; the list stops here)\n")
-	}
-	var diffs, contents strings.Builder
-	left := false
-	for _, f := range c.Files {
-		switch {
-		case f.Diff != nil:
-			diffs.WriteString(fenced(*f.Diff, "diff"))
-		case f.Content != nil:
-			fmt.Fprintf(&contents, "\n### %s\n\n%s", f.Path, fenced(*f.Content, ""))
-		case f.DiffLeftOut:
-			left = true
-		}
-	}
-	if diffs.Len() > 0 {
-		b.WriteString("\n## The diff of each file\n\n")
-		b.WriteString(diffs.String())
-		if left {
-			b.WriteString("(some files have no diff here: binary, too big, or their earlier content is not kept; read them)\n")
-		}
-	}
-	if contents.Len() > 0 {
-		b.WriteString("\n## Small files with no diff here, as they are now\n")
-		b.WriteString(contents.String())
-	}
-	tail := "\n## What to do\n\nReview this change. Read the files you need. Report each problem with a severity: " +
-		"P1 must be fixed before the change lands, P2 should be fixed, P3 is minor.\n\n" +
+	b.WriteString("\n## What to do\n\nReview this change. Read what you need through the calls above and from the files here. " +
+		"Report each problem with a severity: P1 must be fixed before the change lands, P2 should be fixed, P3 is minor.\n\n" +
 		"End your reply with exactly one fenced json block in this format, and nothing after it. " +
-		"verdict is pass or fail; findings may be empty.\n\n" + VerdictFormat + "\n"
-	out := b.String()
-	if len(out)+len(tail) > MaxReviewPrompt {
-		out = strings.ToValidUTF8(out[:MaxReviewPrompt-len(tail)-100], "") + "\n\n(the description is cut here; read the files for the rest)\n"
-	}
-	return out + tail, nil
+		"verdict is pass or fail; findings may be empty.\n\n" + VerdictFormat + "\n")
+	return b.String(), nil
 }
 
 // quoteBlock puts text in a fenced block.

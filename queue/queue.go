@@ -278,11 +278,10 @@ type Spec struct {
 	Machine string `json:"machine,omitempty"`
 	Base    string `json:"base,omitempty"`
 	// Labels: a runner takes the job only if it has every one.
-	Labels   []string `json:"labels,omitempty"`
-	Session  string   `json:"session,omitempty"`
-	Prompt   string   `json:"prompt"`
-	Model    string   `json:"model,omitempty"`
-	ReadOnly bool     `json:"read_only,omitempty"`
+	Labels  []string `json:"labels,omitempty"`
+	Session string   `json:"session,omitempty"`
+	Prompt  string   `json:"prompt"`
+	Model   string   `json:"model,omitempty"`
 	// ModelFromAgent: Model came from the saved agent, not the request. It
 	// is never stored; it only keeps the request's hash what was asked.
 	ModelFromAgent bool `json:"-"`
@@ -2164,11 +2163,16 @@ func (q *Queue) Removed(runnerID, session, removalErr string) error {
 	return nil
 }
 
-// Review makes a review job of job id: kind review, read-only, for agent and
-// model, in the reviewed job's workspace and so on its runner, with a prompt
-// built from what the job recorded. The reviewed job must be a turn that has
-// ended and recorded its changed files, in a session that is not closed.
-// Several reviews of one job may run at once.
+// Review makes a review job of job id: kind review, for agent and model, in a
+// copy of the reviewed job's workspace and so on its runner, with a prompt that
+// points the reviewer at the reviewed turn through agentbus-api. The reviewed
+// job must be a turn that has ended and recorded its changed files, in a
+// session that is not closed. Several reviews of one job may run at once.
+//
+// TODO(B12 P2): a runner from before 0.6 does not make the review its own copy
+// (runner.prepare) and no longer gets read_only, so it would run the review in
+// the author's workspace with edits enabled. Upgrade runners with control; a
+// version gate on review dispatch would enforce it.
 func (q *Queue) Review(team, id, agent, model, key string, includeReply bool) (Job, bool, error) {
 	return q.ReviewAs(team, id, Spec{Harness: agent, Model: model}, key, includeReply)
 }
@@ -2198,19 +2202,28 @@ func (q *Queue) review(team, id string, as Spec, key string, includeReply bool, 
 	if err != nil {
 		return Job{}, false, err
 	}
-	authorReply := ""
-	if includeReply {
-		if authorReply, err = q.replyOf(j); err != nil {
-			return Job{}, false, err
-		}
-	}
-	prompt, err := ReviewPrompt(j, c, authorReply)
+	prompt, err := ReviewPrompt(j, c, includeReply)
 	if err != nil {
 		return Job{}, false, ErrNotReviewable
 	}
 	spec := Spec{Harness: as.Harness, AgentID: as.AgentID, Access: as.Access, KeyEnv: as.KeyEnv, Model: as.Model,
-		ModelFromAgent: as.ModelFromAgent, ReadOnly: true, Prompt: prompt}
+		ModelFromAgent: as.ModelFromAgent, Prompt: prompt}
 	links.ReviewsJob = j.ID
 	links.ReviewSession = NewID("")
+	// A review reads the reviewed turn through agentbus-api (B12), so its
+	// token must reach that turn's session: the review joins the reviewed
+	// turn's request tree. An agent-asked review already carries the asking
+	// turn's Chain (that same tree); a review the person asks for gets one
+	// here, rooted at the reviewed session's tree (itself when it is a root).
+	if links.Chain == nil {
+		root, err := q.SessionRoot(team, j.Session)
+		if err != nil {
+			return Job{}, false, err
+		}
+		if root == "" {
+			root = j.Session
+		}
+		links.Chain = &Chain{Root: root}
+	}
 	return q.create(team, KindReview, key, spec, links, lim, j.Session)
 }

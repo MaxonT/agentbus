@@ -13,8 +13,9 @@ import "strings"
 // permissions.toml decides a tool call and a shell command alike. His decision,
 // 2026-11-18 (DESIGN_0_6_tools.md #9): a tool is decided by NAME alone, against
 // the same rules; nothing about the tool is trusted, so there is no effect and
-// no per-tool default. A tool on no list is held for a person (Ask); AgentBus
-// ships its read-only built-ins as ordinary allow rules, so they match and run.
+// no per-tool default. A tool on no list is held for a person (Ask). The apps
+// that do something, such as ask_agent, carry no rule and so are asked by
+// default; reading the record is the API's own routes, not tools (B12).
 
 // DecideTool decides one tool call by the person's rules and the tool's name.
 // A forbid, ask or allow entry naming the tool wins; with no rule the call is

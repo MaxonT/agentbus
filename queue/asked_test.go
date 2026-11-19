@@ -344,6 +344,42 @@ func TestSessionRootOfReview(t *testing.T) {
 	}
 }
 
+// A review's own session is a leaf (B12): IsReview names it, and it resolves no
+// folder of its own, since control refuses a review asking for work (so there
+// is no asked turn to start in a folder).
+func TestReviewIsALeaf(t *testing.T) {
+	q, _ := open(t)
+	r := runner(t, q, 5)
+	author, _, err := q.Create(DefaultTeam, KindTurn, "", Spec{Harness: "claude", FolderRef: "fld_x", Prompt: "hi"}, Links{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, a := take(t, q, r)
+	if _, _, err := q.Start(r.ID, a.ID, a.Number, lease); err != nil {
+		t.Fatal(err)
+	}
+	res := `{"session":"` + author.Session + `","changes":{"kind":"snapshot","count":0,"files":[]}}`
+	if _, err := q.End(r.ID, a.ID, a.Number, Finish{Status: Finished, Result: json.RawMessage(res),
+		Session: author.Session, Workspace: &Workspace{Kind: WorkspaceFolder, Folder: "/x"}}); err != nil {
+		t.Fatal(err)
+	}
+	rv, _, err := q.Review(DefaultTeam, author.ID, "codex", "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := rv.Links.ReviewSession
+	if ok, err := q.IsReview(DefaultTeam, own); err != nil || !ok {
+		t.Fatalf("IsReview(review session): %v %v, want true", ok, err)
+	}
+	if ok, err := q.IsReview(DefaultTeam, author.Session); err != nil || ok {
+		t.Fatalf("IsReview(author session): %v %v, want false", ok, err)
+	}
+	// A review resolves no folder of its own: it is a leaf, it never asks.
+	if ref, _, _, err := q.SessionFolder(DefaultTeam, own); err != nil || ref != "" {
+		t.Fatalf("review session folder: %q %v, want empty", ref, err)
+	}
+}
+
 // However large a review's findings, the delivered prompt stays bounded and
 // holds no NUL byte, so its turn can start.
 func TestResultPromptBounded(t *testing.T) {

@@ -23,40 +23,39 @@ func flagValue(args []string, flag string) string {
 // its tools without asking, and has none of Claude Code's own agent tools.
 // The token is never in an argument: Claude Code fills ${AGENTBUS_TOKEN} in.
 func TestClaudeToolServer(t *testing.T) {
-	for _, readOnly := range []bool{false, true} {
-		a := claude{}.Args(Turn{Tools: toolsURL, Writes: Writes{ReadOnly: readOnly}, Prompt: "hi"})
-		var cfg struct {
-			MCPServers map[string]struct {
-				Type, URL string
-				Headers   map[string]string
-			} `json:"mcpServers"`
-		}
-		if err := json.Unmarshal([]byte(flagValue(a, "--mcp-config")), &cfg); err != nil {
-			t.Fatalf("read_only %v: %q: %v", readOnly, a, err)
-		}
-		s := cfg.MCPServers[ToolServer]
-		if len(cfg.MCPServers) != 1 || s.Type != "http" || s.URL != toolsURL || s.Headers["Authorization"] != "Bearer ${AGENTBUS_TOKEN}" {
-			t.Errorf("read_only %v: config %+v", readOnly, cfg)
-		}
-		if slices.Contains(a, "--strict-mcp-config") != readOnly {
-			t.Errorf("read_only %v: --strict-mcp-config on a read-only turn only: %q", readOnly, a)
-		}
-		if !slices.Contains(strings.Split(flagValue(a, "--allowedTools"), ","), "mcp__agentbus") {
-			t.Errorf("read_only %v: tools not allowed: %q", readOnly, a)
-		}
-		denied := strings.Split(flagValue(a, "--disallowedTools"), ",")
-		for _, n := range []string{"Task", "Agent", "ListAgents", "SendMessage"} {
-			if !slices.Contains(denied, n) {
-				t.Errorf("read_only %v: %s not denied: %q", readOnly, n, denied)
-			}
-		}
-		if a[len(a)-1] != "hi" || a[len(a)-2] != "--" {
-			t.Errorf("read_only %v: prompt not last: %q", readOnly, a)
+	a := claude{}.Args(Turn{Tools: toolsURL, Prompt: "hi"})
+	var cfg struct {
+		MCPServers map[string]struct {
+			Type, URL string
+			Headers   map[string]string
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(flagValue(a, "--mcp-config")), &cfg); err != nil {
+		t.Fatalf("%q: %v", a, err)
+	}
+	s := cfg.MCPServers[ToolServer]
+	if len(cfg.MCPServers) != 1 || s.Type != "http" || s.URL != toolsURL || s.Headers["Authorization"] != "Bearer ${AGENTBUS_TOKEN}" {
+		t.Errorf("config %+v", cfg)
+	}
+	// Read-only turns retired (B12): no turn gets --strict-mcp-config.
+	if slices.Contains(a, "--strict-mcp-config") {
+		t.Errorf("--strict-mcp-config on a turn: %q", a)
+	}
+	if !slices.Contains(strings.Split(flagValue(a, "--allowedTools"), ","), "mcp__agentbus") {
+		t.Errorf("tools not allowed: %q", a)
+	}
+	denied := strings.Split(flagValue(a, "--disallowedTools"), ",")
+	for _, n := range []string{"Task", "Agent", "ListAgents", "SendMessage"} {
+		if !slices.Contains(denied, n) {
+			t.Errorf("%s not denied: %q", n, denied)
 		}
 	}
+	if a[len(a)-1] != "hi" || a[len(a)-2] != "--" {
+		t.Errorf("prompt not last: %q", a)
+	}
 	// subagents = false as well: each name is denied once.
-	a := claude{}.Args(Turn{Tools: toolsURL, NoSubagents: true, Prompt: "hi"})
-	denied := strings.Split(flagValue(a, "--disallowedTools"), ",")
+	a = claude{}.Args(Turn{Tools: toolsURL, NoSubagents: true, Prompt: "hi"})
+	denied = strings.Split(flagValue(a, "--disallowedTools"), ",")
 	for _, n := range []string{"Task", "Agent", "Workflow", "ListAgents", "SendMessage"} {
 		if c := strings.Count(","+strings.Join(denied, ",")+",", ","+n+","); c != 1 {
 			t.Errorf("%s denied %d times: %q", n, c, denied)
@@ -65,25 +64,20 @@ func TestClaudeToolServer(t *testing.T) {
 }
 
 // Without the tool server, nothing of it is on the command line, and Claude
-// Code keeps its own agent tools. --no-chrome is there on every turn, and
-// --strict-mcp-config on a read-only one, so no tool of the person's loads
-// there.
+// Code keeps its own agent tools. --no-chrome is there on every turn. Read-only
+// turns retired (B12), so --strict-mcp-config is on no turn.
 func TestClaudeNoToolServer(t *testing.T) {
-	for _, readOnly := range []bool{false, true} {
-		turn := Turn{Prompt: "hi"}
-		turn.Writes.ReadOnly = readOnly
-		a := claude{}.Args(turn)
-		if c := slices.Index(a, "--no-chrome"); c < 0 || c > slices.Index(a, "--") {
-			t.Errorf("read_only %v: no --no-chrome before the prompt: %q", readOnly, a)
-		}
-		if c := slices.Index(a, "--strict-mcp-config"); (c >= 0 && c < slices.Index(a, "--")) != readOnly {
-			t.Errorf("read_only %v: --strict-mcp-config: %q", readOnly, a)
-		}
-		all := strings.Join(a, " ")
-		for _, s := range []string{"--mcp-config", "mcp__agentbus", "ListAgents", "Task"} {
-			if strings.Contains(all, s) {
-				t.Errorf("read_only %v: %s without the tool server: %q", readOnly, s, a)
-			}
+	a := claude{}.Args(Turn{Prompt: "hi"})
+	if c := slices.Index(a, "--no-chrome"); c < 0 || c > slices.Index(a, "--") {
+		t.Errorf("no --no-chrome before the prompt: %q", a)
+	}
+	if slices.Contains(a, "--strict-mcp-config") {
+		t.Errorf("--strict-mcp-config: %q", a)
+	}
+	all := strings.Join(a, " ")
+	for _, s := range []string{"--mcp-config", "mcp__agentbus", "ListAgents", "Task"} {
+		if strings.Contains(all, s) {
+			t.Errorf("%s without the tool server: %q", s, a)
 		}
 	}
 }
@@ -202,28 +196,24 @@ func TestClaudeOwnServers(t *testing.T) {
 	}
 }
 
-// An edit turn loads the person's own servers (no --strict-mcp-config) and
-// may call each without asking, beside the tool server; a name Claude Code
-// would rewrite gets no rule. A read-only turn loads none and allows none.
+// Every turn loads the person's own servers (no --strict-mcp-config) and may
+// call each without asking, beside the tool server; a name Claude Code would
+// rewrite gets no rule. Read-only turns retired (B12).
 func TestClaudeOwnServersArgs(t *testing.T) {
 	own := []string{"dune", "posthog", "my.server"}
-	for _, readOnly := range []bool{false, true} {
-		for _, tools := range []string{"", toolsURL} {
-			turn := Turn{Tools: tools, OwnServers: own, Prompt: "hi"}
-			turn.Writes.ReadOnly = readOnly
-			a := claude{}.Args(turn)
-			allowed := strings.Split(flagValue(a, "--allowedTools"), ",")
-			for _, r := range []string{"mcp__dune", "mcp__posthog"} {
-				if slices.Contains(allowed, r) == readOnly {
-					t.Errorf("read_only %v tools %q: %s allowed %v: %q", readOnly, tools, r, !readOnly, a)
-				}
+	for _, tools := range []string{"", toolsURL} {
+		a := claude{}.Args(Turn{Tools: tools, OwnServers: own, Prompt: "hi"})
+		allowed := strings.Split(flagValue(a, "--allowedTools"), ",")
+		for _, r := range []string{"mcp__dune", "mcp__posthog"} {
+			if !slices.Contains(allowed, r) {
+				t.Errorf("tools %q: %s not allowed: %q", tools, r, a)
 			}
-			if strings.Contains(strings.Join(a, " "), "my.server") {
-				t.Errorf("read_only %v tools %q: rule for a rewritten name: %q", readOnly, tools, a)
-			}
-			if slices.Contains(a, "--strict-mcp-config") != readOnly || !slices.Contains(a, "--no-chrome") {
-				t.Errorf("read_only %v tools %q: %q", readOnly, tools, a)
-			}
+		}
+		if strings.Contains(strings.Join(a, " "), "my.server") {
+			t.Errorf("tools %q: rule for a rewritten name: %q", tools, a)
+		}
+		if slices.Contains(a, "--strict-mcp-config") || !slices.Contains(a, "--no-chrome") {
+			t.Errorf("tools %q: %q", tools, a)
 		}
 	}
 	// The tool server's own rule is not given twice.
@@ -250,56 +240,37 @@ func TestCodexOwnServers(t *testing.T) {
 	}
 }
 
-// A read-only codex turn turns each of the person's servers off for the run,
-// before resume; an edit turn leaves them as codex loads them. A name that
-// cannot go in a -c key refuses a read-only turn only.
+// Read-only turns retired (B12): no codex turn turns the person's servers off;
+// every turn loads them as codex does. Refuse never refuses over a server name.
 func TestCodexOwnServersArgs(t *testing.T) {
 	own := []string{"dune", "linear"}
-	for _, readOnly := range []bool{false, true} {
-		for _, resume := range []string{"", "r-1"} {
-			turn := Turn{OwnServers: own, ResumeID: resume, Prompt: "hi"}
-			turn.Writes.ReadOnly = readOnly
-			a := codex{}.Args(turn)
-			end := slices.Index(a, "--")
-			if r := slices.Index(a, "resume"); r >= 0 {
-				end = r
-			}
-			for _, n := range own {
-				i := slices.Index(a, "mcp_servers."+n+".enabled=false")
-				if (i >= 0) != readOnly || (i >= 0 && (a[i-1] != "-c" || i > end)) {
-					t.Errorf("read_only %v resume %q: %s: %q", readOnly, resume, n, a)
-				}
-			}
-			if why := (codex{}).Refuse(turn); why != "" {
-				t.Errorf("read_only %v: refused: %q", readOnly, why)
+	for _, resume := range []string{"", "r-1"} {
+		turn := Turn{OwnServers: own, ResumeID: resume, Prompt: "hi"}
+		a := codex{}.Args(turn)
+		for _, n := range own {
+			if slices.Contains(a, "mcp_servers."+n+".enabled=false") {
+				t.Errorf("resume %q: %s turned off: %q", resume, n, a)
 			}
 		}
+		if why := (codex{}).Refuse(turn); why != "" {
+			t.Errorf("resume %q: refused: %q", resume, why)
+		}
 	}
+	// Even a name that cannot go in a -c key is no longer a refusal.
 	bad := Turn{OwnServers: []string{"ok", "my.server"}, Prompt: "hi"}
 	if why := (codex{}).Refuse(bad); why != "" {
-		t.Errorf("edit turn refused: %q", why)
-	}
-	bad.Writes.ReadOnly = true
-	if why := (codex{}).Refuse(bad); why == "" {
-		t.Errorf("read-only turn with an unsafe name not refused")
+		t.Errorf("turn with an unsafe server name refused: %q", why)
 	}
 }
 
-// agy turns allow no MCP call at all, read-only or not: --settings replaces
-// the person's permissions for the run, and headless agy refuses any call no
-// rule allows (measured 2026-11-14, research/2026-11-14-use-my-own-tools-design.md).
-// agy may call MCP servers on edit turns and never on read-only ones.
+// agy turns allow MCP calls: --settings replaces the person's permissions for
+// the run, and headless agy refuses any call no rule allows (measured
+// 2026-11-14, research/2026-11-14-use-my-own-tools-design.md). Every turn gets
+// the mcp(*) rule, reviews included (read-only retired, B12).
 func TestAgyMCPRule(t *testing.T) {
-	for _, readOnly := range []bool{false, true} {
-		turn := Turn{OwnServers: []string{"dune"}, Prompt: "hi"}
-		turn.Writes.ReadOnly = readOnly
-		s := agySettings(turn)
-		if got := strings.Contains(s, "mcp(*)"); got == readOnly {
-			t.Errorf("read_only %v: mcp(*) present %v: %s", readOnly, got, s)
-		}
-		if readOnly && strings.Contains(s, "mcp") {
-			t.Errorf("read-only turn names mcp: %s", s)
-		}
+	s := agySettings(Turn{OwnServers: []string{"dune"}, Prompt: "hi"})
+	if !strings.Contains(s, "mcp(*)") {
+		t.Errorf("mcp(*) not present: %s", s)
 	}
 }
 
@@ -334,25 +305,21 @@ func TestToolsHiddenAreDenied(t *testing.T) {
 	}
 }
 
-// Every codex turn, read-only or not, with or without the tool server and on
-// resume, runs with the person's ChatGPT apps and plugins off, before resume
-// so the resumed turn gets them too.
+// Every codex turn, with or without the tool server and on resume, runs with
+// the person's ChatGPT apps and plugins off, before resume so the resumed turn
+// gets them too.
 func TestCodexOwnToolsOff(t *testing.T) {
 	for _, tools := range []string{"", toolsURL} {
-		for _, readOnly := range []bool{false, true} {
-			for _, resume := range []string{"", "r-1"} {
-				turn := Turn{Tools: tools, ResumeID: resume, Prompt: "hi"}
-				turn.Writes.ReadOnly = readOnly
-				a := codex{}.Args(turn)
-				all := " " + strings.Join(a, " ") + " "
-				end := strings.Index(all, " -- ")
-				if r := strings.Index(all, " resume "); r >= 0 {
-					end = r
-				}
-				d := strings.Index(all, " --disable apps --disable plugins ")
-				if d < 0 || d > end {
-					t.Errorf("tools %q read_only %v resume %q: %q", tools, readOnly, resume, a)
-				}
+		for _, resume := range []string{"", "r-1"} {
+			a := codex{}.Args(Turn{Tools: tools, ResumeID: resume, Prompt: "hi"})
+			all := " " + strings.Join(a, " ") + " "
+			end := strings.Index(all, " -- ")
+			if r := strings.Index(all, " resume "); r >= 0 {
+				end = r
+			}
+			d := strings.Index(all, " --disable apps --disable plugins ")
+			if d < 0 || d > end {
+				t.Errorf("tools %q resume %q: %q", tools, resume, a)
 			}
 		}
 	}

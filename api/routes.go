@@ -51,10 +51,16 @@ type route struct {
 	// versioned routes send the setting's version in ETag, and a write takes
 	// it back in If-Match (settings.go).
 	versioned bool
-	// tools are the tools this route is, for POST /api/v0/mcp (tools.go).
-	// None: it is not a tool.
+	// tools are the default tools this route ships, for POST /api/v0/mcp
+	// (tools.go). None: the route ships no default tool.
 	tools []tool
-	serve func(a *API, w http.ResponseWriter, r *http.Request, id string)
+	// wrappable marks a route a person may build a CUSTOM tool on, though it
+	// ships no default tool of its own. The read routes set it: read-only turns
+	// and the default read-tool copies retired in 0.6 (B12, reading is done
+	// through agentbus-api), but a route safe to serve as a tool stays open to a
+	// custom tool. A route that ships a default tool is wrappable regardless.
+	wrappable bool
+	serve     func(a *API, w http.ResponseWriter, r *http.Request, id string)
 }
 
 // param is one query parameter.
@@ -168,9 +174,9 @@ var routes = slices.Concat([]route{
 				// person's folder path, and its own copy's path is refused
 				// (his runner, 2026-11-11: it sent its working folder, got
 				// 403, tried mkdir, then left folder out).
-				fields:   []string{"agent", "prompt", "model", "read_only", "idempotency_key"},
+				fields:   []string{"agent", "prompt", "model", "idempotency_key"},
 				required: []string{"agent", "prompt"},
-				doc: "Ask a saved AgentBus agent (from list_agents, any vendor) to do work. " +
+				doc: "Ask a saved AgentBus agent (from GET /api/v0/agents, any vendor) to do work. " +
 					"It starts a new session on that agent, in its own copy of your folder. " +
 					"The reply names the new turn and session at once. Its result comes back to your session as a later turn: do not wait or poll for it. " +
 					"This is not your harness's own subagent: it is recorded, and can be another vendor. " +
@@ -193,26 +199,23 @@ var routes = slices.Concat([]route{
 			{name: "session", doc: "Only this session's turns."},
 			{name: "before", doc: "Only turns whose started_seq is below it: the next_before of the previous page.", integer: true, min: 1},
 			{name: "limit", doc: "Turns per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
-		replies: []reply{ok(200, TurnList{}, "A page of turns."), badRequest, storeFailed},
-		turn:    treeSessionQuery,
-		tools: []tool{{name: "list_turns",
-			doc: "List the turns of your AgentBus session, newest first: each turn's id, number (turn 3 is number 3), state, agent, cost and whether it is applied. " +
-				"With session, another session you can reach. Use a turn's id in the other agentbus tools."}},
-		turns: true,
-		serve: plain((*API).turns)},
+		replies:   []reply{ok(200, TurnList{}, "A page of turns."), badRequest, storeFailed},
+		turn:      treeSessionQuery,
+		turns:     true,
+		wrappable: true,
+		serve:     plain((*API).turns)},
 	{method: "GET", path: "/api/v0/turns/{id}", op: "getTurn",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",
 		summary: "Get a turn",
 		doc: "One turn, from the moment it is asked for: its state (queued, running, finished, failed or stopped), its agent, prompt and reply, its cost, and for a review its verdict and findings.\n\n" +
 			"Poll it to wait for a turn to end, or stream from its store and seq.",
-		query:   []param{{name: "session", doc: turnSessionDoc}},
-		replies: []reply{ok(200, OneTurn{}, "The turn."), badRequest, fail(404, "No such turn."), storeFailed},
-		turn:    treeTurn,
-		tools: []tool{{name: "get_turn", id: "turn",
-			doc: "Read one AgentBus turn: its state (queued, running, finished, failed or stopped), agent, prompt, reply and cost, and for a review its verdict and findings."}},
-		turns: true,
-		serve: (*API).getTurn},
+		query:     []param{{name: "session", doc: turnSessionDoc}},
+		replies:   []reply{ok(200, OneTurn{}, "The turn."), badRequest, fail(404, "No such turn."), storeFailed},
+		turn:      treeTurn,
+		turns:     true,
+		wrappable: true,
+		serve:     (*API).getTurn},
 	{method: "POST", path: "/api/v0/turns/{id}/stop", op: "stopTurn",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",
@@ -235,13 +238,12 @@ var routes = slices.Concat([]route{
 		summary: "Get a turn's diff summary",
 		doc: "What one turn did, in summary: its agent and timing, how many files it changed and its model and tool call counts (with usage, cost and per-model counts), and whether its changes were applied. Each list is on its own paged route, so none is cut here.\n\n" +
 			"files is the summary of the changed files (isolated, the checkpoints, the count); the files themselves page at GET /api/v0/turns/{id}/changes. model_calls summarises the model calls (count, usage, cost, per-model); they page at GET /api/v0/turns/{id}/calls. tools is the tool call count; they page at GET /api/v0/turns/{id}/tools, each with the commands it ran. files is null while the turn runs, and for a turn this service did not run.",
-		query:   []param{{name: "session", doc: turnSessionDoc}},
-		replies: []reply{ok(200, TurnDiff{}, "The turn's diff summary."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
-		turn:    treeTurn,
-		tools: []tool{{name: "turn_diff", id: "turn",
-			doc: "A summary of what one AgentBus turn did: how many files it changed, its model and tool call counts, cost and timing, and whether its changes were applied. The files are at turn_changes, the model calls at turn_calls, the tool calls and commands at turn_tools."}},
-		turns: true,
-		serve: (*API).turnDiff},
+		query:     []param{{name: "session", doc: turnSessionDoc}},
+		replies:   []reply{ok(200, TurnDiff{}, "The turn's diff summary."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
+		turn:      treeTurn,
+		turns:     true,
+		wrappable: true,
+		serve:     (*API).turnDiff},
 	{method: "GET", path: "/api/v0/turns/{id}/changes", op: "turnChanges",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",
@@ -252,12 +254,11 @@ var routes = slices.Concat([]route{
 			{name: "session", doc: turnSessionDoc},
 			{name: "before", doc: "Only files before this position: the next_before of the previous page.", integer: true, min: 1},
 			{name: "limit", doc: "Files per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
-		replies: []reply{ok(200, TurnChangesPage{}, "A page of the turn's file changes."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
-		turn:    treeTurn,
-		tools: []tool{{name: "turn_changes", id: "turn",
-			doc: "The files one AgentBus turn changed, a page at a time: each file's path, change, size and, in an isolated copy, its diff."}},
-		turns: true,
-		serve: (*API).turnChanges},
+		replies:   []reply{ok(200, TurnChangesPage{}, "A page of the turn's file changes."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
+		turn:      treeTurn,
+		turns:     true,
+		wrappable: true,
+		serve:     (*API).turnChanges},
 	{method: "GET", path: "/api/v0/turns/{id}/calls", op: "turnCalls",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",
@@ -268,12 +269,11 @@ var routes = slices.Concat([]route{
 			{name: "session", doc: turnSessionDoc},
 			{name: "before", doc: "Only calls before this position: the next_before of the previous page.", integer: true, min: 1},
 			{name: "limit", doc: "Calls per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
-		replies: []reply{ok(200, TurnCallsPage{}, "A page of the turn's model calls."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
-		turn:    treeTurn,
-		tools: []tool{{name: "turn_calls", id: "turn",
-			doc: "The model calls one AgentBus turn made, a page at a time: each call's model, status, cost and latency."}},
-		turns: true,
-		serve: (*API).turnCalls},
+		replies:   []reply{ok(200, TurnCallsPage{}, "A page of the turn's model calls."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
+		turn:      treeTurn,
+		turns:     true,
+		wrappable: true,
+		serve:     (*API).turnCalls},
 	{method: "GET", path: "/api/v0/turns/{id}/tools", op: "turnTools",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",
@@ -284,25 +284,23 @@ var routes = slices.Concat([]route{
 			{name: "session", doc: turnSessionDoc},
 			{name: "before", doc: "Only tool calls before this position: the next_before of the previous page.", integer: true, min: 1},
 			{name: "limit", doc: "Tool calls per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
-		replies: []reply{ok(200, TurnToolsPage{}, "A page of the turn's tool calls."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
-		turn:    treeTurn,
-		tools: []tool{{name: "turn_tools", id: "turn",
-			doc: "The tool calls one AgentBus turn made, a page at a time: each call's name, input, whether it errored, and the commands it ran."}},
-		turns: true,
-		serve: (*API).turnTools},
+		replies:   []reply{ok(200, TurnToolsPage{}, "A page of the turn's tool calls."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
+		turn:      treeTurn,
+		turns:     true,
+		wrappable: true,
+		serve:     (*API).turnTools},
 	{method: "GET", path: "/api/v0/turns/{id}/context", op: "turnContext",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",
 		summary: "Read a turn's context",
 		doc: "How big the turn's context got, how much of it came from the prompt cache, and what its largest prompt was made of. Nothing is stored: the turn's model.responded events and that call's stored request pieces are read now.\n\n" +
 			"context_tokens is the largest prompt the turn sent, the most one of its calls read: input + cache_read + cache_write, the vendor's own count. cache_read_tokens and fresh_tokens (input + cache_write) are summed over the turn's calls: how much was re-read from the cache against processed afresh, which drives the cost. made_of breaks that largest prompt into its parts from the request's own pieces (system, tools, messages), largest first; its note says what a vendor's request does not separate, such as a file read inside a tool result. made_of is null when no call carried usage or no request body is kept.",
-		query:   []param{{name: "session", doc: turnSessionDoc}},
-		replies: []reply{ok(200, TurnContext{}, "The turn's context."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
-		turn:    treeTurn,
-		tools: []tool{{name: "turn_context", id: "turn",
-			doc: "How big one AgentBus turn's context got, how much came from the prompt cache, and what its largest prompt was made of."}},
-		turns: true,
-		serve: (*API).turnContext},
+		query:     []param{{name: "session", doc: turnSessionDoc}},
+		replies:   []reply{ok(200, TurnContext{}, "The turn's context."), badRequest, fail(404, "No such turn, or it has not started."), storeFailed},
+		turn:      treeTurn,
+		turns:     true,
+		wrappable: true,
+		serve:     (*API).turnContext},
 	{method: "POST", path: "/api/v0/turns/{id}/apply", op: "applyTurn",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",
@@ -327,8 +325,9 @@ var routes = slices.Concat([]route{
 		idDoc:   "The id of the turn to review (such as t_cf58baf9ca42cb1d), never the turn's number in its session. Another shape gets 404.",
 		tag:     "Turns",
 		summary: "Review a turn",
-		doc: "Ask another agent to review a turn: this starts a review turn, by agent, read-only, in a session of its own, in the reviewed turn's copy as it is.\n\n" +
-			"The review's prompt holds the reviewed turn's task, its changed files and its diff; the author's reply only with include_reply. " +
+		doc: "Ask another agent to review a turn: this starts a review turn, by agent, in a session of its own, in the reviewed turn's copy as it is. " +
+			"It runs as a normal turn (read-only retired in 0.6); its own edits stay in that copy and are never applied automatically.\n\n" +
+			"The review reads the reviewed turn and its diff itself through agentbus-api; its prompt names that turn and how to read it, rather than carrying the history. include_reply nudges it toward the author's reply. " +
 			"When the review ends, its verdict (pass, fail or unknown) and findings are on it: GET /api/v0/turns/{id} of the review turn. Any P1 finding makes it fail. " +
 			"The reviewed turn must have ended, with its changed files recorded. " +
 			"A retry with the same idempotency_key and fields answers with the same review turn.",
@@ -438,12 +437,10 @@ var routes = slices.Concat([]route{
 			{name: "q", doc: "The text to find: 1 to 256 bytes of UTF-8, no NUL byte. Case is ignored."},
 			{name: "before", doc: "The next_before of the previous page. Absent: start from the newest."},
 			{name: "limit", doc: "Hits per page. 20 when absent.", integer: true, min: 1, max: maxSearchLimit}},
-		replies: []reply{ok(200, store.SearchResult{}, "A page of hits."), badRequest, storeFailed},
-		turn:    treeSessionPath,
-		tools: []tool{{name: "search_history", id: "session", ownSession: true, required: []string{"q"},
-			doc: "Search an AgentBus session's stored history for a piece of text, newest first: your own session when session is absent. " +
-				"It finds what earlier turns said and did, including turns you no longer hold in context."}},
-		serve: (*API).search},
+		replies:   []reply{ok(200, store.SearchResult{}, "A page of hits."), badRequest, storeFailed},
+		turn:      treeSessionPath,
+		wrappable: true,
+		serve:     (*API).search},
 	{method: "GET", path: "/api/v0/sessions/{id}/context", op: "sessionContext",
 		tag:     "Sessions",
 		summary: "Read a session's context",
@@ -452,12 +449,10 @@ var routes = slices.Concat([]route{
 		query: []param{
 			{name: "before", doc: "Only turns before this position: the next_before of the previous page.", integer: true, min: 1},
 			{name: "limit", doc: "Turns per page. 100 when absent.", integer: true, min: 1, max: maxTurnLimit}},
-		replies: []reply{ok(200, SessionContext{}, "The session's context."), badRequest, storeFailed},
-		turn:    treeSessionPath,
-		tools: []tool{{name: "session_context", id: "session", ownSession: true,
-			doc: "An AgentBus session's context: its token totals and how big each turn's context got, newest first. " +
-				"Your own session when session is absent."}},
-		serve: (*API).sessionContext},
+		replies:   []reply{ok(200, SessionContext{}, "The session's context."), badRequest, storeFailed},
+		turn:      treeSessionPath,
+		wrappable: true,
+		serve:     (*API).sessionContext},
 
 	{method: "GET", path: "/api/v0/agents", op: "listAgents",
 		tag:     "Agents",
@@ -465,12 +460,10 @@ var routes = slices.Concat([]route{
 		doc: "The saved agents, in the order they were made. A turn names one by id in agent.\n\n" +
 			"A new data folder starts with none, under agentbus up as under agentbus server: add them from what GET /api/v0/harnesses reports. " +
 			"A data folder that already had agents keeps them.",
-		replies: []reply{ok(200, AgentList{}, "The agents."), badRequest},
-		turn:    anyRead,
-		tools: []tool{{name: "list_agents",
-			doc: "List the saved AgentBus agents: setups across vendors (Claude Code, Codex, Gemini and others) that you can ask for work or a review. " +
-				"These are saved setups, not conversations running now, and not your harness's own subagents. An agent's id goes in ask_agent or review_turn."}},
-		serve: plain((*API).listSaved)},
+		replies:   []reply{ok(200, AgentList{}, "The agents."), badRequest},
+		turn:      anyRead,
+		wrappable: true,
+		serve:     plain((*API).listSaved)},
 	{method: "POST", path: "/api/v0/agents", op: "createAgent",
 		tag:     "Agents",
 		summary: "Save an agent",
@@ -655,8 +648,9 @@ var routes = slices.Concat([]route{
 		tag:     "Service",
 		summary: "Call the API as tools",
 		doc: "The operations an agent uses, as tools, over the Model Context Protocol: stateless Streamable HTTP, one JSON-RPC message per POST, answered as JSON. " +
-			"A turn's harness is pointed here with the turn's own token, so its agent sees list_agents, ask_agent, review_turn and the rest as tools of its own.\n\n" +
-			"tools/list answers the tools the token may call: a turn token's under [agent_api] in the settings, and a read-only turn's reads only. " +
+			"A turn's harness is pointed here with the turn's own token, so its agent sees the apps it may call, such as ask_agent, as tools of its own. " +
+			"Reading the record (turns, diffs, sessions, saved agents) and starting, reviewing, applying or stopping work are the API's own routes, reached with agentbus-api, not tools.\n\n" +
+			"tools/list answers the tools the token may call: a turn token's under [agent_api] in the settings. " +
 			"The list is discovery only. tools/call sends the operation it names through this API with the same token, so it is refused, limited and answered exactly as that HTTP call is. " +
 			"A tool's answer is the operation's JSON; one that failed is an error result that starts with its HTTP status. " +
 			"Each operation's tools are in its x-agentbus-tools. No session is kept: a token that has stopped working gets 401.",

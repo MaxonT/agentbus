@@ -294,7 +294,6 @@ type Request struct {
 	// started in, for the record; "" when no connector owns it.
 	FolderRef      string
 	Prompt, Model  string
-	ReadOnly       bool
 	IdempotencyKey string // stored on turn.started, as the caller's key
 	// AgentID, Access and KeyEnv: the saved agent and how it reaches its
 	// model (Access). Every turn needs Harness, a next one too (NoAgent):
@@ -426,7 +425,7 @@ func (e *Engine) Start(req Request) (*Turn, error) {
 		return nil, refuse(code, msg)
 	}
 	return e.start(turn{harness: req.Harness, folder: req.Folder, folderRef: req.FolderRef, session: id, id: req.Turn,
-		model: req.Model, readOnly: req.ReadOnly, prompt: req.Prompt, key: req.IdempotencyKey,
+		model: req.Model, prompt: req.Prompt, key: req.IdempotencyKey,
 		agentID: req.AgentID, access: req.Access, keyEnv: req.KeyEnv, origin: req.Origin, root: req.Root, depth: req.Depth,
 		token: req.Token, apiURL: req.APIURL, standIn: req.StandIn, signin: req.Signin, allowOnce: req.AllowOnce})
 }
@@ -558,7 +557,7 @@ func (e *Engine) next(req Request) (*Turn, error) {
 	}
 	t := turn{harness: agent, folder: c.Folder, folderRef: c.FolderRef, session: session, id: req.Turn, resumeID: c.ResumeID, replayFrom: from,
 		recoveredFrom: recovered, recoveredWhy: recoveredWhy, continuity: continuity, model: model,
-		readOnly: req.ReadOnly, prompt: req.Prompt, context: context, key: req.IdempotencyKey,
+		prompt: req.Prompt, context: context, key: req.IdempotencyKey,
 		agentID: agentID, access: access, keyEnv: keyEnv, origin: req.Origin, root: req.Root, depth: req.Depth,
 		token: req.Token, apiURL: req.APIURL, standIn: req.StandIn, signin: req.Signin, allowOnce: req.AllowOnce}
 	if from != "" || continuity == ByTranscript {
@@ -626,7 +625,6 @@ type turn struct {
 	recoveredWhy             string // and how it ended
 	continuity               string // a next turn: ByReplay or ByResume; empty for a first
 	model                    string
-	readOnly                 bool
 	prompt                   string
 	context                  string // put before prompt: the earlier turns as text (ByTranscript)
 	key                      string // the caller's idempotency key, or ""
@@ -715,7 +713,7 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	if t.token != "" {
 		apiURL = t.apiURL
 	} else {
-		if tok, err = e.turnTokens.mint(Grant{Session: t.session, Turn: t.id, Root: root, Depth: t.depth, ReadOnly: t.readOnly, Harness: t.harness}); err != nil {
+		if tok, err = e.turnTokens.mint(Grant{Session: t.session, Turn: t.id, Root: root, Depth: t.depth, Harness: t.harness}); err != nil {
 			return nil, storeFailed
 		}
 		childTok = tok
@@ -757,9 +755,9 @@ func (e *Engine) start(t turn) (*Turn, error) {
 			e.cfg.Logf("run.tools session=%s turn=%s left_out=%s", t.session, t.id, why)
 		}
 	}
-	// The turn may apply as its token may: [agent_api] apply on, and not a
-	// read-only turn (a review), whose token refuses it (api turnRefusal).
-	apply := !t.readOnly && perm.AgentAPI.Apply != nil && *perm.AgentAPI.Apply
+	// The turn may apply as its token may: [agent_api] apply on. A review's
+	// own changes stay in its copy; it never applies them automatically.
+	apply := perm.AgentAPI.Apply != nil && *perm.AgentAPI.Apply
 	hint = withTools(hint, t.session, tools, apply)
 	// The folder's AGENTS.md, then the instructions, then who asked: the
 	// same for every harness, each once.
@@ -767,10 +765,10 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	if why != "" {
 		e.cfg.Logf("run.doc session=%s turn=%s left_out=%s", t.session, t.id, why)
 	}
-	askText := askedLine(asked, e.cfg.APIDir != "", tools)
+	askText := askedLine(asked, e.cfg.APIDir != "")
 	added := addedContext(doc, hint, askText)
 	hint = joinText(doc, hint, askText)
-	perm = withAPI(perm, e.cfg.APIDir != "", t.readOnly)
+	perm = withAPI(perm, e.cfg.APIDir != "")
 	// The gateway decides every shell command of this turn: forbid refused,
 	// ask held for a person, allow run, a command on no list held (or refused
 	// when the person set the unlisted default to refuse), and a command
@@ -790,7 +788,7 @@ func (e *Engine) start(t turn) (*Turn, error) {
 		text := settings.ToolServerInstructions(apply)
 		added = append(added, event.Added{Kind: event.AddedMCPInstructions, Bytes: len(text), Text: text})
 	}
-	w, why := writesFor(h, t.folder, t.readOnly, perm, e.cfg.Protect)
+	w, why := writesFor(h, t.folder, perm, e.cfg.Protect)
 	if why != "" {
 		e.cfg.Logf("run.edit session=%s turn=%s left_out=%s", t.session, t.id, why)
 	}
@@ -812,10 +810,10 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	// person turns contain on, and the runner builds what it needs.
 	autoWall := perm.Sandbox.Mode != settings.SandboxOn && needsWall(perm)
 	if perm.Sandbox.Mode == settings.SandboxOn || autoWall {
-		// A read-only turn cannot write its folder in the wall. Nor can a
-		// turn that may edit nothing, of a harness whose own sandbox kept it
-		// from writing: that one is off in the wall (harness.Turn.Walled).
-		readOnly := w.ReadOnly || (h.Info().OwnSandbox && len(w.Edit) == 0)
+		// A turn that may edit nothing (edit = "none"), of a harness whose
+		// own sandbox kept it from writing, is off in the wall
+		// (harness.Turn.Walled); other turns write their own copy.
+		readOnly := h.Info().OwnSandbox && len(w.Edit) == 0
 		lead := "the sandbox is on in Settings"
 		if autoWall {
 			lead = "Network contain is on in Settings, which on this machine needs the session's sandbox"
@@ -846,12 +844,12 @@ func (e *Engine) start(t turn) (*Turn, error) {
 	}()
 	spec := turnSpec(hint, t.resumeID, t.model, w, perm, t.context+t.prompt)
 	spec.Access = t.access
-	// The person's own MCP servers in the turn's home: an edit turn loads
-	// them, a read-only one does not (harness.Turn.OwnServers). Names only,
+	// The person's own MCP servers in the turn's home: every turn loads them
+	// now that read-only is retired (harness.Turn.OwnServers). Names only,
 	// in the service log.
 	spec.OwnServers = harness.OwnServers(h, cmd.Env)
 	if len(spec.OwnServers) > 0 {
-		e.cfg.Logf("run.own_servers session=%s turn=%s read_only=%t names=%q", t.session, t.id, t.readOnly, strings.Join(spec.OwnServers, ","))
+		e.cfg.Logf("run.own_servers session=%s turn=%s names=%q", t.session, t.id, strings.Join(spec.OwnServers, ","))
 	}
 	if tools {
 		spec.Tools = strings.TrimSuffix(apiURL, "/") + ToolPath
@@ -1255,13 +1253,14 @@ func turnSpec(hint, resumeID, model string, w Writes, perm settings.Policy, prom
 		NoSubagents: perm.Subagents != nil && !*perm.Subagents, Walled: perm.Sandbox.Mode == settings.SandboxOn, Prompt: prompt}
 }
 
-// withAPI is perm with the agent's way to the API on the allow list, for a
-// turn that may write, so the gateway runs the agent's own API calls without
-// holding each for a person (a command on no list is held under the ask
-// default). What the call may do is the turn token's to say (api/tokens.go).
-// forbid still wins over it.
-func withAPI(perm settings.Policy, api, readOnly bool) settings.Policy {
-	if !api || readOnly {
+// withAPI is perm with the agent's way to the API on the allow list, on every
+// turn now that read-only is retired (B12), so the gateway runs the agent's own
+// API calls without holding each for a person (a command on no list is held
+// under the ask default). What the call may do is the turn token's to say
+// (api/tokens.go); a review's token reads the reviewed turn through its request
+// tree. forbid still wins over it.
+func withAPI(perm settings.Policy, api bool) settings.Policy {
+	if !api {
 		return perm
 	}
 	perm.Allow = append(append([]string(nil), perm.Allow...), APIClient)
@@ -1281,16 +1280,9 @@ func askedBy(o *event.Origin) *event.Origin {
 // that session's changes, which its own folder may not hold: a new session
 // gets a copy of the person's folder. "" for a turn nobody asked for. Its
 // token may always read its own request tree.
-func askedLine(asked *event.Origin, client, tools bool) string {
+func askedLine(asked *event.Origin, client bool) string {
 	if asked == nil {
 		return ""
-	}
-	if tools {
-		return "Another agent asked for this work, from session " + asked.Session + ", turn " + asked.Turn +
-			" (also in AGENTBUS_ASKED_BY_SESSION and AGENTBUS_ASKED_BY_TURN). Your folder may not hold its changes. " +
-			"To read what that turn changed, with each file's diff, call turn_changes with turn " + asked.Turn + " and session " + asked.Session +
-			". Its changes are empty while that turn still runs; read it again once its state is no longer running. " +
-			"That session's earlier turns: list_turns with session " + asked.Session + "."
 	}
 	get := `agentbus-api GET "%s"`
 	if !client {

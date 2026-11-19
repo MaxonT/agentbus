@@ -19,7 +19,7 @@ package api
 // no rule, is held for a person. A forbid/ask/allow entry naming the tool
 // overrides the default. The gate runs only for an agent's own call (a turn
 // token); the authorize step refuses a call the caller may not make (out of its
-// tree, [agent_api] off, read-only) at once, before any hold.
+// tree, [agent_api] off) at once, before any hold.
 //
 // Ask holds the call here, on control's MCP endpoint, up to 60 s — H1's hold
 // carried to a tool call. The agent's tool-call HTTP request is a plain
@@ -59,7 +59,7 @@ func (a *API) gateToolCall(r *http.Request, inner *http.Request, g *run.Grant, s
 	}
 	// authorize (permission, not validation): may this caller use this session at
 	// all — the SAME check the route applies to a turn token (out of the token's
-	// tree, [agent_api] off, read-only), reusing allowTurn so there is no second
+	// tree, [agent_api] off), reusing allowTurn so there is no second
 	// copy. Run before the decision, so a call the caller may not make is refused
 	// at once and never held. The route runs it again; it reads only, so twice is
 	// safe. The gate does NOT validate the tool's inputs — the tool validates its
@@ -182,8 +182,9 @@ func (a *API) holdToolCall(r *http.Request, g *run.Grant, st servedTool, args ma
 // So it reads the record; if a person allowed, the call runs; otherwise it
 // records the ending and reads once more (an allow that landed while it recorded
 // still wins); only a record with no allow refuses the call. A person who
-// answers AFTER this ending is told the hold had ended (decideApproval); their
-// late allow is recorded but the call does not run — H1's own rule, not a defect.
+// answers AFTER this ending finds the approval already decided and is refused
+// (decideApproval returns 404); the late answer is not recorded and the call
+// does not run — H1's own rule, not a defect.
 func (a *API) endHeldCall(g *run.Grant, id, reason, text string) (allow bool, result toolResult) {
 	if a.toolApprovalState(id) == gateway.Allow {
 		return true, toolResult{} // a person allowed within the window: run it

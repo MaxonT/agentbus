@@ -842,13 +842,19 @@ func (r *Runner) work(ctx context.Context, job queue.Job, a queue.Attempt) {
 	// The turn's record reaches control while it runs (record.go).
 	go at.live(ctx, done)
 	r.follow(ctx, at, turn)
-	// A review's session has no workspace to be removed with, and takes no
-	// next turn: its home goes once its turn has ended.
+	// A review takes no next turn and its own copy (B12) is throwaway: both its
+	// home and its copy go once its turn has ended.
 	if job.Kind == queue.KindReview {
+		space := at.space
 		go func() {
 			<-turn.Done()
 			if err := r.cfg.Engine.RemoveHome(turn.Session); err != nil {
 				r.cfg.Logf("review %s: its session's home could not be removed", job.ID)
+			}
+			if space != nil {
+				if err := isolation.Close(space); err != nil {
+					r.cfg.Logf("review %s: its copy could not be removed", job.ID)
+				}
 			}
 		}()
 	}
@@ -856,10 +862,10 @@ func (r *Runner) work(ctx context.Context, job queue.Job, a queue.Attempt) {
 
 // request is the turn the attempt runs. Its id is the job's turn. A turn
 // job's first turn opens the session the queue named for it; a review opens
-// one of its own, read-only, in the reviewed job's folder.
+// one of its own, in the reviewed job's folder, as a normal turn (B12).
 func (r *Runner) request(at *attempt) run.Request {
 	sp := at.job.Spec
-	req := run.Request{Turn: at.job.Turn, Prompt: sp.Prompt, Model: sp.Model, ReadOnly: sp.ReadOnly,
+	req := run.Request{Turn: at.job.Turn, Prompt: sp.Prompt, Model: sp.Model,
 		IdempotencyKey: at.job.IdempotencyKey, AllowOnce: sp.AllowOnce}
 	// The agent's token for the API is control's: a runner of a server's
 	// always, and in up too. Its model calls carry the stand-in, not the token.
@@ -920,15 +926,21 @@ func (r *Runner) prepare(ctx context.Context, at *attempt) *queue.Result {
 	sp := at.job.Spec
 	switch {
 	case at.job.Kind == queue.KindReview && at.job.Workspace != nil:
-		// A review reads the reviewed session's workspace, as it is.
-		at.folder = r.workspaceDir(*at.job.Workspace)
-		if res := r.remount(at, at.folder); res != nil {
+		// A review runs in its OWN copy of the reviewed workspace (B12: it is a
+		// normal turn now, so it may edit — but its edits must stay in the copy
+		// and never reach the author's workspace or the person's folder). The
+		// copy is named after the review's own session so it does not collide
+		// with the author's. It is removed when the review's turn ends.
+		reviewed := r.workspaceDir(*at.job.Workspace)
+		if res := r.remount(at, reviewed); res != nil {
 			return res
 		}
-		if info, err := os.Stat(at.folder); err != nil || !info.IsDir() {
+		if info, err := os.Stat(reviewed); err != nil || !info.IsDir() {
 			at.folder = ""
 			return nil // the engine refuses it, in its own words
 		}
+		b, _ := isolation.Get(isolation.Copy)
+		return r.isolate(at, b, isolation.Request{ID: at.job.Links.ReviewSession, Folder: reviewed})
 	case sp.Repo != "" || sp.RepoRef != "":
 		repo, ok := r.folderPath(sp.Repo, sp.RepoRef, sp.Machine)
 		if !ok {
@@ -1044,8 +1056,13 @@ func (r *Runner) isolate(at *attempt, b isolation.Backend, req isolation.Request
 		return &queue.Result{Refused: "this runner has no workdir for isolated copies"}
 	}
 	// The copy is named after its session, so the folder name an agent
-	// sees is the session the cockpit shows.
-	req.ID, req.Workdir = at.job.Session, r.cfg.Workdir
+	// sees is the session the cockpit shows. A review names its own session
+	// (req.ID set by the caller), not the reviewed one, so its copy does not
+	// collide with the author's workspace.
+	if req.ID == "" {
+		req.ID = at.job.Session
+	}
+	req.Workdir = r.cfg.Workdir
 	s, err := b.Open(req)
 	var rf *isolation.Refusal
 	switch {

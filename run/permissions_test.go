@@ -20,8 +20,9 @@ func writePerm(t *testing.T, path, s string) {
 	}
 }
 
-// The exact arguments each agent gets for a policy, with and without
-// read_only, an edit rule, resume and model.
+// The exact arguments each agent gets for a policy, with and without an edit
+// rule, resume and model. Read-only turns retired (B12): edit = "none" (no edit
+// rule) is the only way a turn is kept from writing.
 func TestTurnArgsPermissions(t *testing.T) {
 	perm := settings.Policy{ReadFolders: []string{"/home/me/.agents", "/home/me/notes"},
 		Allow: []string{"go test", "make test"}, Forbid: []string{"git push", "git checkout"}}
@@ -36,14 +37,12 @@ func TestTurnArgsPermissions(t *testing.T) {
 	// person's own settings allow.
 	noEdit := []string{"--disallowedTools", "Edit,Write,NotebookEdit"}
 	noEditOnly := noEdit
-	readOnly := []string{"--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob," + reads, "--strict-mcp-config", "--no-chrome"}
-	// An edit turn loads the person's own MCP servers (no
-	// --strict-mcp-config); Claude in Chrome is off on every turn.
+	// Every turn loads the person's own MCP servers (no --strict-mcp-config);
+	// Claude in Chrome is off on every turn.
 	noChrome := []string{"--no-chrome"}
 	cat := func(parts ...[]string) []string { return slices.Concat(parts...) }
 	head := []string{"-p", "--output-format", "json"}
 	edit := Writes{Edit: []string{"/w/repo"}, Protect: []string{"/data/permissions.toml", "/data/token"}}
-	ro := Writes{ReadOnly: true, Protect: edit.Protect}
 	for _, tc := range []struct {
 		name, agent, resume, model string
 		w                          Writes
@@ -64,21 +63,15 @@ func TestTurnArgsPermissions(t *testing.T) {
 		// there under the person's acceptEdits mode.
 		{"claude, folders only", "claude", "", "", Writes{}, settings.Policy{ReadFolders: []string{"/x"}},
 			cat(head, []string{"--allowedTools", "Read(//x/**),Grep(//x/**),Glob(//x/**),Bash"}, noChrome, noEditOnly, []string{"--", "hi"})},
-		{"claude read-only, no policy", "claude", "", "", ro, settings.Policy{},
-			cat(head, []string{"--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config", "--no-chrome", "--", "hi"})},
 		{"claude, allow only", "claude", "", "", Writes{}, settings.Policy{Allow: []string{"go test"}},
 			cat(head, bash, noChrome, noEditOnly, []string{"--", "hi"})},
-		// allow never widens a read-only turn; folders and forbid still apply.
-		{"claude read-only", "claude", "", "", ro, perm, cat(head, readOnly, []string{"--", "hi"})},
 		{"claude resume and model", "claude", "r-1", "opus", Writes{}, perm,
 			cat(head, []string{"--resume", "r-1"}, allow, noChrome, noEdit, []string{"--model", "opus", "--", "hi"})},
-		{"claude read-only, resume and model", "claude", "r-1", "opus", ro, perm,
-			cat(head, []string{"--resume", "r-1"}, readOnly, []string{"--model", "opus", "--", "hi"})},
-		// codex writes, with network, only with the edit rule.
+		// codex writes, with network, only with the edit rule; edit = "none" (no
+		// edit rule) runs the read-only sandbox with no network.
 		{"codex edits", "codex", "", "", edit, perm, []string{"exec", "--skip-git-repo-check", "--json", "--sandbox", "workspace-write",
 			"-c", "sandbox_workspace_write.network_access=true", "--disable", "apps", "--disable", "plugins", "--", "hi"}},
 		{"codex, no edit rule", "codex", "", "", Writes{}, perm, []string{"exec", "--skip-git-repo-check", "--json", "--sandbox", "read-only", "--disable", "apps", "--disable", "plugins", "--", "hi"}},
-		{"codex read-only", "codex", "", "", ro, perm, []string{"exec", "--skip-git-repo-check", "--json", "--sandbox", "read-only", "--disable", "apps", "--disable", "plugins", "--", "hi"}},
 		{"codex resume and model", "codex", "r-1", "gpt-5", edit, perm, []string{"exec", "--skip-git-repo-check", "--sandbox", "workspace-write",
 			"-c", "sandbox_workspace_write.network_access=true", "--disable", "apps", "--disable", "plugins", "resume", "--json", "--model", "gpt-5", "--", "r-1", "hi"}},
 	} {
@@ -89,59 +82,56 @@ func TestTurnArgsPermissions(t *testing.T) {
 	}
 }
 
-// writesFor gives the edit rule from edit = "session", never to a read-only
-// turn; a folder that cannot go in a rule gets none; codex gets none for a
-// folder that holds a protected file, which its sandbox could not keep out.
+// writesFor gives the edit rule from edit = "session"; a folder that cannot go
+// in a rule gets none; codex gets none for a folder that holds a protected
+// file, which its sandbox could not keep out.
 func TestWritesFor(t *testing.T) {
 	folder := t.TempDir()
 	real, _ := filepath.EvalSymlinks(folder)
 	data := filepath.Join(t.TempDir(), "home")
 	protect := []string{filepath.Join(data, settings.PolicyFile)}
 	def := settings.DefaultPolicy()
-	w, why := writesFor(hn("claude"), folder, false, def, protect)
-	if why != "" || len(w.Edit) == 0 || w.Edit[0] != folder || !slices.Contains(w.Edit, real) || len(w.Protect) == 0 || w.ReadOnly {
+	w, why := writesFor(hn("claude"), folder, def, protect)
+	if why != "" || len(w.Edit) == 0 || w.Edit[0] != folder || !slices.Contains(w.Edit, real) || len(w.Protect) == 0 {
 		t.Fatalf("claude: %+v %q", w, why)
 	}
-	if w, _ := writesFor(hn("codex"), folder, false, def, protect); len(w.Edit) == 0 {
+	if w, _ := writesFor(hn("codex"), folder, def, protect); len(w.Edit) == 0 {
 		t.Fatalf("codex: %+v", w)
-	}
-	if w, _ := writesFor(hn("claude"), folder, true, def, protect); !w.ReadOnly || len(w.Edit)+len(w.Protect) != 0 {
-		t.Fatalf("read-only: %+v", w)
 	}
 	none := def
 	none.Edit = settings.EditNone
-	if w, _ := writesFor(hn("claude"), folder, false, none, protect); len(w.Edit) != 0 || len(w.Protect) == 0 {
+	if w, _ := writesFor(hn("claude"), folder, none, protect); len(w.Edit) != 0 || len(w.Protect) == 0 {
 		t.Fatalf("edit none: %+v", w)
 	}
 	odd := filepath.Join(t.TempDir(), "a,b")
 	if err := os.Mkdir(odd, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if w, why := writesFor(hn("claude"), odd, false, def, protect); len(w.Edit) != 0 || why != "folder_shape" {
+	if w, why := writesFor(hn("claude"), odd, def, protect); len(w.Edit) != 0 || why != "folder_shape" {
 		t.Fatalf("a comma in the folder: %+v %q", w, why)
 	}
 	// codex takes any folder name: its sandbox needs no rule.
-	if w, why := writesFor(hn("codex"), odd, false, def, protect); len(w.Edit) == 0 || why != "" {
+	if w, why := writesFor(hn("codex"), odd, def, protect); len(w.Edit) == 0 || why != "" {
 		t.Fatalf("codex, a comma in the folder: %+v %q", w, why)
 	}
 	// A data folder named relative to the service's own folder is still
 	// found inside the session's folder.
 	wd, _ := os.Getwd()
 	t.Chdir(filepath.Dir(data))
-	if w, why := writesFor(hn("codex"), filepath.Dir(data), false, def, []string{filepath.Join("home", settings.PolicyFile)}); len(w.Edit) != 0 || why != "data_folder_inside" {
+	if w, why := writesFor(hn("codex"), filepath.Dir(data), def, []string{filepath.Join("home", settings.PolicyFile)}); len(w.Edit) != 0 || why != "data_folder_inside" {
 		t.Fatalf("codex, a relative data folder inside: %+v %q", w, why)
 	}
 	t.Chdir(wd)
 	// The data folder inside the session's folder.
 	parent := filepath.Dir(data)
-	if w, why := writesFor(hn("codex"), parent, false, def, protect); len(w.Edit) != 0 || why != "data_folder_inside" {
+	if w, why := writesFor(hn("codex"), parent, def, protect); len(w.Edit) != 0 || why != "data_folder_inside" {
 		t.Fatalf("codex over the data folder: %+v %q", w, why)
 	}
-	if w, why := writesFor(hn("claude"), parent, false, def, protect); len(w.Edit) == 0 || why != "" || len(w.Protect) == 0 {
+	if w, why := writesFor(hn("claude"), parent, def, protect); len(w.Edit) == 0 || why != "" || len(w.Protect) == 0 {
 		t.Fatalf("claude over the data folder keeps the deny rules: %+v %q", w, why)
 	}
 	// A protected file that cannot go in a deny rule leaves edits out.
-	if w, why := writesFor(hn("claude"), folder, false, def, []string{"/data/a(b"}); len(w.Edit) != 0 || why != "protected_file_shape" {
+	if w, why := writesFor(hn("claude"), folder, def, []string{"/data/a(b"}); len(w.Edit) != 0 || why != "protected_file_shape" {
 		t.Fatalf("an odd protected file: %+v %q", w, why)
 	}
 }

@@ -21,8 +21,9 @@ const (
 	mcpReadTok  = "turn-tok-read-0123456789abcdef"
 )
 
-// mcpEnv is an API whose runner tokens are two turn tokens of session s1:
-// one that may write, one read-only, under a policy with tools = true.
+// mcpEnv is an API whose runner tokens are two turn tokens of session s1,
+// under a policy with tools = true. Read-only turns retired (B12), so both are
+// ordinary turn tokens; the second keeps its old name.
 func mcpEnv(t *testing.T) *env { return mcpEnvTools(t, true) }
 
 // mcpEnvTools is mcpEnv with [agent_api] tools as given.
@@ -30,7 +31,7 @@ func mcpEnvTools(t *testing.T, tools bool) *env {
 	t.Helper()
 	return mcpEnvGrants(t, tools, map[string]run.Grant{
 		mcpWriteTok: {Session: "s1", Turn: "t_1", Root: "s1"},
-		mcpReadTok:  {Session: "s1", Turn: "t_1", Root: "s1", ReadOnly: true},
+		mcpReadTok:  {Session: "s1", Turn: "t_1", Root: "s1"},
 	})
 }
 
@@ -39,7 +40,7 @@ func mcpEnvTools(t *testing.T, tools bool) *env {
 func mcpEnvGrants(t *testing.T, tools bool, grants map[string]run.Grant) *env {
 	t.Helper()
 	dir := t.TempDir()
-	p := settings.FirstInstallPolicy() // ships the read-only built-in tools pre-set to allow
+	p := settings.FirstInstallPolicy() // a fresh install's policy
 	p.AgentAPI.Tools = &tools
 	if err := os.WriteFile(filepath.Join(dir, settings.PolicyFile), settings.FormatPolicy(p), 0o600); err != nil {
 		t.Fatal(err)
@@ -115,29 +116,27 @@ func TestMCPInitialize(t *testing.T) {
 	}
 }
 
-// A turn token sees the tools of its turn; a read-only one sees reads only.
-// The main token sees them all.
+// Every token sees the same tool list now (read-only retired, B12): the apps,
+// such as ask_agent. The read-tool copies are gone — reading is done through
+// agentbus-api, not tools — so none is listed, and neither is continue_session.
 func TestMCPToolListFollowsTheToken(t *testing.T) {
 	e := mcpEnv(t)
 	all := toolNames(t, e, token)
-	if slices.Contains(all, "continue_session") {
-		t.Error("continue_session is listed: a turn token never continues a session")
+	if !slices.Contains(all, "ask_agent") {
+		t.Errorf("main token: ask_agent missing from %v", all)
 	}
-	for _, want := range []string{"list_agents", "ask_agent", "list_turns",
-		"get_turn", "turn_diff", "search_history"} {
-		if !slices.Contains(all, want) {
-			t.Errorf("main token: %s missing from %v", want, all)
+	for _, gone := range []string{"continue_session", "list_agents", "list_turns", "get_turn",
+		"turn_diff", "turn_changes", "turn_calls", "turn_tools", "turn_context", "search_history", "session_context"} {
+		if slices.Contains(all, gone) {
+			t.Errorf("%s is listed as a tool: it is an API route, not a tool now", gone)
 		}
 	}
-	// B11 removed the write route copies, so a write turn sees the same read and
-	// ask tools as the main token (no apply_turn to gate off).
+	// A write turn and the second turn see the same list as the main token.
 	if w := toolNames(t, e, mcpWriteTok); !slices.Equal(w, all) {
 		t.Errorf("write turn: %v, want %v", w, all)
 	}
-	ro := toolNames(t, e, mcpReadTok)
-	want := []string{"list_turns", "get_turn", "turn_diff", "turn_changes", "turn_calls", "turn_tools", "turn_context", "search_history", "session_context", "list_agents"}
-	if !slices.Equal(ro, want) {
-		t.Errorf("read-only turn: %v, want %v", ro, want)
+	if ro := toolNames(t, e, mcpReadTok); !slices.Equal(ro, all) {
+		t.Errorf("second turn: %v, want %v", ro, all)
 	}
 }
 
@@ -182,35 +181,32 @@ func TestMCPToolListFollowsAgentAPI(t *testing.T) {
 	}
 	// tools = false refuses the tool server to a turn token, naming the
 	// switch as Settings shows it.
-	if msg := turnRefusal(toolList, *g, off(func(a *settings.AgentAPI) { a.Tools = &no })); !strings.Contains(msg, "AgentBus tools is off in Settings (Permissions)") ||
+	if msg := turnRefusal(toolList, off(func(a *settings.AgentAPI) { a.Tools = &no })); !strings.Contains(msg, "AgentBus tools is off in Settings (Permissions)") ||
 		strings.Contains(msg, "permissions.toml") {
 		t.Errorf("tools off: %q", msg)
 	}
 }
 
-// A tool left out of the list is still refused by its route when called:
-// the list is discovery only. The refusal is the route's own 403.
-func TestMCPCallOutsideTheGrantIsRefused(t *testing.T) {
+// The read-tool copies retired in 0.6 (B12): reading the record is done through
+// agentbus-api, not tools. A tools/call for one of them is "no such tool"; the
+// tool list names only the apps.
+func TestReadToolsAreNotTools(t *testing.T) {
 	e := mcpEnv(t)
-	for _, call := range []string{
-		`{"name":"ask_agent","arguments":{"agent":"claude","prompt":"x"}}`,
-	} {
-		code, v := rpc(t, e, mcpReadTok, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":`+call+`}`)
-		text, _ := dig(v, "result", "content").([]any)[0].(map[string]any)["text"].(string)
-		if code != 200 || dig(v, "result", "isError") != true || !strings.HasPrefix(text, "HTTP 403") || !strings.Contains(text, "read-only") {
-			t.Errorf("%s: %d %v", call, code, v)
+	for _, name := range []string{"list_turns", "get_turn", "turn_diff", "turn_changes", "turn_calls",
+		"turn_tools", "turn_context", "search_history", "session_context", "list_agents"} {
+		call := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"` + name + `","arguments":{}}}`
+		code, v := rpc(t, e, mcpWriteTok, call)
+		if code != 200 || dig(v, "error", "code") != float64(rpcInvalidParams) {
+			t.Errorf("%s is still callable as a tool: %d %v", name, code, v)
 		}
-	}
-	// Another session's history, outside the token's tree.
-	code, v := rpc(t, e, mcpWriteTok, `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"search_history","arguments":{"session":"other","q":"x"}}}`)
-	text, _ := dig(v, "result", "content").([]any)[0].(map[string]any)["text"].(string)
-	if code != 200 || dig(v, "result", "isError") != true || !strings.HasPrefix(text, "HTTP 403") {
-		t.Errorf("other session: %d %v", code, v)
 	}
 }
 
-// A call fills the route from its inputs, refuses inputs the tool does not
-// take, and answers the route's JSON.
+// A call validates its arguments against the tool's inputs before routing: a
+// missing required input, or one the tool does not take, is refused by name,
+// and an unknown tool name is a JSON-RPC error. ask_agent is the one built-in
+// app now (read-only retired, B12: the read tools are gone, and ask_agent no
+// longer takes read_only).
 func TestMCPCallSendsTheRoute(t *testing.T) {
 	e := mcpEnv(t)
 	call := func(tok, params string) (bool, string) {
@@ -222,16 +218,13 @@ func TestMCPCallSendsTheRoute(t *testing.T) {
 		}
 		return dig(v, "result", "isError") == true, c[0].(map[string]any)["text"].(string)
 	}
-	if isErr, text := call(mcpWriteTok, `{"name":"search_history","arguments":{"q":"needle"}}`); isErr || !strings.Contains(text, `"hits"`) {
-		t.Errorf("own session search: %v %s", isErr, text)
-	}
 	for params, want := range map[string]string{
-		`{"name":"get_turn","arguments":{}}`:                                              "turn is required",
-		`{"name":"get_turn","arguments":{"turn":"t_1","x":1}}`:                            "no input of that name",
-		`{"name":"get_turn","arguments":{"turn":"../x"}}`:                                 "turn must be an id",
-		`{"name":"ask_agent","arguments":{"agent":"claude","session":"s1","prompt":"x"}}`: "no input of that name",
+		`{"name":"ask_agent","arguments":{"prompt":"x"}}`:                              "agent is required",
+		`{"name":"ask_agent","arguments":{"agent":"a_x","prompt":"x","session":"s1"}}`: "no input of that name",
 		// No folder: the asking session's folder, always.
-		`{"name":"ask_agent","arguments":{"agent":"claude","folder":"/x","prompt":"x"}}`: "no input of that name",
+		`{"name":"ask_agent","arguments":{"agent":"a_x","folder":"/x","prompt":"x"}}`: "no input of that name",
+		// read_only retired (B12): ask_agent no longer takes it.
+		`{"name":"ask_agent","arguments":{"agent":"a_x","prompt":"x","read_only":true}}`: "no input of that name",
 	} {
 		if isErr, text := call(mcpWriteTok, params); !isErr || !strings.Contains(text, want) {
 			t.Errorf("%s: %v %q, want %q", params, isErr, text, want)
@@ -239,10 +232,6 @@ func TestMCPCallSendsTheRoute(t *testing.T) {
 	}
 	if _, v := rpc(t, e, mcpWriteTok, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agentbus_shell","arguments":{}}}`); dig(v, "error", "code") != float64(rpcInvalidParams) {
 		t.Errorf("unknown tool: %v", v)
-	}
-	// The main token reaches the same route.
-	if isErr, text := call(token, `{"name":"list_agents","arguments":{}}`); isErr {
-		t.Errorf("main token list agents: %s", text)
 	}
 }
 
@@ -264,33 +253,36 @@ func TestMCPToolSchemas(t *testing.T) {
 		st, _ := e.api.servedByName(name)
 		return st.def.Inputs
 	}
-	req := func(name string) []string { return schemaRequired(schemaOf(name)) }
-	if r := req("search_history"); slices.Contains(r, "session") || !slices.Contains(r, "q") {
-		t.Errorf("search requires %v", r)
+	// ask_agent is the one built-in app (read-only retired, B12: the read tools
+	// are gone). It requires agent and prompt, and no longer takes read_only.
+	r := schemaRequired(schemaOf("ask_agent"))
+	if !slices.Contains(r, "agent") || !slices.Contains(r, "prompt") {
+		t.Errorf("ask_agent requires %v", r)
 	}
-	// A turn input says it takes the id, not the turn's number: agents
-	// passed "3" in 5 of 6 MCP runs (2026-11-11). (B11 removed the write-side
-	// turn tools; the kept read tools carry the same turn-id input doc.)
-	for _, name := range []string{"get_turn", "turn_diff"} {
-		props, _ := schemaOf(name)["properties"].(map[string]any)
-		turn, _ := props["turn"].(map[string]any)
-		if d, _ := turn["description"].(string); !strings.Contains(d, "never the turn's number") {
-			t.Errorf("%s: turn input says %q", name, d)
-		}
+	if props, _ := schemaOf("ask_agent")["properties"].(map[string]any); props["read_only"] != nil {
+		t.Errorf("ask_agent still takes read_only: %v", props)
 	}
 }
 
-// The OpenAPI description names each operation's tools (by name; a tool carries
-// no effect since 0.6).
+// The OpenAPI description names an operation's tools (by name; a tool carries
+// no effect since 0.6). ask_agent is the one built-in app, on POST /turns.
 func TestOpenAPINamesTools(t *testing.T) {
 	doc := loadSpec(t)
-	op := doc.Paths.Value("/api/v0/turns/{id}/diff").Get
+	op := doc.Paths.Value("/api/v0/turns").Post
 	b, _ := json.Marshal(op.Extensions["x-agentbus-tools"])
-	if !strings.Contains(string(b), `"turn_diff"`) {
-		t.Errorf("diff's tools: %s", b)
+	if !strings.Contains(string(b), `"ask_agent"`) {
+		t.Errorf("start turn's tools: %s", b)
 	}
 	if strings.Contains(string(b), "effect") {
 		t.Errorf("x-agentbus-tools still carries an effect: %s", b)
+	}
+	// The read-tool copies retired in 0.6 (B12): the read routes name no tool.
+	for _, p := range []string{"/api/v0/turns/{id}/diff", "/api/v0/turns/{id}/changes"} {
+		op := doc.Paths.Value(p).Get
+		b, _ := json.Marshal(op.Extensions["x-agentbus-tools"])
+		if strings.Contains(string(b), "turn_") {
+			t.Errorf("%s still names a tool: %s", p, b)
+		}
 	}
 	// The removed write route copies no longer name a tool.
 	op = doc.Paths.Value("/api/v0/turns/{id}/apply").Post

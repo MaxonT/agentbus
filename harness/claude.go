@@ -224,7 +224,6 @@ func (claude) ResumeID(line []byte, current string) string {
 }
 
 func (claude) Args(t Turn) []string {
-	readOnly := t.Writes.ReadOnly
 	// --output-format json prints one result object with the session_id.
 	a := []string{"-p", "--output-format", "json"}
 	// The hint goes at the end of Claude Code's system prompt. Own replay
@@ -240,59 +239,44 @@ func (claude) Args(t Turn) []string {
 	// One --allowedTools, comma-joined (Claude Code 2.1.318,
 	// 2026-11-05): what the tools may do without asking.
 	allowed := readRules(t.ReadFolders)
-	if readOnly {
-		// --tools removes every other tool. --allowedTools only approves
-		// without asking, and the person's settings could approve more.
-		// allow never widens a read-only turn.
-		allowed = append([]string{"Read", "Grep", "Glob"}, allowed...)
-		allowed = append(allowed, claudeTools(t.Tools)...)
-		a = append(a, "--tools", "Read,Grep,Glob", "--allowedTools", strings.Join(allowed, ","))
-	} else {
-		// edit: Edit(<folder>/**) lets Edit and Write change files there
-		// without asking; one Edit rule covers every built-in tool that
-		// edits files. Without it a -p turn cannot edit at all: nobody
-		// is there to approve.
-		allowed = append(allowed, editRules(t.Writes.Edit)...)
-		// The AgentBus gateway decides every shell command of the turn — allow,
-		// ask, forbid, and a command on no list — acting on the model's reply
-		// before the agent runs the call (gateway/guard.go). So the whole Bash
-		// tool is allowed here and the gateway is the gate: Claude Code's own
-		// literal Bash check must not refuse a command first. That check split
-		// a chain at ";" and did not match an env prefix, so it refused an
-		// allowed command with nowhere to approve it (his finding, turn
-		// t_f088dacca881acf7, 2026-11-16). The person's config is never edited;
-		// this is a per-turn flag. File edit rules above are unchanged.
-		allowed = append(allowed, "Bash")
-		allowed = append(allowed, claudeTools(t.Tools)...)
-		// The person's own MCP servers load (no --strict-mcp-config), and
-		// a -p turn has nobody to approve a call: mcp__<server> lets every
-		// tool of each run without asking, as for the tool server. A name
-		// of another shape gets no rule: Claude Code rewrites it in its
-		// tool names, so a rule could miss or widen; its tools then run
-		// only as the person's own settings allow.
-		for _, n := range t.OwnServers {
-			if r := "mcp__" + n; serverNameShape.MatchString(n) && !slices.Contains(allowed, r) {
-				allowed = append(allowed, r)
-			}
+	// edit: Edit(<folder>/**) lets Edit and Write change files there
+	// without asking; one Edit rule covers every built-in tool that
+	// edits files. Without it a -p turn cannot edit at all: nobody
+	// is there to approve.
+	allowed = append(allowed, editRules(t.Writes.Edit)...)
+	// The AgentBus gateway decides every shell command of the turn — allow,
+	// ask, forbid, and a command on no list — acting on the model's reply
+	// before the agent runs the call (gateway/guard.go). So the whole Bash
+	// tool is allowed here and the gateway is the gate: Claude Code's own
+	// literal Bash check must not refuse a command first. That check split
+	// a chain at ";" and did not match an env prefix, so it refused an
+	// allowed command with nowhere to approve it (his finding, turn
+	// t_f088dacca881acf7, 2026-11-16). The person's config is never edited;
+	// this is a per-turn flag. File edit rules above are unchanged.
+	allowed = append(allowed, "Bash")
+	allowed = append(allowed, claudeTools(t.Tools)...)
+	// The person's own MCP servers load (no --strict-mcp-config), and
+	// a -p turn has nobody to approve a call: mcp__<server> lets every
+	// tool of each run without asking, as for the tool server. A name
+	// of another shape gets no rule: Claude Code rewrites it in its
+	// tool names, so a rule could miss or widen; its tools then run
+	// only as the person's own settings allow.
+	for _, n := range t.OwnServers {
+		if r := "mcp__" + n; serverNameShape.MatchString(n) && !slices.Contains(allowed, r) {
+			allowed = append(allowed, r)
 		}
-		if len(allowed) > 0 {
-			a = append(a, "--allowedTools", strings.Join(allowed, ","))
-		}
+	}
+	if len(allowed) > 0 {
+		a = append(a, "--allowedTools", strings.Join(allowed, ","))
 	}
 	// The tool server comes in by --mcp-config on every turn that has it.
 	if t.Tools != "" {
 		a = append(a, "--mcp-config", claudeMCPConfig(t.Tools))
 	}
-	// A read-only turn (a review) gets --strict-mcp-config: only the
-	// --mcp-config servers load, the tool server or none at all. --tools
-	// restricts built-in tools only, so a server of the person's could
-	// still write. An edit turn loads the person's own servers beside it:
-	// in a session's home, those Home files copied in (his decision,
-	// 2026-11-14). Calls are recorded as tool.requested under their
-	// mcp__ names.
-	if readOnly {
-		a = append(a, "--strict-mcp-config")
-	}
+	// A review is a normal turn now (read-only retired, B12): it loads the
+	// person's own servers like any turn, in a session's home from Home
+	// files copied in (his decision, 2026-11-14). Calls are recorded as
+	// tool.requested under their mcp__ names.
 	// --no-chrome: Claude in Chrome is not an MCP server of the person's
 	// settings, so --strict-mcp-config leaves it on (measured 2026-11-14,
 	// research/2026-11-14-use-my-own-tools-design.md), and it cannot work
@@ -306,14 +290,12 @@ func (claude) Args(t Turn) []string {
 	// folder's own files are still never edited: a deny on each, which wins over
 	// the edit rule and the person's settings alike.
 	var denied []string
-	if !readOnly {
-		denied = append(denied, protectRules(t.Writes.Protect)...)
-		// No edit rule: a deny on every tool that edits files, so the
-		// person's own settings (an acceptEdits mode, an Edit allow
-		// rule) cannot approve one either. A deny wins over any allow.
-		if len(t.Writes.Edit) == 0 {
-			denied = append(denied, "Edit", "Write", "NotebookEdit")
-		}
+	denied = append(denied, protectRules(t.Writes.Protect)...)
+	// No edit rule: a deny on every tool that edits files, so the
+	// person's own settings (an acceptEdits mode, an Edit allow
+	// rule) cannot approve one either. A deny wins over any allow.
+	if len(t.Writes.Edit) == 0 {
+		denied = append(denied, "Edit", "Write", "NotebookEdit")
 	}
 	// subagents = false: a deny on each tool that starts a subagent. Task
 	// is its name in Claude Code 2.1.319 (2026-11-09, read from the tool

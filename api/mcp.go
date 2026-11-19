@@ -180,13 +180,10 @@ func rpcID(id json.RawMessage) bool {
 	return false
 }
 
-// mayApply says r's token may apply a turn: its [agent_api] apply is on and it
-// is not read-only (the same test authorize makes, api/tokens.go). B11 removed
-// the apply_turn tool, so this reads the policy, not whether that tool lists.
+// mayApply says r's token may apply a turn: its [agent_api] apply is on (the
+// same test authorize makes, api/tokens.go). B11 removed the apply_turn tool,
+// so this reads the policy, not whether that tool lists.
 func (a *API) mayApply(r *http.Request) bool {
-	if g := grantOf(r); g != nil && g.ReadOnly {
-		return false
-	}
 	ap := policyOf(r).AgentAPI.Apply
 	return ap != nil && *ap
 }

@@ -101,13 +101,14 @@ func TestCodexWalled(t *testing.T) {
 		network bool
 	}{
 		{Turn{Writes: writes, Walled: true, Prompt: "p"}, "danger-full-access", false},
-		{Turn{Writes: Writes{ReadOnly: true}, Walled: true, Prompt: "p"}, "danger-full-access", false},
+		// edit = "none" (no Edit rule): read-only sandbox. Read-only turns retired (B12).
+		{Turn{Walled: true, Prompt: "p"}, "danger-full-access", false},
 		{Turn{Writes: writes, Prompt: "p"}, "workspace-write", true},
-		{Turn{Writes: Writes{ReadOnly: true}, Prompt: "p"}, "read-only", false},
+		{Turn{Prompt: "p"}, "read-only", false},
 	} {
 		a := codex{}.Args(c.turn)
 		if got := sandbox(a); got != c.want {
-			t.Errorf("walled %t, read only %t: --sandbox %s, want %s", c.turn.Walled, c.turn.Writes.ReadOnly, got, c.want)
+			t.Errorf("walled %t, edit %v: --sandbox %s, want %s", c.turn.Walled, c.turn.Writes.Edit, got, c.want)
 		}
 		if got := slices.Contains(a, "sandbox_workspace_write.network_access=true"); got != c.network {
 			t.Errorf("walled %t: network flag %t, want %t", c.turn.Walled, got, c.network)

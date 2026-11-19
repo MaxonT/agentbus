@@ -252,15 +252,17 @@ func (a *API) createTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, badTool)
 		return
 	}
-	// An api tool may run only a route a built-in tool already exposes (one
-	// with a tools entry). This one rule is what keeps a custom tool servable:
-	// it rejects a route that is not a tool at all, a path with {call} or {n}
-	// (never a tool's route), and a route that needs a header the stored
-	// format cannot supply (such as a settings write's If-Match) — none of
-	// which a built-in exposes. The call still runs with the caller's own
-	// token, so a custom tool can reach nothing the caller could not.
+	// An api tool may run only a route marked servable as a tool: one that
+	// ships a default tool, or one marked wrappable (the read routes, whose
+	// default tool copies retired in 0.6 but which stay open to a custom tool).
+	// This one rule is what keeps a custom tool servable: it rejects a route
+	// that is not a tool at all, a path with {call} or {n} (never a tool's
+	// route), and a route that needs a header the stored format cannot supply
+	// (such as a settings write's If-Match) — none of which is marked. The call
+	// still runs with the caller's own token, so a custom tool can reach nothing
+	// the caller could not.
 	if t.Run.Kind == toolreg.RunAPI {
-		if rt := a.routeFor(t.Run.Method, t.Run.Path); rt == nil || len(rt.tools) == 0 {
+		if rt := a.routeFor(t.Run.Method, t.Run.Path); rt == nil || (len(rt.tools) == 0 && !rt.wrappable) {
 			writeError(w, http.StatusBadRequest, toolRoute0)
 			return
 		}

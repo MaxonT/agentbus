@@ -58,8 +58,8 @@ unlisted = "ask"    # "ask" or "refuse": what a command on no list gets
 #   "none"     nowhere. claude is denied Edit, Write and NotebookEdit, whatever
 #              your own settings allow; codex runs with --sandbox read-only,
 #              which also has no network.
-# A read-only turn never edits. forbid still wins. No turn may edit the files
-# of the data folder (this file, instructions.md, agents.json, the tokens)
+# A turn with edit = "none" never edits. forbid still wins. No turn may edit the
+# files of the data folder (this file, instructions.md, agents.json, the tokens)
 # with its edit tools. A command in allow that runs any code (python3, sh)
 # can still write them: allow only commands you would let change this file.
 edit = "session"
@@ -166,18 +166,15 @@ const (
 
 // StarterAllow is the small read-only allow list a new install starts with, so
 // a first session is not a card for every command. Each is a command that
-// reads, never one that changes anything — and, since 0.6, the read-only
-// built-in tools too: a tool is decided by its name against this one list, the
-// same as a shell command (his decision, 2026-11-18, DESIGN_0_6_tools.md #9).
-// AgentBus ships its read-only tools pre-set to allow, as ordinary rules a
-// person sees and edits; the tools that do something carry no rule and are
-// asked by default. The api package pins this list to its GET built-in tools
-// (a test), so a read-only tool is never left off and asked about.
+// reads, never one that changes anything. A tool is decided by its name against
+// this one list, the same as a shell command (his decision, 2026-11-18,
+// DESIGN_0_6_tools.md #9); the apps that do something, such as ask_agent, carry
+// no rule and are asked by default. Reading the record is the API's own routes,
+// reached with agentbus-api, not tools (read-only turns and the read-tool
+// copies retired in 0.6, B12), so none is listed here.
 var StarterAllow = []string{
 	"ls", "cat", "head", "tail", "grep", "find", "wc",
 	"git status", "git diff", "git log", "git show",
-	"list_turns", "get_turn", "turn_diff", "turn_changes", "turn_calls",
-	"turn_tools", "turn_context", "search_history", "session_context", "list_agents",
 }
 
 // Isolation values: where a new session's turns run.
@@ -222,7 +219,7 @@ type Policy struct {
 	Edit        string   `toml:"edit" json:"edit,omitempty" doc:"Where a turn may edit files without asking: session (its own session's folder) or none. Absent in a PUT: session."`
 	Isolation   string   `toml:"isolation" json:"isolation,omitempty" doc:"Where a new session's turns run: auto (copy on macOS; overlay on Linux where the runner can mount one, else copy), overlay, copy (a copy of its folder as it is now), git (a git worktree with the folder's uncommitted edits, in a repo) or none (the folder itself). On ext4, copy and the overlay's snapshot copy every byte: use xfs, btrfs, git or none for a big folder. Absent in a PUT: auto."`
 	Subagents   *bool    `toml:"subagents" json:"subagents,omitempty" doc:"Whether a turn may start the agent's own subagents. Off by default: agents ask other agents through AgentBus, where the work is recorded. Absent in a PUT: false."`
-	HomeFiles   []string `toml:"home_files" json:"home_files" doc:"Files or folders under the home folder, each starting with ~/, copied into each session's own home at the same place at the start of each turn, such as ~/.aws/config. Sandbox on or off. A folder's files go at any depth, 64 MiB and 10000 files in all. A file the session has is replaced when the original is newer, and kept when it is as new or newer. ~/.claude.json gives only its mcpServers, merged into the session's own .claude.json. The MCP servers copied in (claude's ~/.claude.json, codex's ~/.codex/config.toml) load on an edit turn, and claude may call them without asking; a read-only turn (a review) loads none of them. agy refuses every MCP call. A vendor sign-in file (claude's .credentials.json, codex's auth.json, agy's token) is refused, and left out of a folder listed. Before 0.5.2 this was sandbox.read, which still reads as home_files. Absent in a PUT: none."`
+	HomeFiles   []string `toml:"home_files" json:"home_files" doc:"Files or folders under the home folder, each starting with ~/, copied into each session's own home at the same place at the start of each turn, such as ~/.aws/config. Sandbox on or off. A folder's files go at any depth, 64 MiB and 10000 files in all. A file the session has is replaced when the original is newer, and kept when it is as new or newer. ~/.claude.json gives only its mcpServers, merged into the session's own .claude.json. The MCP servers copied in (claude's ~/.claude.json, codex's ~/.codex/config.toml) load on every turn, reviews included (read-only retired in 0.6), and claude and agy may call them without asking. A vendor sign-in file (claude's .credentials.json, codex's auth.json, agy's token) is refused, and left out of a folder listed. Before 0.5.2 this was sandbox.read, which still reads as home_files. Absent in a PUT: none."`
 	Limits      Limits   `toml:"limits" json:"limits" doc:"The limits on work agents ask for."`
 	AgentAPI    AgentAPI `toml:"agent_api" json:"agent_api" doc:"What a turn's own token may call."`
 	Network     Network  `toml:"network" json:"network" doc:"What a turn's agent may reach on the network (on Linux by its network namespace, on macOS by the session's sandbox)."`
