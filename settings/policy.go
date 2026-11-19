@@ -30,12 +30,12 @@ const PolicyStarter = `# What AgentBus turns may do without asking. Read at the 
 # and by the API for each request a turn's token sends: an edit applies at once.
 # A key left out reads as the default written here. Folders may start with ~.
 #
-# allow: commands agents may run without asking (a command and its arguments).
-# ask: commands that wait for a person. The gateway holds a matching call and
-# records it; a person answers once (run it this turn only), always (move it to
-# allow and continue the session) or refuse. forbid wins over ask, ask wins
-# over allow.
-# forbid: commands claude and codex may never run. The gateway refuses them.
+# allow: commands and tools agents may run without asking.
+# ask: commands and tools that wait for a person. The gateway holds
+# a matching call and records it; a person answers once (run it this turn only),
+# always (move it to allow and continue the session) or refuse. forbid wins over
+# ask, ask wins over allow.
+# forbid: commands and tools agents may never run. The gateway refuses them.
 # It reads the command text, so it cannot see a command built at run time or
 # run from a script. For a hard rule, also leave out what the command needs.
 # unlisted: what the gateway does with a command on none of the lists:
@@ -43,23 +43,10 @@ const PolicyStarter = `# What AgentBus turns may do without asking. Read at the 
 # it. The gateway decides every shell command this way, for claude and codex
 # alike: forbid, then ask, then allow, then this default for what is left.
 
-allow = []          # e.g. ["go test", "make test", "git commit"]
-ask = []            # e.g. ["git push", "npm publish"] — refused until a person allows
-forbid = []         # e.g. ["git push", "git checkout"]
+allow = ["tool:*", "tool:edit"]
+ask = []
+forbid = ["tool:subagent"]
 unlisted = "ask"    # "ask" or "refuse": what a command on no list gets
-
-# edit: where a turn may create and change files without asking.
-#   "session"  its own session's folder: the session's worktree, or the folder
-#              itself when it is not in a git repo. claude gets Edit and Write
-#              there; codex runs with --sandbox workspace-write.
-#   "none"     nowhere. claude is denied Edit, Write and NotebookEdit, whatever
-#              your own settings allow; codex runs with --sandbox read-only,
-#              which also has no network.
-# A turn with edit = "none" never edits. forbid still wins. No turn may edit the
-# files of the data folder (this file, instructions.md, agents.json, the tokens)
-# with its edit tools. A command in allow that runs any code (python3, sh)
-# can still write them: allow only commands you would let change this file.
-edit = "session"
 
 # isolation: where a new session's turns run.
 #   "auto"     the fastest copy this machine can make: on macOS "copy" (one
@@ -80,13 +67,6 @@ edit = "session"
 # with isolate false always uses the folder itself.
 isolation = "auto"
 
-# subagents: whether a turn may start the agent's own subagents. Off by
-# default: agents ask other agents through AgentBus, where the work is
-# recorded. false turns them off on the command line: claude is denied its
-# Task, Agent and Workflow tools; codex runs with its multi_agent features
-# disabled. Your own settings files are never changed.
-subagents = false
-
 # home_files: files or folders under your home, such as "~/.aws/config",
 # copied into each session's own home at the start of each turn, at the same
 # place. Every session has a home of its own, so it sees nothing else of
@@ -104,18 +84,10 @@ max_jobs_per_turn = 10       # turns and reviews one turn may ask for
 max_jobs_per_tree = 30       # turns and reviews one request tree may ask for in all
 max_cost_usd_per_tree = 0.0  # USD one request tree may cost before asking stops; 0 is off
 
-# What a turn's own token (AGENTBUS_TOKEN, used by agentbus-api) may do.
-# Within its own request tree it may always read, list agents, start new
-# sessions, ask for reviews, stop work its tree asked for and rename; the
-# [limits] cap how much it asks for. No setting here lets it change this
-# file, the instructions, saved agents or tokens: those take the main token,
-# always.
+# What a turn's own token may call.
 [agent_api]
 apply = false        # apply a turn's changes to the person's folder, for a turn in its tree;
                      # off by default: only the main token applies
-tools = true         # true: give each claude and codex turn the agentbus MCP tools (MCP), which
-                     # call this API as its token may, and hide claude's own Task, Agent,
-                     # ListAgents and SendMessage. false: agents call it with agentbus-api
 
 # What a turn's agent may reach on the network. Linux closes an agent off in
 # a network namespace; macOS has none, so there the runner builds the
@@ -149,12 +121,6 @@ allow = []           # e.g. ["github.com", "registry.npmjs.org"]
 mode = "off"
 `
 
-// Edit values: where a turn may edit files without asking.
-const (
-	EditSession = "session"
-	EditNone    = "none"
-)
-
 // Unlisted values: what the gateway does with a command on none of the lists.
 const (
 	UnlistedAsk    = "ask"
@@ -170,9 +136,13 @@ const (
 // reached with agentbus-api, not tools (read-only turns and the read-tool
 // copies retired in 0.6, B12), so none is listed here.
 var StarterAllow = []string{
+	"tool:*", "tool:edit",
 	"ls", "cat", "head", "tail", "grep", "find", "wc",
 	"git status", "git diff", "git log", "git show",
 }
+
+var defaultAllow = []string{"tool:*", "tool:edit"}
+var defaultForbid = []string{"tool:subagent"}
 
 // Isolation values: where a new session's turns run.
 const (
@@ -208,14 +178,12 @@ const (
 // Once read from a store every value is filled: a key left out holds its
 // default, and a list is empty, never null.
 type Policy struct {
-	Allow     []string `toml:"allow" json:"allow" doc:"Commands agents may run without asking, for claude and codex alike: a command and its leading arguments, such as \"go test\". A command on none of the lists is held for a person (ask) unless unlisted is set to refuse."`
-	Ask       []string `toml:"ask" json:"ask" doc:"Commands that wait for a person before an agent runs them, for claude and codex alike. The gateway holds a matching call and records it for a person; an \"always\" moves the entry to allow and continues the session so the agent can run it, \"once\" lets it run that continuation turn only, a refusal records the decision. Matched like forbid, by leading words and base name. Forbid wins over ask; ask wins over allow."`
-	Forbid    []string `toml:"forbid" json:"forbid" doc:"Commands claude and codex may never run. The gateway refuses them. It matches each simple command by its leading words and the program's base name, through pipes, sh -c, sudo and env. It reads the command text, so it is not a sandbox: a command built at run time is not seen."`
+	Allow     []string `toml:"allow" json:"allow" doc:"Commands and tools agents may run without asking, for claude and codex alike: a command or tool:<name>. Absent in a PUT: default allow rules."`
+	Ask       []string `toml:"ask" json:"ask" doc:"Commands and tools that wait for a person before an agent runs them, for claude and codex alike. The gateway holds a matching call and records it for a person; an \"always\" moves the entry to allow and continues the session so the agent can run it, \"once\" lets it run that continuation turn only, a refusal records the decision. Forbid wins over ask; ask wins over allow."`
+	Forbid    []string `toml:"forbid" json:"forbid" doc:"Commands and tools agents may never run. The gateway refuses them."`
 	Unlisted  string   `toml:"unlisted" json:"unlisted,omitempty" doc:"What the gateway does with a command on none of the lists: ask (the default; it holds the command and records it for a person) or refuse (it refuses the command). Forbid, ask and allow are matched first; this decides only what is left. Absent in a PUT: ask."`
-	Edit      string   `toml:"edit" json:"edit,omitempty" doc:"Where a turn may edit files without asking: session (its own session's folder) or none. Absent in a PUT: session."`
 	Isolation string   `toml:"isolation" json:"isolation,omitempty" doc:"Where a new session's turns run: auto (copy on macOS; overlay on Linux where the runner can mount one, else copy), overlay, copy (a copy of its folder as it is now), git (a git worktree with the folder's uncommitted edits, in a repo) or none (the folder itself). On ext4, copy and the overlay's snapshot copy every byte: use xfs, btrfs, git or none for a big folder. Absent in a PUT: auto."`
-	Subagents *bool    `toml:"subagents" json:"subagents,omitempty" doc:"Whether a turn may start the agent's own subagents. Off by default: agents ask other agents through AgentBus, where the work is recorded. Absent in a PUT: false."`
-	HomeFiles []string `toml:"home_files" json:"home_files" doc:"Files or folders under the home folder, each starting with ~/, copied into each session's own home at the same place at the start of each turn, such as ~/.aws/config. Sandbox on or off. A folder's files go at any depth, 64 MiB and 10000 files in all. A file the session has is replaced when the original is newer, and kept when it is as new or newer. ~/.claude.json gives only its mcpServers, merged into the session's own .claude.json. The MCP servers copied in (claude's ~/.claude.json, codex's ~/.codex/config.toml) load on every turn, reviews included (read-only retired in 0.6), and claude and agy may call them without asking. A vendor sign-in file (claude's .credentials.json, codex's auth.json, agy's token) is refused, and left out of a folder listed. Before 0.5.2 this was sandbox.read, which still reads as home_files. Absent in a PUT: none."`
+	HomeFiles []string `toml:"home_files" json:"home_files" doc:"Files or folders under the home folder, each starting with ~/, copied into each session's own home at the same place at the start of each turn, such as ~/.aws/config."`
 	Limits    Limits   `toml:"limits" json:"limits" doc:"The limits on work agents ask for."`
 	AgentAPI  AgentAPI `toml:"agent_api" json:"agent_api" doc:"What a turn's own token may call."`
 	Network   Network  `toml:"network" json:"network" doc:"What a turn's agent may reach on the network (on Linux by its network namespace, on macOS by the session's sandbox)."`
@@ -224,6 +192,18 @@ type Policy struct {
 	// where and fix say, in a turn's refusal, where the policy came from and
 	// what to do: set by the store that read it (Error).
 	where, fix string
+
+	legacyTools     *bool
+	legacySubagents *bool
+	legacyEdit      *string
+}
+
+// AgentAPI says what a turn token may call ([agent_api]). A pointer is a key
+// left out; once read from a store each is set. Within its request tree a
+// turn token may always read, list agents, start, review, stop and rename
+// (0.5.2 retired the switches for those: upgradeSteps).
+type AgentAPI struct {
+	Apply *bool `toml:"apply" json:"apply" doc:"Apply a turn's changes to the person's folder, for a turn of a session in its request tree. Off by default: only the main token applies. Absent in a PUT: false."`
 }
 
 // Limits are the caps on work agents ask for ([limits]). A pointer is a key
@@ -233,15 +213,6 @@ type Limits struct {
 	MaxJobsPerTurn    *int     `toml:"max_jobs_per_turn" json:"max_jobs_per_turn,omitempty" doc:"Turns and reviews one turn may ask for. Absent in a PUT: 10."`
 	MaxJobsPerTree    *int     `toml:"max_jobs_per_tree" json:"max_jobs_per_tree,omitempty" doc:"Turns and reviews one request tree may ask for in all. Absent in a PUT: 30."`
 	MaxCostUSDPerTree *float64 `toml:"max_cost_usd_per_tree" json:"max_cost_usd_per_tree,omitempty" doc:"USD one request tree may cost before asking stops; 0 is off. Absent in a PUT: 0."`
-}
-
-// AgentAPI says what a turn token may call ([agent_api]). A pointer is a key
-// left out; once read from a store each is set. Within its request tree a
-// turn token may always read, list agents, start, review, stop and rename
-// (0.5.2 retired the switches for those: upgradeSteps).
-type AgentAPI struct {
-	Apply *bool `toml:"apply" json:"apply,omitempty" doc:"Apply a turn's changes to the person's folder, for a turn of a session in its request tree. Off by default: only the main token applies. Absent in a PUT: false."`
-	Tools *bool `toml:"tools" json:"tools,omitempty" doc:"Give each turn the agentbus MCP tools over MCP (POST /api/v0/mcp), which call this API as its token may. claude's own Task, Agent, ListAgents and SendMessage tools are hidden then. false: agents call the API with agentbus-api only. Absent in a PUT: true."`
 }
 
 // Network says what a turn's agent may reach ([network]). Read by the
@@ -276,25 +247,29 @@ func FirstInstallPolicy() Policy {
 
 // fill sets every value left out to its default.
 func (p *Policy) fill() {
-	for _, l := range []*[]string{&p.Allow, &p.Ask, &p.Forbid, &p.HomeFiles, &p.Network.Allow} {
+	if p.Allow == nil {
+		p.Allow = append([]string(nil), defaultAllow...)
+	}
+	if p.Forbid == nil {
+		if !slices.Contains(p.Allow, "tool:subagent") {
+			p.Forbid = append([]string(nil), defaultForbid...)
+		} else {
+			p.Forbid = []string{}
+		}
+	}
+	if p.Ask == nil {
+		p.Ask = []string{}
+	}
+	for _, l := range []*[]string{&p.HomeFiles, &p.Network.Allow} {
 		if *l == nil {
 			*l = []string{}
 		}
-	}
-	if p.Edit == "" {
-		p.Edit = EditSession
 	}
 	if p.Unlisted == "" {
 		p.Unlisted = UnlistedAsk
 	}
 	if p.Isolation == "" {
 		p.Isolation = IsolationAuto
-	}
-	// Off from 0.5.2 (his call, 2026-11-13): agents ask other agents through
-	// AgentBus, recorded, not through their own subagents.
-	if p.Subagents == nil {
-		off := false
-		p.Subagents = &off
 	}
 	setInt := func(v **int, d int) {
 		if *v == nil {
@@ -314,17 +289,9 @@ func (p *Policy) fill() {
 	if p.Sandbox.Mode == "" {
 		p.Sandbox.Mode = SandboxOff
 	}
-	// Only the main token applies unless the person says so (defaults
-	// version 2). Version 1 writes its own value out (defaultsV1).
 	if p.AgentAPI.Apply == nil {
 		off := false
 		p.AgentAPI.Apply = &off
-	}
-	// On from 0.5.2 (his call, 2026-11-13), with subagents off: the agents
-	// ask through AgentBus's own tools.
-	if p.AgentAPI.Tools == nil {
-		on := true
-		p.AgentAPI.Tools = &on
 	}
 }
 
@@ -332,9 +299,6 @@ func (p *Policy) fill() {
 // checks the folders' shape only: whether each exists is for the machine
 // that runs the turn (Resolve).
 func (p *Policy) Check() error {
-	if p.Edit != "" && p.Edit != EditSession && p.Edit != EditNone {
-		return fmt.Errorf("edit must be %q or %q", EditSession, EditNone)
-	}
 	if p.Unlisted != "" && p.Unlisted != UnlistedAsk && p.Unlisted != UnlistedRefuse {
 		return fmt.Errorf("unlisted must be %q or %q", UnlistedAsk, UnlistedRefuse)
 	}
@@ -418,9 +382,21 @@ func parsePolicy(b []byte) (Policy, error) {
 	if err := movedOver(&p, b, md); err != nil {
 		return Policy{}, err
 	}
-	extra := slices.DeleteFunc(md.Undecoded(), func(k toml.Key) bool { return slices.Contains(retiredKeys, strings.Join(k, ".")) })
+	extra := slices.DeleteFunc(md.Undecoded(), func(k toml.Key) bool {
+		if slices.Contains(retiredKeys, strings.Join(k, ".")) {
+			return true
+		}
+		if len(k) == 1 {
+			for _, rk := range retiredKeys {
+				if t, _, ok := strings.Cut(rk, "."); ok && t == k[0] {
+					return true
+				}
+			}
+		}
+		return false
+	})
 	if len(extra) > 0 {
-		return Policy{}, fmt.Errorf("unknown key %s; the keys are allow, ask, forbid, unlisted, edit, isolation, subagents, home_files, [limits], [agent_api], [network] and [sandbox] (see the README)", strconv.Quote(extra[0].String()))
+		return Policy{}, fmt.Errorf("unknown key %s; the keys are allow, ask, forbid, unlisted, isolation, home_files, [limits], [agent_api], [network] and [sandbox] (see the README)", strconv.Quote(extra[0].String()))
 	}
 	if err := p.Check(); err != nil {
 		return Policy{}, err
@@ -430,7 +406,7 @@ func parsePolicy(b []byte) (Policy, error) {
 
 // wrongTypeTOML is a permissions.toml's error for a value of the wrong type.
 const wrongTypeTOML = "a value has the wrong type: allow, ask, forbid and home_files are lists of strings, such as [\"go test\"]; " +
-	"edit, unlisted, isolation, contain and mode are strings; [network] allow is a list of strings; subagents is true or false; the [limits] are numbers; the [agent_api] switches are true or false"
+	"unlisted, isolation, contain and mode are strings; [network] allow is a list of strings; the [limits] are numbers; the [agent_api] switches are true or false"
 
 // over is p, read with the keys it leaves out unset, on top of base: each key
 // p leaves out takes base's value, and the result is filled.
@@ -439,7 +415,12 @@ func (p Policy) over(base Policy) (Policy, error) {
 	if err != nil {
 		return Policy{}, err
 	}
-	return applyOverlay(base, set)
+	res, err := applyOverlay(base, set)
+	if err != nil {
+		return Policy{}, err
+	}
+	res.applyLegacy(p.legacyTools, p.legacySubagents, p.legacyEdit)
+	return res, nil
 }
 
 // setKeys are the keys p sets, by dotted name, read with the keys it leaves
@@ -487,7 +468,10 @@ func withoutRetired(b []byte) []byte {
 			if raw, found := top[t]; found && json.Unmarshal(raw, &inner) == nil {
 				if _, found := inner[sub]; found {
 					delete(inner, sub)
-					if out, err := json.Marshal(inner); err == nil {
+					if len(inner) == 0 {
+						delete(top, t)
+						changed = true
+					} else if out, err := json.Marshal(inner); err == nil {
 						top[t], changed = out, true
 					}
 				}
@@ -518,7 +502,39 @@ func DecodePolicy(b []byte) (Policy, error) {
 		return Policy{}, err
 	}
 	p.fill()
+	p.applyLegacy(p.legacyTools, p.legacySubagents, p.legacyEdit)
 	return p, nil
+}
+
+func (p *Policy) applyLegacy(tools *bool, subagents *bool, edit *string) {
+	if tools != nil {
+		if *tools {
+			p.Allow = addRule(p.Allow, "tool:*")
+			p.Forbid = removeRule(p.Forbid, "tool:*")
+		} else {
+			p.Forbid = addRule(p.Forbid, "tool:*")
+			p.Allow = removeRule(p.Allow, "tool:*")
+		}
+	}
+	if subagents != nil {
+		if *subagents {
+			p.Allow = addRule(p.Allow, "tool:subagent")
+			p.Forbid = removeRule(p.Forbid, "tool:subagent")
+		} else {
+			p.Forbid = addRule(p.Forbid, "tool:subagent")
+			p.Allow = removeRule(p.Allow, "tool:subagent")
+		}
+	}
+	if edit != nil {
+		if *edit == "session" {
+			p.Allow = addRule(p.Allow, "tool:edit")
+			p.Ask = removeRule(p.Ask, "tool:edit")
+			p.Forbid = removeRule(p.Forbid, "tool:edit")
+		} else if *edit == "none" {
+			p.Ask = addRule(p.Ask, "tool:edit")
+			p.Allow = removeRule(p.Allow, "tool:edit")
+		}
+	}
 }
 
 // DecodePolicyChange reads a change of the policy sent as JSON, as PATCH
@@ -530,7 +546,15 @@ func DecodePolicyChange(b []byte) (Policy, error) {
 	if t := bytes.TrimLeft(b, " \t\r\n"); len(t) == 0 || t[0] != '{' {
 		return Policy{}, errors.New("the body must be one JSON object: the policy")
 	}
-	b = withoutRetired(withMoved(b))
+	moved, err := withMoved(b)
+	if err != nil {
+		return Policy{}, err
+	}
+	legTools, legSubagents, legEdit, err := extractLegacySwitches(moved)
+	if err != nil {
+		return Policy{}, err
+	}
+	b = withoutRetired(moved)
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&p); err != nil {
@@ -539,11 +563,11 @@ func DecodePolicyChange(b []byte) (Policy, error) {
 		switch {
 		case errors.As(err, &te) && te.Field != "":
 			return Policy{}, fmt.Errorf("%s has the wrong type: allow, ask, forbid and home_files are lists of strings; "+
-				"edit, unlisted, isolation, contain and mode are strings; network.allow is a list of strings; subagents and the agent_api switches are true or false; the limits are numbers", te.Field)
+				"unlisted, isolation, contain and mode are strings; network.allow is a list of strings; the limits are numbers", te.Field)
 		case errors.As(err, &se):
 			return Policy{}, errors.New("the body is not valid JSON")
 		case strings.HasPrefix(err.Error(), "json: unknown field "):
-			return Policy{}, fmt.Errorf("unknown key %s; the keys are allow, ask, forbid, unlisted, edit, isolation, subagents, home_files, limits, agent_api, network and sandbox",
+			return Policy{}, fmt.Errorf("unknown key %s; the keys are allow, ask, forbid, unlisted, isolation, home_files, limits, agent_api, network and sandbox",
 				strings.TrimPrefix(err.Error(), "json: unknown field "))
 		}
 		return Policy{}, errors.New("the body must be one JSON object: the policy")
@@ -551,6 +575,9 @@ func DecodePolicyChange(b []byte) (Policy, error) {
 	if d.More() {
 		return Policy{}, errors.New("the body must be one JSON object: the policy")
 	}
+	p.legacyTools = legTools
+	p.legacySubagents = legSubagents
+	p.legacyEdit = legEdit
 	if err := p.Check(); err != nil {
 		return Policy{}, err
 	}
@@ -559,7 +586,7 @@ func DecodePolicyChange(b []byte) (Policy, error) {
 
 // starterLine is a key's line of PolicyStarter: the key, the value and an
 // optional comment.
-var starterLine = regexp.MustCompile(`^([a-z_]+) = (\S+)( +#.*)?$`)
+var starterLine = regexp.MustCompile(`^([a-z_]+) = (.*?)((?: {2,}|\t+)#.*)?$`)
 
 // FormatPolicy is p as permissions.toml, in PolicyStarter's layout with its
 // comments, and each key's value set to p's. The person's own comments in a
@@ -567,11 +594,11 @@ var starterLine = regexp.MustCompile(`^([a-z_]+) = (\S+)( +#.*)?$`)
 func FormatPolicy(p Policy) []byte {
 	p.fill()
 	values := map[string]any{
-		"allow": p.Allow, "ask": p.Ask, "forbid": p.Forbid, "unlisted": p.Unlisted, "edit": p.Edit, "isolation": p.Isolation,
-		"subagents": *p.Subagents, "home_files": p.HomeFiles,
+		"allow": p.Allow, "ask": p.Ask, "forbid": p.Forbid, "unlisted": p.Unlisted, "isolation": p.Isolation,
+		"home_files":       p.HomeFiles,
 		"limits.max_depth": *p.Limits.MaxDepth, "limits.max_jobs_per_turn": *p.Limits.MaxJobsPerTurn,
 		"limits.max_jobs_per_tree": *p.Limits.MaxJobsPerTree, "limits.max_cost_usd_per_tree": *p.Limits.MaxCostUSDPerTree,
-		"agent_api.apply": *p.AgentAPI.Apply, "agent_api.tools": *p.AgentAPI.Tools,
+		"agent_api.apply": *p.AgentAPI.Apply,
 		"network.contain": p.Network.Contain, "network.allow": p.Network.Allow,
 		"sandbox.mode": p.Sandbox.Mode,
 	}
@@ -691,7 +718,7 @@ func resolveFolder(f, home string) (string, error) {
 }
 
 // checkCommand accepts a command and its leading arguments, such as
-// "go test". Claude Code's rule is Bash(<command>:*), and its lists are
+// "go test", or a tool rule ("tool:*", "tool:edit"). Claude Code's rule is Bash(<command>:*), and its lists are
 // comma-joined, so a comma or a parenthesis would change the rule. A star, as
 // in "go test:*", or two spaces in a row would make a rule that never matches
 // (found in review), so they are refused rather than passed on. A colon is
@@ -703,16 +730,34 @@ func checkCommand(c string) error {
 		return errors.New("is empty")
 	case c != strings.TrimSpace(c):
 		return errors.New("starts or ends with a space")
-	case strings.HasPrefix(c, "-"):
-		return errors.New("starts with -")
-	case strings.ContainsAny(c, ",()"):
-		return errors.New("has a comma or a parenthesis")
-	case strings.Contains(c, "*"):
-		return errors.New("has a star; write the command alone, such as \"go test\"")
-	case strings.Contains(c, "  "):
-		return errors.New("has two spaces in a row")
 	case strings.ContainsFunc(c, isControl):
 		return errors.New("has a control character")
+	case strings.ContainsAny(c, ",()"):
+		return errors.New("has a comma or a parenthesis")
+	case strings.Contains(c, "  "):
+		return errors.New("has two spaces in a row")
+	}
+	if strings.HasPrefix(c, "tool:") {
+		name := strings.TrimPrefix(c, "tool:")
+		if name == "" {
+			return errors.New("is empty")
+		}
+		if strings.HasPrefix(name, "-") {
+			return errors.New("starts with -")
+		}
+		if name != "*" && strings.Contains(name, "*") {
+			return errors.New("has a star; write tool:* or tool:<name>")
+		}
+		if strings.Contains(name, " ") {
+			return errors.New("tool name cannot contain spaces")
+		}
+		return nil
+	}
+	switch {
+	case strings.HasPrefix(c, "-"):
+		return errors.New("starts with -")
+	case strings.Contains(c, "*"):
+		return errors.New("has a star; write the command alone, such as \"go test\"")
 	}
 	return nil
 }

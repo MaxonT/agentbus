@@ -230,7 +230,24 @@ func (d *DB) writeSteps() (kept, removed, moved []string, err error) {
 		for k, v := range s.overlay {
 			o[k] = v
 		}
-		for _, st := range upgradeSteps[n:] {
+		var modified []string
+		for idx := n; idx < len(upgradeSteps); idx++ {
+			if idx == stepSwitchesToRules {
+				cModified, cRemoved := convert06Switches(o)
+				for _, m := range cModified {
+					if !slices.Contains(modified, m) {
+						modified = append(modified, m)
+					}
+				}
+				for _, r := range cRemoved {
+					if i := slices.Index(kept, r); i >= 0 {
+						kept = slices.Delete(kept, i, i+1)
+					} else if !slices.Contains(removed, r) {
+						removed = append(removed, r)
+					}
+				}
+			}
+			st := upgradeSteps[idx]
 			_, set := o[st.Key]
 			switch {
 			case st.Retired && set:
@@ -250,7 +267,7 @@ func (d *DB) writeSteps() (kept, removed, moved []string, err error) {
 				kept = append(kept, st.Key)
 			}
 		}
-		if keys := append(append(slices.Clone(kept), removed...), moved...); len(keys) > 0 {
+		if keys := append(append(append(slices.Clone(kept), removed...), moved...), modified...); len(keys) > 0 {
 			if err := putSetting(tx, SettingPermissions, o, d.now()); err != nil {
 				return fail(err)
 			}

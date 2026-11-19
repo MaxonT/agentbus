@@ -1,6 +1,10 @@
 package gateway
 
-import "strings"
+import (
+	"path"
+	"slices"
+	"strings"
+)
 
 // B6: the gate's second checkpoint. The command gate (command.go) decides a
 // shell command the model wrote; DecideTool decides a tool call the agent made
@@ -17,18 +21,48 @@ import "strings"
 // that do something, such as ask_agent, carry no rule and so are asked by
 // default; reading the record is the API's own routes, not tools (B12).
 
+func matchExactTool(rule, target, bare string) bool {
+	f := strings.Fields(rule)
+	if len(f) != 1 {
+		return false
+	}
+	r := f[0]
+	if target == "tool:*" {
+		return r == "tool:*"
+	}
+	if r == target || r == bare {
+		return true
+	}
+	ruleBase := path.Base(strings.TrimPrefix(r, "tool:"))
+	return ruleBase == bare
+}
+
 // DecideTool decides one tool call by the person's rules and the tool's name.
 // A forbid, ask or allow entry naming the tool wins; with no rule the call is
 // held for a person (Ask), never allowed silently. rule is the ask or forbid
 // entry that drove an Ask or a Refuse, "" when no rule matched.
 func DecideTool(r Rules, name string) (Decision, string) {
-	// The SAME core the command gate uses, with the no-rule default fixed at Ask
-	// for a tool. A tool name has no spaces, so it is one word and matchWords
-	// compares it whole (by base name) against each rule's words: an exact-name
-	// match, never a command's prefix match by accident.
-	rr := r
-	rr.Unlisted = Ask
-	return decideWords(rr, []string{name}, false)
+	bare := strings.TrimPrefix(name, "tool:")
+	target := "tool:" + bare
+	for _, rule := range r.Forbid {
+		if matchExactTool(rule, target, bare) {
+			return Refuse, rule
+		}
+	}
+	for _, rule := range r.Ask {
+		if matchExactTool(rule, target, bare) {
+			return Ask, rule
+		}
+	}
+	for _, rule := range r.Allow {
+		if matchExactTool(rule, target, bare) {
+			return Allow, ""
+		}
+	}
+	if target != "tool:*" && slices.Contains(r.Forbid, "tool:*") {
+		return Refuse, "tool:*"
+	}
+	return Ask, ""
 }
 
 // MatchingRules are every entry of list the tool name matches, by the SAME
@@ -39,8 +73,10 @@ func DecideTool(r Rules, name string) (Decision, string) {
 // again. The order is list's.
 func MatchingRules(list []string, name string) []string {
 	var out []string
+	bare := strings.TrimPrefix(name, "tool:")
+	target := "tool:" + bare
 	for _, r := range list {
-		if matchWords(strings.Fields(r), []string{name}) {
+		if matchExactTool(r, target, bare) || (target != "tool:*" && r == "tool:*") {
 			out = append(out, r)
 		}
 	}

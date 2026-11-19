@@ -430,8 +430,6 @@ func toolGateEnv(t *testing.T, timeout time.Duration, max int, shape func(*setti
 	t.Helper()
 	dir := t.TempDir()
 	p := settings.FirstInstallPolicy() // a fresh install's policy
-	tools := true
-	p.AgentAPI.Tools = &tools
 	if shape != nil {
 		shape(&p)
 	}

@@ -94,7 +94,7 @@ func TestSettingsPolicyReadWrite(t *testing.T) {
 
 	// Nothing changed yet: every default.
 	resp, out := send(t, e, "GET", "/api/v0/settings/permissions", "", "")
-	if resp.StatusCode != 200 || !strings.Contains(out, `"edit":"session"`) {
+	if resp.StatusCode != 200 || !strings.Contains(out, `"tool:edit"`) {
 		t.Fatalf("GET with nothing changed: %d %s", resp.StatusCode, out)
 	}
 	v0 := resp.Header.Get("ETag")
@@ -115,11 +115,11 @@ func TestSettingsPolicyReadWrite(t *testing.T) {
 	}
 	// A value out of range names its key.
 	for _, tc := range []struct{ body, want string }{
-		{`{"edit":"everywhere"}`, "edit must be"},
+		{`{"isolation":"everywhere"}`, "isolation must be"},
 		{`{"limits":{"max_depth":-1}}`, "max_depth must be 0 or more"},
 		{`{"forbid":"git push"}`, "forbid has the wrong type"},
 		{`{"allow":["go test:*"]}`, `allow entry "go test:*" has a star`},
-		{`{"agent_api":{"apply":"yes"}}`, "agent_api.apply has the wrong type"},
+		{`{"unlisted":"yes"}`, "unlisted must be"},
 		{`{"allowed":[]}`, `unknown key "allowed"`},
 		{`[]`, "one JSON object"},
 		{`null`, "one JSON object"},
@@ -246,7 +246,7 @@ func TestSettingsDefaultsApplyOff(t *testing.T) {
 		if resp.StatusCode != 200 || json.Unmarshal([]byte(out), &p) != nil {
 			t.Fatalf("GET permissions: %d %s", resp.StatusCode, out)
 		}
-		return *p.AgentAPI.Apply, strings.Trim(resp.Header.Get("ETag"), `"`)
+		return p.AgentAPI.Apply != nil && *p.AgentAPI.Apply, strings.Trim(resp.Header.Get("ETag"), `"`)
 	}
 	on, etag := apply()
 	if on {
@@ -254,11 +254,14 @@ func TestSettingsDefaultsApplyOff(t *testing.T) {
 	}
 	// The person turns it on.
 	_, out := send(t, e, "GET", "/api/v0/settings/permissions", "", "")
-	body := strings.Replace(out, `"apply":false`, `"apply":true`, 1)
-	if body == out {
-		t.Fatalf("no apply key in %s", out)
+	var p settings.Policy
+	if err := json.Unmarshal([]byte(out), &p); err != nil {
+		t.Fatal(err)
 	}
-	if resp, out := send(t, e, "PUT", "/api/v0/settings/permissions", `"`+etag+`"`, body); resp.StatusCode != 200 {
+	onBool := true
+	p.AgentAPI.Apply = &onBool
+	b, _ := json.Marshal(p)
+	if resp, out := send(t, e, "PUT", "/api/v0/settings/permissions", `"`+etag+`"`, string(b)); resp.StatusCode != 200 {
 		t.Fatalf("PUT apply on: %d %s", resp.StatusCode, out)
 	}
 	if on, _ := apply(); !on {
@@ -292,20 +295,20 @@ func TestSettingsTurnsTokenRefused(t *testing.T) {
 // its value, and the reply is the whole policy, filled.
 func TestSettingsPolicyPatch(t *testing.T) {
 	e, _ := settingsEnv(t)
-	if resp, out := send(t, e, "PATCH", "/api/v0/settings/permissions", "", `{"subagents":true}`); resp.StatusCode != 428 {
+	if resp, out := send(t, e, "PATCH", "/api/v0/settings/permissions", "", `{"unlisted":"refuse"}`); resp.StatusCode != 428 {
 		t.Fatalf("PATCH without If-Match: %d %s", resp.StatusCode, out)
 	}
 	resp, _ := send(t, e, "PUT", "/api/v0/settings/permissions", "*", `{"forbid":["git push"]}`)
 	v1 := resp.Header.Get("ETag")
-	if resp, out := send(t, e, "PATCH", "/api/v0/settings/permissions", v1, `{"edit":"everywhere"}`); resp.StatusCode != 400 || !strings.Contains(out, "edit") {
+	if resp, out := send(t, e, "PATCH", "/api/v0/settings/permissions", v1, `{"isolation":"everywhere"}`); resp.StatusCode != 400 || !strings.Contains(out, "isolation") {
 		t.Fatalf("PATCH out of range: %d %s", resp.StatusCode, out)
 	}
-	resp, out := send(t, e, "PATCH", "/api/v0/settings/permissions", v1, `{"subagents":true,"network":{"allow":["github.com"]}}`)
-	if resp.StatusCode != 200 || !strings.Contains(out, `"forbid":["git push"]`) || !strings.Contains(out, `"subagents":true`) ||
+	resp, out := send(t, e, "PATCH", "/api/v0/settings/permissions", v1, `{"network":{"allow":["github.com"]}}`)
+	if resp.StatusCode != 200 || !strings.Contains(out, `"forbid":["git push"]`) ||
 		!strings.Contains(out, `"allow":["github.com"]`) || !strings.Contains(out, `"contain":"off"`) || !strings.Contains(out, `"max_depth":2`) {
 		t.Fatalf("PATCH: %d %s", resp.StatusCode, out)
 	}
-	if resp, _ := send(t, e, "PATCH", "/api/v0/settings/permissions", v1, `{"subagents":false}`); resp.StatusCode != 412 {
+	if resp, _ := send(t, e, "PATCH", "/api/v0/settings/permissions", v1, `{"unlisted":"ask"}`); resp.StatusCode != 412 {
 		t.Fatalf("PATCH with a stale version: %d", resp.StatusCode)
 	}
 }

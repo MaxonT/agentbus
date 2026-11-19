@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"os"
+	"strings"
 )
 
 // agy is the Antigravity CLI, Google's agent harness for Gemini.
@@ -141,6 +142,7 @@ func (agy) RelayHome(placeholder string) map[string][]byte {
 
 // Edit: agy's permission rules hold paths, as Claude Code's do; a name that
 // cannot go in one gets no edit rule.
+// Temporary glue: mapping tool:edit to agy's edit rules.
 func (agy) Edit(folders, protect []string) ([]string, string) {
 	for _, f := range folders {
 		if !ruleSafe(f) {
@@ -180,18 +182,28 @@ func (agy) ResumeID(line []byte, current string) string {
 
 // Refuse: the gateway's guard does not read the Gemini format, so forbid
 // could only be agy's own prefix rule, which a command in another shape
-// passes.
+// passes. Tool and API rules are checked elsewhere (control and tool gate).
 func (agy) Refuse(t Turn) string {
-	if len(t.Forbid) > 0 {
+	hasShellRules := func(list []string) bool {
+		for _, r := range list {
+			f := strings.Fields(r)
+			if len(f) > 0 && !strings.HasPrefix(f[0], "tool:") && !strings.HasPrefix(f[0], "api:") {
+				return true
+			}
+		}
+		return false
+	}
+	if hasShellRules(t.Forbid) {
 		return "forbid in permissions.toml is not enforced for agy yet; remove it, or use " + "claude or codex"
 	}
-	if len(t.Ask) > 0 {
+	if hasShellRules(t.Ask) {
 		return "ask in permissions.toml is not enforced for agy yet; remove it, or use " + "claude or codex"
 	}
 	return ""
 }
 
 // AgySubagentsUnkept is what a turn with subagents off records on agy.
+// Temporary glue: mapping tool:subagent to agy subagents recording.
 const AgySubagentsUnkept = "agy cannot turn its own subagents off, so subagents = false does not apply to this turn"
 
 // Unkept: agy has no switch that turns its subagents off (a deny rule on
@@ -244,7 +256,7 @@ func agySettings(t Turn) string {
 		allow = append(allow, "write_file("+f+")", "edit_file("+f+")")
 	}
 	for _, c := range t.Allow {
-		if ruleSafe(c) {
+		if !strings.HasPrefix(c, "tool:") && !strings.HasPrefix(c, "api:") && ruleSafe(c) {
 			allow = append(allow, "command("+c+")")
 		}
 	}

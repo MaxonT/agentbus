@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -433,6 +434,47 @@ func (d *DB) ChangePolicy(change Policy, match Version) (Policy, Version, error)
 				keys = append(keys, k)
 			}
 			o[k] = val
+		}
+		if change.legacyTools != nil || change.legacySubagents != nil || change.legacyEdit != nil {
+			mergedP, err := applyOverlay(defaultPolicy(), o)
+			if err != nil {
+				return nil, &Invalid{Why: err.Error()}
+			}
+			mergedP.applyLegacy(change.legacyTools, change.legacySubagents, change.legacyEdit)
+			defP := defaultPolicy()
+			if !slices.Equal(mergedP.Allow, defP.Allow) {
+				putRuleList(o, "allow", mergedP.Allow)
+				if !slices.Contains(keys, "allow") {
+					keys = append(keys, "allow")
+				}
+			} else if _, had := o["allow"]; had {
+				delete(o, "allow")
+				if !slices.Contains(keys, "allow") {
+					keys = append(keys, "allow")
+				}
+			}
+			if !slices.Equal(mergedP.Forbid, defP.Forbid) {
+				putRuleList(o, "forbid", mergedP.Forbid)
+				if !slices.Contains(keys, "forbid") {
+					keys = append(keys, "forbid")
+				}
+			} else if _, had := o["forbid"]; had {
+				delete(o, "forbid")
+				if !slices.Contains(keys, "forbid") {
+					keys = append(keys, "forbid")
+				}
+			}
+			if !slices.Equal(mergedP.Ask, defP.Ask) {
+				putRuleList(o, "ask", mergedP.Ask)
+				if !slices.Contains(keys, "ask") {
+					keys = append(keys, "ask")
+				}
+			} else if _, had := o["ask"]; had {
+				delete(o, "ask")
+				if !slices.Contains(keys, "ask") {
+					keys = append(keys, "ask")
+				}
+			}
 		}
 		p, err := applyOverlay(defaultPolicy(), o)
 		if err != nil {

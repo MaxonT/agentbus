@@ -19,13 +19,11 @@ func load(path, home string) (Policy, error) {
 	return p.Resolve(home)
 }
 
-// samePolicy says p and q have the same edit rule, limits and switches.
+// samePolicy says p and q have the same limits and isolation.
 func samePolicy(p, q Policy) bool {
 	l, m := p.Limits, q.Limits
-	a, b := p.AgentAPI, q.AgentAPI
-	return p.Edit == q.Edit && *p.Subagents == *q.Subagents && *l.MaxDepth == *m.MaxDepth && *l.MaxJobsPerTurn == *m.MaxJobsPerTurn &&
-		*l.MaxJobsPerTree == *m.MaxJobsPerTree && *l.MaxCostUSDPerTree == *m.MaxCostUSDPerTree &&
-		*a.Apply == *b.Apply && *a.Tools == *b.Tools
+	return p.Isolation == q.Isolation && *l.MaxDepth == *m.MaxDepth && *l.MaxJobsPerTurn == *m.MaxJobsPerTurn &&
+		*l.MaxJobsPerTree == *m.MaxJobsPerTree && *l.MaxCostUSDPerTree == *m.MaxCostUSDPerTree
 }
 
 func writePerm(t *testing.T, path, s string) {
@@ -44,19 +42,19 @@ func TestReadPolicy(t *testing.T) {
 
 	// A missing file is empty lists and every default.
 	def := DefaultPolicy()
-	if p, err := load(path, home); err != nil || len(p.Allow)+len(p.Forbid) != 0 || !samePolicy(p, def) {
+	if p, err := load(path, home); err != nil || !slices.Equal(p.Allow, def.Allow) || !slices.Equal(p.Forbid, def.Forbid) || !samePolicy(p, def) {
 		t.Fatalf("missing file: %+v %v", p, err)
 	}
-	if def.Edit != EditSession || *def.Limits.MaxDepth != 2 || *def.Limits.MaxJobsPerTurn != 10 || *def.Limits.MaxJobsPerTree != 30 ||
-		*def.Limits.MaxCostUSDPerTree != 0 || *def.AgentAPI.Apply {
-		t.Fatalf("defaults: %+v %+v", def.Limits, def.AgentAPI)
+	if *def.Limits.MaxDepth != 2 || *def.Limits.MaxJobsPerTurn != 10 || *def.Limits.MaxJobsPerTree != 30 ||
+		*def.Limits.MaxCostUSDPerTree != 0 {
+		t.Fatalf("defaults: %+v", def.Limits)
 	}
-	if *def.Subagents || !*def.AgentAPI.Tools {
-		t.Fatal("subagents are on or tools off by default")
+	if !slices.Equal(def.Allow, []string{"tool:*", "tool:edit"}) || !slices.Equal(def.Forbid, []string{"tool:subagent"}) {
+		t.Fatalf("default rules: allow %v forbid %v", def.Allow, def.Forbid)
 	}
-	// The starter parses, with empty lists, and writes out every default.
+	// The starter parses and writes out every default.
 	writePerm(t, path, PolicyStarter)
-	if p, err := load(path, home); err != nil || len(p.Allow)+len(p.Forbid) != 0 || !samePolicy(p, def) {
+	if p, err := load(path, home); err != nil || !slices.Equal(p.Allow, def.Allow) || !slices.Equal(p.Forbid, def.Forbid) || !samePolicy(p, def) {
 		t.Fatalf("starter: %+v %v", p, err)
 	}
 	// An older file, with the lists only, keeps its lists and gets the
@@ -65,14 +63,14 @@ func TestReadPolicy(t *testing.T) {
 	if p, err := load(path, home); err != nil || !slices.Equal(p.Allow, []string{"go test"}) || !samePolicy(p, def) {
 		t.Fatalf("older file: %+v %v", p, err)
 	}
-	// The [agent_api] switches 0.5.2 retired still read, and are left out.
+	// Retired switches still read, and are left out.
 	writePerm(t, path, "edit = \"none\"\n[limits]\nmax_depth = 0\nmax_cost_usd_per_tree = 0.25\n[agent_api]\nscope = \"session\"\nstart = false\nrename = false\napply = true\n")
-	if p, err := load(path, home); err != nil || p.Edit != EditNone || *p.Limits.MaxDepth != 0 || *p.Limits.MaxJobsPerTurn != 10 ||
-		*p.Limits.MaxCostUSDPerTree != 0.25 || !*p.AgentAPI.Apply || !*p.AgentAPI.Tools {
+	if p, err := load(path, home); err != nil || *p.Limits.MaxDepth != 0 || *p.Limits.MaxJobsPerTurn != 10 ||
+		*p.Limits.MaxCostUSDPerTree != 0.25 {
 		t.Fatalf("set values: %+v %v", p, err)
 	}
 	writePerm(t, path, "subagents = false\n")
-	if p, err := load(path, home); err != nil || *p.Subagents || p.Edit != EditSession {
+	if p, err := load(path, home); err != nil {
 		t.Fatalf("subagents = false: %+v %v", p, err)
 	}
 	// Commands and comments.
@@ -105,14 +103,14 @@ func TestReadPolicy(t *testing.T) {
 		{"rule syntax in a command", "allow = [\"go test:*\"]\n", "has a star"},
 		{"two spaces", "allow = [\"go  test\"]\n", "two spaces in a row"},
 		{"tab", "allow = [\"go\\ttest\"]\n", "control character"},
-		{"edit unknown", "edit = \"everywhere\"\n", `edit must be "session" or "none"`},
-		{"edit not a string", "edit = true\n", "wrong type"},
+		{"isolation unknown", "isolation = \"everywhere\"\n", `isolation must be`},
+		{"isolation not a string", "isolation = true\n", "wrong type"},
+		{"unlisted unknown", "unlisted = \"everywhere\"\n", `unlisted must be`},
+		{"unlisted not a string", "unlisted = true\n", "wrong type"},
 		{"limit negative", "[limits]\nmax_depth = -1\n", "max_depth must be 0 or more"},
 		{"limit not a number", "[limits]\nmax_jobs_per_turn = \"10\"\n", "wrong type"},
 		{"cost negative", "[limits]\nmax_cost_usd_per_tree = -0.5\n", "max_cost_usd_per_tree must be 0"},
 		{"unknown limit", "[limits]\nmax_rounds = 2\n", `unknown key "limits.max_rounds"`},
-		{"subagents not a bool", "subagents = \"no\"\n", "subagents is true or false"},
-		{"switch not a bool", "[agent_api]\napply = \"no\"\n", "wrong type"},
 		{"unknown switch", "[agent_api]\nwrite_permissions = true\n", `unknown key "agent_api.write_permissions"`},
 	} {
 		writePerm(t, path, tc.file)
@@ -287,7 +285,7 @@ func TestCommandsKeyRetired(t *testing.T) {
 		}
 	}
 	p, err := DecodePolicy([]byte(`{"commands":false,"subagents":false}`))
-	if err != nil || *p.Subagents {
+	if err != nil {
 		t.Fatalf("JSON with commands: %+v %v", p, err)
 	}
 	for _, src := range []string{"subscriptions_on_runners = \"own\"\n", "subscriptions_on_runners = \"off\"\n"} {
@@ -326,6 +324,138 @@ func TestHomeFilesSignInRefused(t *testing.T) {
 		}
 		if _, err := ParsePolicy([]byte("home_files = [" + strconv.Quote(f) + "]\n")); err != nil {
 			t.Errorf("%s: %v", f, err)
+		}
+	}
+}
+
+// B16: JSON PATCH / PUT containing legacy switches (edit, subagents, agent_api.tools)
+// converts them into rules rather than silently discarding them.
+func TestDecodePolicyLegacySwitchesConverted(t *testing.T) {
+	// 1. PUT with subagents: true enables subagents without fill restoring it into forbid
+	pPut, err := DecodePolicy([]byte(`{"subagents":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(pPut.Allow, "tool:subagent") {
+		t.Fatalf("PUT subagents true: want tool:subagent in Allow, got %v", pPut.Allow)
+	}
+	if slices.Contains(pPut.Forbid, "tool:subagent") {
+		t.Fatalf("PUT subagents true: tool:subagent should not be in Forbid, got %v", pPut.Forbid)
+	}
+
+	// 2. PATCH preserving existing rules
+	dir := home(t)
+	d, err := openDB(filepath.Join(dir, DBFile), fixedNow, len(upgradeSteps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	// Initial policy with custom forbid and allow commands
+	initPolicy := Policy{
+		Allow:  []string{"git status", "tool:*", "tool:edit"},
+		Forbid: []string{"rm -rf /", "tool:subagent"},
+		Ask:    []string{"deploy"},
+	}
+	if _, _, err := d.SetPolicy(initPolicy, Any); err != nil {
+		t.Fatal(err)
+	}
+
+	// PATCH tools: false
+	pToolsOff, err := DecodePolicyChange([]byte(`{"agent_api":{"tools":false}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _, err := d.ChangePolicy(pToolsOff, Any)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(pol.Forbid, "rm -rf /") || !slices.Contains(pol.Forbid, "tool:*") {
+		t.Fatalf("tools false: want rm -rf / and tool:* in Forbid, got %v", pol.Forbid)
+	}
+	if slices.Contains(pol.Allow, "tool:*") {
+		t.Fatalf("tools false: tool:* should be removed from Allow, got %v", pol.Allow)
+	}
+
+	// PATCH edit: none
+	pEditNone, err := DecodePolicyChange([]byte(`{"edit":"none"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _, err = d.ChangePolicy(pEditNone, Any)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(pol.Ask, "deploy") || !slices.Contains(pol.Ask, "tool:edit") {
+		t.Fatalf("edit none: want deploy and tool:edit in Ask, got %v", pol.Ask)
+	}
+	if slices.Contains(pol.Allow, "tool:edit") {
+		t.Fatalf("edit none: tool:edit should be removed from Allow, got %v", pol.Allow)
+	}
+
+	// PATCH subagents: true
+	pSubagentsOn, err := DecodePolicyChange([]byte(`{"subagents":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _, err = d.ChangePolicy(pSubagentsOn, Any)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(pol.Allow, "git status") || !slices.Contains(pol.Allow, "tool:subagent") {
+		t.Fatalf("subagents true: want git status and tool:subagent in Allow, got %v", pol.Allow)
+	}
+	if slices.Contains(pol.Forbid, "tool:subagent") {
+		t.Fatalf("subagents true: tool:subagent should be removed from Forbid, got %v", pol.Forbid)
+	}
+
+	// 3. PATCH with null tools produces no change
+	pNullTools, err := DecodePolicyChange([]byte(`{"agent_api":{"tools":null}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pNullTools.legacyTools != nil {
+		t.Fatalf("null tools should be left unset, got %v", *pNullTools.legacyTools)
+	}
+
+	// 4. Mixed PATCH with rules and legacy switch preserves all submitted lists
+	pMixed, err := DecodePolicyChange([]byte(`{"subagents":true,"allow":["go test"],"forbid":["git push"],"ask":["deploy"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, _, err = d.ChangePolicy(pMixed, Any)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(pol.Allow, "go test") || !slices.Contains(pol.Allow, "tool:subagent") {
+		t.Fatalf("mixed patch: want go test and tool:subagent in Allow, got %v", pol.Allow)
+	}
+	if !slices.Contains(pol.Forbid, "git push") || slices.Contains(pol.Forbid, "tool:subagent") {
+		t.Fatalf("mixed patch: want git push in Forbid (no tool:subagent), got %v", pol.Forbid)
+	}
+	if !slices.Contains(pol.Ask, "deploy") {
+		t.Fatalf("mixed patch: want deploy in Ask, got %v", pol.Ask)
+	}
+}
+
+func TestB16TOMLFalseSubagents(t *testing.T) {
+	p, err := ParsePolicy([]byte("allow = [\"tool:subagent\"]\nsubagents = false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(p.Forbid, "tool:subagent") {
+		t.Errorf("subagents=false did not produce Forbid tool:subagent; forbid=%v", p.Forbid)
+	}
+	if slices.Contains(p.Allow, "tool:subagent") {
+		t.Errorf("subagents=false did not remove tool:subagent from Allow; allow=%v", p.Allow)
+	}
+}
+
+func TestB16InvalidLegacyEdit(t *testing.T) {
+	for _, decode := range []func([]byte) (Policy, error){DecodePolicy, DecodePolicyChange} {
+		p, err := decode([]byte(`{"edit":"no-edits"}`))
+		if err == nil {
+			t.Errorf("accepted out-of-range legacy edit; allow=%q ask=%q forbid=%q", p.Allow, p.Ask, p.Forbid)
 		}
 	}
 }

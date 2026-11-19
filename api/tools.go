@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/staysup/agentbus/gateway"
 	"github.com/staysup/agentbus/run"
-	"github.com/staysup/agentbus/settings"
 )
 
 // tool is one tool a route is. It carries no effect: nothing about a tool is
@@ -101,16 +101,16 @@ func checkTools() error {
 
 // listedRoute says a tool on rt is in the list a caller sees: every tool for
 // the main token, the routes it may call for the turns token, and for a turn
-// token the tools its grant and [agent_api] allow. Only discovery: the route
+// token the tools its grant, rules and switches allow. Only discovery: the route
 // decides a call.
-func listedRoute(rt *route, g *run.Grant, turnsOnly bool, api settings.AgentAPI) bool {
+func listedRoute(rt *route, g *run.Grant, turnsOnly bool, rules gateway.Rules, applyAllowed bool) bool {
 	switch {
 	case turnsOnly:
 		return rt.turns
 	case g == nil:
 		return true
 	}
-	return turnRefusal(rt.turn, api) == ""
+	return turnRefusal(rt, rules, applyAllowed) == ""
 }
 
 // toolSchemas are the input schemas of every tool, by name, built from

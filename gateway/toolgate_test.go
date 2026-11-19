@@ -62,3 +62,60 @@ func TestDecideToolDoesNotCrossMatch(t *testing.T) {
 		t.Errorf("list_turns: %v, want Allow", d)
 	}
 }
+
+// B16: Rules in AgentBus's own names (tool:<name>, tool:*).
+// tool:* in allow enables the tool server; an unlisted tool is still asked.
+// tool:* in forbid forbids all tools. tool:subagent is forbidden.
+// tool:* in allow never allows a shell command.
+func TestToolRules(t *testing.T) {
+	rules := Rules{
+		Allow:    []string{"tool:*", "tool:edit", "ls"},
+		Forbid:   []string{"tool:subagent"},
+		Unlisted: Ask,
+	}
+	// tool:* is allowed (tool server enabled)
+	if d, _ := DecideTool(rules, "tool:*"); d != Allow {
+		t.Errorf("tool:*: %v, want Allow", d)
+	}
+	// an unlisted tool is asked by default
+	if d, _ := DecideTool(rules, "ask_agent"); d != Ask {
+		t.Errorf("ask_agent under tool:*: %v, want Ask", d)
+	}
+	// tool:edit is allowed
+	if d, _ := DecideTool(rules, "edit"); d != Allow {
+		t.Errorf("edit under tool:edit: %v, want Allow", d)
+	}
+	if d, _ := DecideTool(rules, "tool:edit"); d != Allow {
+		t.Errorf("tool:edit: %v, want Allow", d)
+	}
+	// tool:subagent is forbidden
+	if d, rule := DecideTool(rules, "subagent"); d != Refuse || rule != "tool:subagent" {
+		t.Errorf("subagent under tool:subagent: %v %q, want Refuse tool:subagent", d, rule)
+	}
+	if d, rule := DecideTool(rules, "tool:subagent"); d != Refuse || rule != "tool:subagent" {
+		t.Errorf("tool:subagent: %v %q, want Refuse tool:subagent", d, rule)
+	}
+	// forbid tool:* forbids unlisted tools, but explicit tool:edit in allow stays allowed
+	forbidAll := Rules{
+		Allow:    []string{"tool:edit"},
+		Forbid:   []string{"tool:*"},
+		Unlisted: Ask,
+	}
+	if d, rule := DecideTool(forbidAll, "ask_agent"); d != Refuse || rule != "tool:*" {
+		t.Errorf("ask_agent under forbid tool:*: %v %q, want Refuse tool:*", d, rule)
+	}
+	if d, _ := DecideTool(forbidAll, "tool:edit"); d != Allow {
+		t.Errorf("tool:edit under forbid tool:* but explicit allow: %v, want Allow", d)
+	}
+	// tool:* in allow NEVER allows a shell command
+	if d, _ := classify(rules, "rm -rf /"); d != Ask {
+		t.Errorf("rm -rf / under tool:*: %v, want Ask (unlisted)", d)
+	}
+	// tool:edit in allow NEVER allows a shell command named tool:edit
+	if d, _ := classify(rules, "tool:edit"); d != Ask {
+		t.Errorf("shell command tool:edit under tool:edit rule: %v, want Ask", d)
+	}
+	if d, _ := classify(rules, "./tool:edit"); d != Ask {
+		t.Errorf("shell command ./tool:edit under tool:edit rule: %v, want Ask", d)
+	}
+}

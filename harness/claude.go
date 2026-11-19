@@ -291,13 +291,15 @@ func (claude) Args(t Turn) []string {
 	// the edit rule and the person's settings alike.
 	var denied []string
 	denied = append(denied, protectRules(t.Writes.Protect)...)
+	// Temporary glue: mapping tool:edit to Claude Code tools Edit, Write, NotebookEdit.
 	// No edit rule: a deny on every tool that edits files, so the
 	// person's own settings (an acceptEdits mode, an Edit allow
 	// rule) cannot approve one either. A deny wins over any allow.
 	if len(t.Writes.Edit) == 0 {
 		denied = append(denied, "Edit", "Write", "NotebookEdit")
 	}
-	// subagents = false: a deny on each tool that starts a subagent. Task
+	// Temporary glue: mapping tool:subagent to Claude Code tools Task, Agent, Workflow.
+	// subagents off: a deny on each tool that starts a subagent. Task
 	// is its name in Claude Code 2.1.319 (2026-11-09, read from the tool
 	// list a haiku turn prints, and gone from it with this deny); Agent is
 	// its name in newer versions. Workflow runs scripts that start

@@ -990,8 +990,8 @@ func TestUpgradeRemovesRetiredAgentAPISwitches(t *testing.T) {
 	if len(got) != 1 || strings.Join(got[0].Keys, ",") != want {
 		t.Fatalf("events %+v", got)
 	}
-	if p, _, err := d.Policy(); err != nil || !*p.AgentAPI.Apply || !*p.AgentAPI.Tools {
-		t.Fatalf("policy %+v %v", p.AgentAPI, err)
+	if p, _, err := d.Policy(); err != nil || !*p.AgentAPI.Apply || !slices.Contains(p.Allow, "tool:*") {
+		t.Fatalf("policy %+v %v", p.Allow, err)
 	}
 	d.Close()
 
@@ -1025,10 +1025,10 @@ func TestRetiredAgentAPISwitchesRead(t *testing.T) {
 	if s := stored(t, d, SettingPermissions); strings.Contains(s, "scope") || strings.Contains(s, "start") || !strings.Contains(s, `"agent_api.apply":true`) {
 		t.Fatalf("stored %s", s)
 	}
-	body := []byte(`{"agent_api":{"scope":"session","rename":false,"list_agents":false,"tools":false}}`)
-	p, err := DecodePolicy(body)
-	if err != nil || *p.AgentAPI.Tools {
-		t.Fatalf("PUT body: %+v %v", p.AgentAPI, err)
+	body := []byte(`{"agent_api":{"scope":"session","rename":false,"list_agents":false,"start":false}}`)
+	_, err = DecodePolicy(body)
+	if err != nil {
+		t.Fatalf("PUT body: %v", err)
 	}
 	change, err := DecodePolicyChange(body)
 	if err != nil {
@@ -1037,7 +1037,158 @@ func TestRetiredAgentAPISwitchesRead(t *testing.T) {
 	if _, _, err := d.ChangePolicy(change, Any); err != nil {
 		t.Fatal(err)
 	}
-	if s := stored(t, d, SettingPermissions); strings.Contains(s, "scope") || strings.Contains(s, "rename") || !strings.Contains(s, `"agent_api.tools":false`) {
+	if s := stored(t, d, SettingPermissions); strings.Contains(s, "scope") || strings.Contains(s, "rename") || strings.Contains(s, "start") {
 		t.Fatalf("stored after PATCH %s", s)
+	}
+}
+
+// B16: A settings.db with 0.5 switches (agent_api.tools, subagents, edit)
+// converts them into rules (tool:*, tool:subagent, tool:edit) upon upgrading to 0.6.
+// agent_api.apply stays a platform switch.
+func TestUpgrade06SwitchesToRules(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		overlay string
+		check   func(t *testing.T, p Policy, rep Report)
+	}{
+		{
+			name:    "tools on",
+			overlay: `{"agent_api.tools":true}`,
+			check: func(t *testing.T, p Policy, rep Report) {
+				if !slices.Contains(rep.Removed, "agent_api.tools") {
+					t.Fatalf("removed %v, want agent_api.tools", rep.Removed)
+				}
+				if !slices.Contains(p.Allow, "tool:*") || slices.Contains(p.Forbid, "tool:*") {
+					t.Fatalf("tools on: allow %v, forbid %v", p.Allow, p.Forbid)
+				}
+			},
+		},
+		{
+			name:    "tools off",
+			overlay: `{"agent_api.tools":false}`,
+			check: func(t *testing.T, p Policy, rep Report) {
+				if !slices.Contains(rep.Removed, "agent_api.tools") {
+					t.Fatalf("removed %v, want agent_api.tools", rep.Removed)
+				}
+				if !slices.Contains(p.Forbid, "tool:*") || slices.Contains(p.Allow, "tool:*") {
+					t.Fatalf("tools off: allow %v, forbid %v", p.Allow, p.Forbid)
+				}
+			},
+		},
+		{
+			name:    "subagents true",
+			overlay: `{"subagents":true}`,
+			check: func(t *testing.T, p Policy, rep Report) {
+				if !slices.Contains(rep.Removed, "subagents") {
+					t.Fatalf("removed %v, want subagents", rep.Removed)
+				}
+				if !slices.Contains(p.Allow, "tool:subagent") || slices.Contains(p.Forbid, "tool:subagent") {
+					t.Fatalf("subagents true: allow %v, forbid %v", p.Allow, p.Forbid)
+				}
+			},
+		},
+		{
+			name:    "subagents false",
+			overlay: `{"subagents":false}`,
+			check: func(t *testing.T, p Policy, rep Report) {
+				if !slices.Contains(rep.Removed, "subagents") {
+					t.Fatalf("removed %v, want subagents", rep.Removed)
+				}
+				if !slices.Contains(p.Forbid, "tool:subagent") || slices.Contains(p.Allow, "tool:subagent") {
+					t.Fatalf("subagents false: allow %v, forbid %v", p.Allow, p.Forbid)
+				}
+			},
+		},
+		{
+			name:    "edit session",
+			overlay: `{"edit":"session"}`,
+			check: func(t *testing.T, p Policy, rep Report) {
+				if !slices.Contains(rep.Removed, "edit") {
+					t.Fatalf("removed %v, want edit", rep.Removed)
+				}
+				if !slices.Contains(p.Allow, "tool:edit") || slices.Contains(p.Ask, "tool:edit") || slices.Contains(p.Forbid, "tool:edit") {
+					t.Fatalf("edit session: allow %v, ask %v, forbid %v", p.Allow, p.Ask, p.Forbid)
+				}
+			},
+		},
+		{
+			name:    "edit none",
+			overlay: `{"edit":"none"}`,
+			check: func(t *testing.T, p Policy, rep Report) {
+				if !slices.Contains(rep.Removed, "edit") {
+					t.Fatalf("removed %v, want edit", rep.Removed)
+				}
+				if !slices.Contains(p.Ask, "tool:edit") || slices.Contains(p.Allow, "tool:edit") || slices.Contains(p.Forbid, "tool:edit") {
+					t.Fatalf("edit none: allow %v, ask %v, forbid %v", p.Allow, p.Ask, p.Forbid)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := home(t)
+			storedDB(t, dir, tc.overlay)
+			d, err := openDB(filepath.Join(dir, DBFile), fixedNow, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.db.Exec(`INSERT INTO meta(key, value) VALUES ('upgrades', '12') ON CONFLICT(key) DO UPDATE SET value = excluded.value`); err != nil {
+				t.Fatal(err)
+			}
+			d.Close()
+			var rep Report
+			d, rep, err = upgrade(dir).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			p, _, err := d.Policy()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.check(t, p, rep)
+		})
+	}
+}
+
+// A permissions.toml that explicitly enables subagents without a forbid list
+// keeps subagents allowed and does not populate them into forbid via fill().
+func TestParsePolicySwitchesEnabledWithoutForbid(t *testing.T) {
+	toml := "subagents = true\n"
+	p, err := ParsePolicy([]byte(toml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(p.Allow, "tool:subagent") {
+		t.Fatalf("p.Allow %v, want tool:subagent", p.Allow)
+	}
+	if slices.Contains(p.Forbid, "tool:subagent") {
+		t.Fatalf("p.Forbid %v, tool:subagent should not be forbidden", p.Forbid)
+	}
+}
+
+func TestB16UpgradeImplicitSwitchDefaults(t *testing.T) {
+	dir := home(t)
+	storedDB(t, dir, `{"allow":["go test"],"forbid":["git push"]}`)
+	d, err := openDB(filepath.Join(dir, DBFile), fixedNow, 14)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.db.Exec(`UPDATE meta SET value = '14' WHERE key = 'upgrades'`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	d, _, err = upgrade(dir).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	p, _, err := d.Policy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"tool:*", "tool:edit"} {
+		if !slices.Contains(p.Allow, rule) {
+			t.Errorf("implicit old default %s was not preserved in Allow: %v", rule, p.Allow)
+		}
 	}
 }

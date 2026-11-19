@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/staysup/agentbus/event"
 	"github.com/staysup/agentbus/queue"
+	"github.com/staysup/agentbus/settings"
 )
 
 // seedApproval writes an approval.requested event to control's record, as the
@@ -127,7 +130,8 @@ func TestDecideApprovalAllowMovesAskToAllow(t *testing.T) {
 		t.Fatalf("always: %d %s", resp.StatusCode, out)
 	}
 	_, out := send(t, e, "GET", "/api/v0/settings/permissions", "", "")
-	if !strings.Contains(out, `"allow":["git push"]`) || !strings.Contains(out, `"ask":[]`) {
+	var p settings.Policy
+	if err := json.Unmarshal([]byte(out), &p); err != nil || !slices.Contains(p.Allow, "git push") || len(p.Ask) != 0 {
 		t.Fatalf("the command was not moved from ask to allow:\n%s", out)
 	}
 	if txt, ok := decidedText(t, e, "ap1"); !ok || txt != "allowed from now on by a person" {
@@ -210,7 +214,9 @@ func TestDecideApprovalAllowMovesAndDoesNotContinue(t *testing.T) {
 		t.Fatalf("allow: %d %s", resp.StatusCode, out)
 	}
 	assertNoContinuation(t, e)
-	if _, out := send(t, e, "GET", "/api/v0/settings/permissions", "", ""); !strings.Contains(out, `"allow":["git push"]`) {
+	_, out := send(t, e, "GET", "/api/v0/settings/permissions", "", "")
+	var p settings.Policy
+	if err := json.Unmarshal([]byte(out), &p); err != nil || !slices.Contains(p.Allow, "git push") {
 		t.Fatalf("the command was not moved to allow:\n%s", out)
 	}
 }
@@ -318,7 +324,9 @@ func TestDecideApprovalAllowAskingTurnGone(t *testing.T) {
 	if len(jobs) != 0 {
 		t.Fatalf("a continuation started for a gone turn: %d jobs", len(jobs))
 	}
-	if _, out := send(t, e, "GET", "/api/v0/settings/permissions", "", ""); !strings.Contains(out, `"allow":["git push"]`) {
+	_, out := send(t, e, "GET", "/api/v0/settings/permissions", "", "")
+	var p settings.Policy
+	if err := json.Unmarshal([]byte(out), &p); err != nil || !slices.Contains(p.Allow, "git push") {
 		t.Fatalf("the command was not moved to allow:\n%s", out)
 	}
 }

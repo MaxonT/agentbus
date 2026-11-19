@@ -175,7 +175,7 @@ func TestXProcHoldReleasedByAnswer(t *testing.T) {
 	}
 
 	// always/allow moved the command to the allow list.
-	if code, b := x.get("/api/v0/settings/permissions"); code != 200 || !strings.Contains(string(b), `"allow":["git push"]`) {
+	if code, b := x.get("/api/v0/settings/permissions"); code != 200 || !strings.Contains(string(b), `"git push"`) {
 		t.Fatalf("after allow, permissions: %d %s", code, b)
 	}
 	// The record holds exactly one approval.decided, the person's — the gateway

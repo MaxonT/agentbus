@@ -31,8 +31,9 @@ func TestTurnArgsPermissions(t *testing.T) {
 	// Bash(<cmd>:*) rules are gone, and so is the Bash forbid deny.
 	bash := []string{"--allowedTools", "Bash"}
 	// No edit rule: every tool that edits files is denied, whatever the
-	// person's own settings allow.
-	noEdit := []string{"--disallowedTools", "Edit,Write,NotebookEdit"}
+	// person's own settings allow. Subagents are off by default.
+	noSub := []string{"Task", "Agent", "Workflow"}
+	noEdit := []string{"--disallowedTools", strings.Join(append([]string{"Edit", "Write", "NotebookEdit"}, noSub...), ",")}
 	noEditOnly := noEdit
 	// Every turn loads the person's own MCP servers (no --strict-mcp-config);
 	// Claude in Chrome is off on every turn.
@@ -53,9 +54,9 @@ func TestTurnArgsPermissions(t *testing.T) {
 		// neighbours in the same list.
 		{"claude edits its folder", "claude", "", "", edit, perm, cat(head,
 			[]string{"--allowedTools", "Edit(//w/repo/**),Bash", "--no-chrome",
-				"--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token)", "--", "hi"})},
+				"--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token),Task,Agent,Workflow", "--", "hi"})},
 		{"claude edits, no other policy", "claude", "", "", edit, settings.Policy{}, cat(head,
-			[]string{"--allowedTools", "Edit(//w/repo/**),Bash", "--no-chrome", "--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token)", "--", "hi"})},
+			[]string{"--allowedTools", "Edit(//w/repo/**),Bash", "--no-chrome", "--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token),Task,Agent,Workflow", "--", "hi"})},
 		{"claude, allow only", "claude", "", "", Writes{}, settings.Policy{Allow: []string{"go test"}},
 			cat(head, bash, noChrome, noEditOnly, []string{"--", "hi"})},
 		{"claude resume and model", "claude", "r-1", "opus", Writes{}, perm,
@@ -63,10 +64,10 @@ func TestTurnArgsPermissions(t *testing.T) {
 		// codex writes, with network, only with the edit rule; edit = "none" (no
 		// edit rule) runs the read-only sandbox with no network.
 		{"codex edits", "codex", "", "", edit, perm, []string{"exec", "--skip-git-repo-check", "--json", "--sandbox", "workspace-write",
-			"-c", "sandbox_workspace_write.network_access=true", "--disable", "apps", "--disable", "plugins", "--", "hi"}},
-		{"codex, no edit rule", "codex", "", "", Writes{}, perm, []string{"exec", "--skip-git-repo-check", "--json", "--sandbox", "read-only", "--disable", "apps", "--disable", "plugins", "--", "hi"}},
+			"-c", "sandbox_workspace_write.network_access=true", "--disable", "apps", "--disable", "plugins", "--disable", "multi_agent", "--disable", "multi_agent_v2", "--", "hi"}},
+		{"codex, no edit rule", "codex", "", "", Writes{}, perm, []string{"exec", "--skip-git-repo-check", "--json", "--sandbox", "read-only", "--disable", "apps", "--disable", "plugins", "--disable", "multi_agent", "--disable", "multi_agent_v2", "--", "hi"}},
 		{"codex resume and model", "codex", "r-1", "gpt-5", edit, perm, []string{"exec", "--skip-git-repo-check", "--sandbox", "workspace-write",
-			"-c", "sandbox_workspace_write.network_access=true", "--disable", "apps", "--disable", "plugins", "resume", "--json", "--model", "gpt-5", "--", "r-1", "hi"}},
+			"-c", "sandbox_workspace_write.network_access=true", "--disable", "apps", "--disable", "plugins", "--disable", "multi_agent", "--disable", "multi_agent_v2", "resume", "--json", "--model", "gpt-5", "--", "r-1", "hi"}},
 	} {
 		got := turnArgs(hn(tc.agent), "", tc.resume, tc.model, tc.w, tc.perm, "hi")
 		if !slices.Equal(got, tc.want) {
@@ -92,7 +93,8 @@ func TestWritesFor(t *testing.T) {
 		t.Fatalf("codex: %+v", w)
 	}
 	none := def
-	none.Edit = settings.EditNone
+	none.Allow = slices.DeleteFunc(slices.Clone(none.Allow), func(s string) bool { return s == "tool:edit" })
+	none.Ask = []string{"tool:edit"}
 	if w, _ := writesFor(hn("claude"), folder, none, protect); len(w.Edit) != 0 || len(w.Protect) == 0 {
 		t.Fatalf("edit none: %+v", w)
 	}
