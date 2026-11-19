@@ -180,7 +180,7 @@ func TestDecideApprovalNoContinuationTurn(t *testing.T) {
 		// still continued.
 		orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
 			queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "do a thing"},
-			queue.Links{}, queue.Limits{})
+			queue.Links{}, queue.Limits{}, "", queue.Maker{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +201,7 @@ func TestDecideApprovalAllowMovesAndDoesNotContinue(t *testing.T) {
 	e := askStack(t)
 	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
 		queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "do a thing"},
-		queue.Links{}, queue.Limits{})
+		queue.Links{}, queue.Limits{}, "", queue.Maker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestDecideApprovalOnce(t *testing.T) {
 	e := askStack(t)
 	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
 		queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "do a thing"},
-		queue.Links{}, queue.Limits{})
+		queue.Links{}, queue.Limits{}, "", queue.Maker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestDecideApprovalConcurrentAllow(t *testing.T) {
 	e := askStack(t)
 	orig, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "",
 		queue.Spec{Session: "s1", Harness: "claude", AgentID: "a1", Access: "subscription", Prompt: "x"},
-		queue.Links{}, queue.Limits{})
+		queue.Links{}, queue.Limits{}, "", queue.Maker{})
 	if err != nil {
 		t.Fatal(err)
 	}

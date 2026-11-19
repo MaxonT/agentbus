@@ -258,9 +258,19 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// ask_agent as an app: start the asked turn and, in the same transaction,
+	// register the on that delivers its reply to the asking session when it
+	// completes (queue/on.go). One transaction, so a stop between the two can
+	// never leave the turn with no on and strand its result. A turn the person
+	// started (no grant) registers no on. The caps stay in core on the create.
+	var deliverTo string
+	var maker queue.Maker
+	if g := grantOf(r); g != nil {
+		deliverTo, maker = g.Session, queue.Maker{Session: g.Session, Turn: g.Turn}
+	}
 	// Never refused for a busy session: the job waits behind the session's
 	// turns that have not ended, as a delivered result does.
-	job, created, err := a.cfg.Queue.CreateTurnLinked(queue.DefaultTeam, body.IdempotencyKey, spec, links, queueLimits(policyOf(r)))
+	job, created, err := a.cfg.Queue.CreateTurnLinked(queue.DefaultTeam, body.IdempotencyKey, spec, links, queueLimits(policyOf(r)), deliverTo, maker)
 	var limit *queue.LimitError
 	var removed *queue.RunnerRemovedError
 	switch {

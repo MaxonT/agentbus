@@ -135,6 +135,7 @@ var tags = []struct {
 	{name: "Sessions", doc: "A session is a conversation: its turns, in order. Read its history, search it, name it or close it."},
 	{name: "Agents", doc: "Saved agents: a harness, how it reaches its model, the model and a name. A turn names one. And the harnesses, runners and folders a turn can use."},
 	{name: "Tools", doc: "The tools control serves to agents: the built-in ones and the person's own, in one stored format. List, add and remove them. The main token only."},
+	{name: "Reactions", doc: "An on is a standing instruction: when an event happens (for now, a turn completes), do something (for now, deliver that turn's reply to a session). Register one and remove it. A row on control; nothing waits. ask_agent registers one for itself."},
 	{name: "Settings", doc: "The policy and the instructions every turn gets, and the subscriptions control holds for runners. The main token only."},
 	{name: "Approvals", doc: "The commands the gateway held for a person (an ask entry, or a command on none of the lists under the ask default): list them and answer one, once, always or refuse. The main token only."},
 	{name: "Events", doc: "The record as a live stream, for a cockpit, an export or a program, and a program's own events. The main token only."},
@@ -232,6 +233,32 @@ var routes = slices.Concat([]route{
 		turn:  askedTurn,
 		turns: true,
 		serve: (*API).stopTurn},
+	{method: "POST", path: "/api/v0/ons", op: "registerOn",
+		tag:     "Reactions",
+		summary: "Register an on",
+		doc: "Register a standing instruction: when the turn you name completes, its reply is delivered to a session as that session's next turn.\n\n" +
+			"This is the one primitive every reaction is built on; for now the only event is a turn completing. " +
+			"The turn must be asked work (a turn an agent started), so it sits in a request tree, and the reply is delivered inside that tree. " +
+			"A turn token may name only a turn its own turn started, and the reply goes to its own session, so it leaves session out. " +
+			"The main token names the session to deliver to, which must be in the watched turn's tree. " +
+			"It is a row on control plus control's own check: nothing waits, and the reply arrives as a later turn. " +
+			"Registering the same turn again returns the on already registered. ask_agent registers one of these for itself.",
+		body: OnRequest{},
+		replies: []reply{ok(201, OnView{}, "The on."), turnRefused,
+			fail(403, "A turn token named a turn its tree did not start, or a session not its own."),
+			fail(404, "This service keeps no queue, or no turn has this id.")},
+		turn:  onRegister,
+		serve: plain((*API).registerOn)},
+	{method: "DELETE", path: "/api/v0/ons/{id}", op: "removeOn",
+		idDoc:   "An on's id (on_...), as POST /api/v0/ons named it.",
+		tag:     "Reactions",
+		summary: "Remove an on",
+		doc:     "Remove an on: it stops reacting. Removing one already removed, or one that has fired, is accepted. A turn token may remove only an on its own turn registered. No body is read.",
+		replies: []reply{{status: 204, doc: "Removed.", empty: true}, turnRefused,
+			fail(403, "A turn token tried to remove an on another turn registered."),
+			fail(404, "This service keeps no queue, or no on has this id.")},
+		turn:  onPath,
+		serve: (*API).removeOn},
 	{method: "GET", path: "/api/v0/turns/{id}/diff", op: "turnDiff",
 		idDoc:   turnIDDoc,
 		tag:     "Turns",

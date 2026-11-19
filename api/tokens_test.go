@@ -53,7 +53,7 @@ func TestAskChecksRemoteFolderByReference(t *testing.T) {
 	const sessRef = "fld_fedcba9876543210"
 	lim := queue.Limits{MaxDepth: 2, MaxPerTurn: 10, MaxPerTree: 30}
 	j, _, err := q.CreateTurnLinked(queue.DefaultTeam, "",
-		queue.Spec{Harness: "claude", FolderRef: sessRef, Machine: remote, Prompt: "hi", Isolate: true}, queue.Links{}, lim)
+		queue.Spec{Harness: "claude", FolderRef: sessRef, Machine: remote, Prompt: "hi", Isolate: true}, queue.Links{}, lim, "", queue.Maker{})
 	if err != nil {
 		t.Fatal(err)
 	}

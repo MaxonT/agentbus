@@ -225,6 +225,36 @@ func session(t *testing.T, snap Snapshot, id string) Session {
 	return Session{}
 }
 
+// A session's summary carries the origin of its first turn, so a view can show
+// only the person's sessions: a session an agent asked for has kind asked, one
+// the person started has none.
+func TestSnapshotSessionOrigin(t *testing.T) {
+	s := newStore(t)
+	p := ev(event.TurnStarted, "sp")
+	p.Turn = "t_p"
+	mustAppend(t, s, p)
+	a := ev(event.TurnStarted, "sa")
+	a.Turn = "t_a"
+	a.Origin = &event.Origin{Kind: event.OriginAsked, Session: "sp", Turn: "t_p"}
+	mustAppend(t, s, a)
+	// A later turn of the asked session, person-less origin absent, must not
+	// change the session's recorded origin (the first turn's).
+	a2 := ev(event.TurnStarted, "sa")
+	a2.Turn = "t_a2"
+	mustAppend(t, s, a2)
+	snap, err := s.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := session(t, snap, "sp").Origin; o != nil {
+		t.Fatalf("the person's session has origin %+v, want none", o)
+	}
+	o := session(t, snap, "sa").Origin
+	if o == nil || o.Kind != event.OriginAsked || o.Session != "sp" || o.Turn != "t_p" {
+		t.Fatalf("asked session origin %+v, want asked from sp/t_p", o)
+	}
+}
+
 func responded(session string, u *event.Usage) event.Event {
 	e := ev(event.ModelResponded, session)
 	e.Usage = u

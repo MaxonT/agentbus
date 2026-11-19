@@ -5,7 +5,7 @@ package api
 // agent reads its session's history and asks other agents: it starts turns
 // on any saved agent, each in a new session, asks for reviews, and reads
 // their results. It never continues a session (his call, 2026-11-12). Each result comes back to its session as a later
-// turn (queue.Deliver).
+// turn, delivered by an on row the ask path registers (queue/on.go, FireOns).
 //
 // What a turn token must never do: read or change the settings (the policy
 // and the instructions: every /api/v0/settings route is main-token only),
@@ -70,6 +70,13 @@ const (
 	// toolList: POST /api/v0/mcp, the API as tools. Each tool call is sent
 	// through its own route and checked there (tools.go).
 	toolList
+	// onRegister: POST /api/v0/ons. The subject turn is in the body; the
+	// handler checks it is a turn the token's tree started and the delivery
+	// session is the token's own (on.go).
+	onRegister
+	// onPath: DELETE /api/v0/ons/{id}. The handler checks the on's maker is
+	// this token's turn (on.go).
+	onPath
 )
 
 // Refusals a turn token gets. Fixed wording: they never quote the request.
@@ -264,10 +271,12 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 		if err != nil {
 			return failed(err)
 		}
-		if j.Links.Asker == nil || j.Links.Chain == nil || j.Links.Chain.Root != g.Root {
+		if j.Links.Chain == nil || j.Links.Chain.By == "" || j.Links.Chain.Root != g.Root {
 			return refuse(turnAskedRefused)
 		}
-	case askTurn, anyRead, toolList:
+	case askTurn, anyRead, toolList, onRegister, onPath:
+		// The handler checks the rest: onRegister reads the subject turn from
+		// the body and the session it delivers to; onPath reads the on's maker.
 	default:
 		return refuse(turnWriteRefused)
 	}
@@ -315,11 +324,13 @@ func turnRefusal(turn int, api settings.AgentAPI) string {
 	return ""
 }
 
-// askedLinks are the links of work g's turn asks for: the asking turn, and one
-// level deeper in its request tree.
+// askedLinks are the links of work g's turn asks for: the request tree it is
+// in, one level deeper, naming g's turn and session as who asked (Chain.By/
+// BySession). That is the job's recorded origin and the caps' provenance; its
+// result is delivered by an on row the ask path registers (on.go), not from
+// these links.
 func askedLinks(g run.Grant) queue.Links {
-	return queue.Links{Asker: &queue.Asker{Session: g.Session, Turn: g.Turn},
-		Chain: &queue.Chain{Root: g.Root, Depth: g.Depth + 1}}
+	return queue.Links{Chain: &queue.Chain{Root: g.Root, Depth: g.Depth + 1, By: g.Turn, BySession: g.Session}}
 }
 
 // queueJob reads a job of the default team.

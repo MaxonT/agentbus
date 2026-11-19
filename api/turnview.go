@@ -112,8 +112,8 @@ func (a *API) waiting(j queue.Job) Turn {
 	case l.ResultOf != nil:
 		t.Origin = &event.Origin{Kind: event.OriginResult, Session: l.ResultOf.Session, Turn: l.ResultOf.Turn,
 			TurnKind: l.ResultOf.Kind, Agent: l.ResultOf.Agent}
-	case l.Asker != nil:
-		t.Origin = &event.Origin{Kind: event.OriginAsked, Session: l.Asker.Session, Turn: l.Asker.Turn}
+	case l.Chain != nil && l.Chain.By != "":
+		t.Origin = &event.Origin{Kind: event.OriginAsked, Session: l.Chain.BySession, Turn: l.Chain.By}
 	}
 	if j.Ended != nil {
 		t.Ended = j.Ended

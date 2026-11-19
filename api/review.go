@@ -92,13 +92,19 @@ func (a *API) reviewTurn(w http.ResponseWriter, r *http.Request, id string) {
 			as.Model, as.ModelFromAgent = ag.Model, true
 		}
 	}
-	// A review a turn asks for names that turn, within its caps.
+	// A review a turn asks for names that turn, within its caps, and its verdict
+	// is delivered to the asking session by an on registered in the same
+	// transaction as the review (so a stop between cannot strand it). A review
+	// the person asks for (no grant) registers no on.
 	var links queue.Links
 	var lim queue.Limits
+	var deliverTo string
+	var maker queue.Maker
 	if g := grantOf(r); g != nil {
 		links, lim = askedLinks(*g), queueLimits(policyOf(r))
+		deliverTo, maker = g.Session, queue.Maker{Session: g.Session, Turn: g.Turn}
 	}
-	rv, created, err := a.cfg.Queue.ReviewLinked(queue.DefaultTeam, j.ID, as, b.IdempotencyKey, b.IncludeReply, links, lim)
+	rv, created, err := a.cfg.Queue.ReviewLinked(queue.DefaultTeam, j.ID, as, b.IdempotencyKey, b.IncludeReply, links, lim, deliverTo, maker)
 	var limit *queue.LimitError
 	var removed *queue.RunnerRemovedError
 	switch {

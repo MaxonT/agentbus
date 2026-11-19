@@ -101,7 +101,7 @@ func gitRepo(t *testing.T) string {
 func deliverUntil(t *testing.T, e *env, session string, want int) []store.Turn {
 	t.Helper()
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if _, err := e.q.Deliver(queue.DefaultTeam, nil, nil); err != nil {
+		if _, err := e.q.FireOns(queue.DefaultTeam, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		list, err := e.store.Turns(store.TurnQuery{Session: session, Limit: 100})
@@ -133,6 +133,65 @@ func ask(t *testing.T, e *env, tok, body string) Started {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// The public on routes honour the caller's token: a turn token registers an
+// on only for a turn its tree started, always delivering to its own session,
+// and removes only an on its own turn made; the main token names any turn and
+// the session. A turn token's ask already registered the on for the turn it
+// started, so registering it again returns that same on.
+func TestOnAPIAuth(t *testing.T) {
+	e, dir := askEnv(t)
+	p := startTurn(t, e, `{"agent":"claude","folder":"`+gitRepo(t)+`","prompt":"parent"}`)
+	ptok := tokenOf(t, dir, "parent")
+	other := startTurn(t, e, `{"agent":"claude","folder":"`+gitRepo(t)+`","prompt":"other"}`)
+	child := ask(t, e, ptok, `{"agent":"claude","prompt":"child"}`)
+
+	// In-tree: the session is forced to the token's own, so one it sends is ignored.
+	code, out := as(t, e, ptok, "POST", "/api/v0/ons", `{"turn":"`+child.Turn+`","session":"s_not_mine"}`)
+	if code != 201 {
+		t.Fatalf("register in-tree: %d %s", code, out)
+	}
+	var ov OnView
+	if err := json.Unmarshal([]byte(out), &ov); err != nil {
+		t.Fatal(err)
+	}
+	if ov.Turn != child.Turn || ov.Session != p.Session {
+		t.Fatalf("on %+v, want turn %s session %s", ov, child.Turn, p.Session)
+	}
+	// Out of tree: refused.
+	if code, out := as(t, e, ptok, "POST", "/api/v0/ons", `{"turn":"`+other.Turn+`"}`); code != 403 {
+		t.Fatalf("out-of-tree register: %d %s, want 403", code, out)
+	}
+	// A turn may not subscribe to its own turn (that would be a self-
+	// continuation dodging the asked-work caps).
+	if code, out := as(t, e, ptok, "POST", "/api/v0/ons", `{"turn":"`+p.Turn+`"}`); code != 403 {
+		t.Fatalf("self register: %d %s, want 403", code, out)
+	}
+	// The main token must name a session (an asked turn without one is 400),
+	// and a nonexistent turn is 404.
+	if resp, out := do(t, e.req(t, "POST", "/api/v0/ons", strings.NewReader(`{"turn":"`+child.Turn+`"}`))); resp.StatusCode != 400 {
+		t.Fatalf("main without session: %d %s, want 400", resp.StatusCode, out)
+	}
+	if resp, out := do(t, e.req(t, "POST", "/api/v0/ons", strings.NewReader(`{"turn":"t_nope","session":"`+p.Session+`"}`))); resp.StatusCode != 404 {
+		t.Fatalf("main unknown turn: %d %s, want 404", resp.StatusCode, out)
+	}
+	// The main token delivers only within the watched turn's tree: child is in
+	// p's tree, so an unrelated session is refused and p's own is allowed.
+	if resp, out := do(t, e.req(t, "POST", "/api/v0/ons", strings.NewReader(`{"turn":"`+child.Turn+`","session":"`+other.Session+`"}`))); resp.StatusCode != 403 {
+		t.Fatalf("main cross-tree: %d %s, want 403", resp.StatusCode, out)
+	}
+	if resp, out := do(t, e.req(t, "POST", "/api/v0/ons", strings.NewReader(`{"turn":"`+child.Turn+`","session":"`+p.Session+`"}`))); resp.StatusCode != 201 {
+		t.Fatalf("main in-tree: %d %s, want 201", resp.StatusCode, out)
+	}
+	// A different turn cannot remove the parent's on; the maker can.
+	ctok := tokenOf(t, dir, "child")
+	if code, out := as(t, e, ctok, "DELETE", "/api/v0/ons/"+ov.ID, ""); code != 403 {
+		t.Fatalf("remove another's on: %d %s, want 403", code, out)
+	}
+	if code, out := as(t, e, ptok, "DELETE", "/api/v0/ons/"+ov.ID, ""); code != 204 {
+		t.Fatalf("maker remove: %d %s, want 204", code, out)
+	}
 }
 
 // A turn asks two agents with its token, in the person's folder: each runs in
@@ -234,7 +293,7 @@ func TestAskFanOutAndDeliver(t *testing.T) {
 	var rs Started
 	_ = json.Unmarshal([]byte(out), &rs)
 	rj, err := e.q.JobByTurn(queue.DefaultTeam, rs.Turn)
-	if err != nil || rj.Links.Asker == nil || rj.Links.Asker.Turn != p2.Turn || rj.Links.Chain == nil || rj.Links.Chain.Root != p.Session {
+	if err != nil || rj.Links.Chain == nil || rj.Links.Chain.By != p2.Turn || rj.Links.Chain.Root != p.Session {
 		t.Errorf("review %+v: %v %+v", rs, err, rj.Links)
 	}
 	// A stop of asked work in the tree is allowed.

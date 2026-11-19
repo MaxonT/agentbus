@@ -1013,10 +1013,21 @@ func (s *service) sweep(svcLog *logfile.Log, name func(string) string) {
 						svcLog.Printf("runner.back id=%s name=%q", r.ID, r.Name)
 					}
 				}
-				// Asked work that ended: its result becomes the asking
-				// session's next turn (queue.Deliver).
-				if n, err := s.queue.Deliver(queue.DefaultTeam, name, s.deliveredAgent); err != nil {
-					svcLog.Printf("queue.deliver_failed")
+				// An on that matured: asked work that ended delivers its
+				// result as the asking session's next turn (queue/on.go,
+				// FireOns), the generalisation of the old Deliver.
+				// TODO(B13): jobs stored before an upgrade to this build hold
+				// their provenance under links.asker, which this build no longer
+				// reads: (1) asked work that ended but was not delivered gets no
+				// on row, so FireOns never delivers it; (2) the asked-work caps
+				// (checkAsked) now count links.chain.by, so pre-upgrade jobs are
+				// not counted and the per-turn and per-tree limits reset until
+				// those jobs drain. A one-time startup migration (register an on
+				// for each undelivered asked job, and backfill chain.by/by_session
+				// from asker) would close both; for this dev milestone the store
+				// is drained before upgrade instead.
+				if n, err := s.queue.FireOns(queue.DefaultTeam, name, s.deliveredAgent); err != nil {
+					svcLog.Printf("queue.fire_ons_failed")
 				} else if n > 0 {
 					svcLog.Printf("queue.results_delivered n=%d", n)
 				}

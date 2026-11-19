@@ -9,7 +9,16 @@ import (
 )
 
 func asked(session, turn, root string, depth int) Links {
-	return Links{Asker: &Asker{Session: session, Turn: turn}, Chain: &Chain{Root: root, Depth: depth}}
+	return Links{Chain: &Chain{Root: root, Depth: depth, By: turn, BySession: session}}
+}
+
+// onFor registers the delivery on the ask path registers for child, so a
+// queue test drives FireOns the way the API drives it.
+func onFor(t *testing.T, q *Queue, child Job, l Links) {
+	t.Helper()
+	if _, err := q.RegisterOn(DefaultTeam, OnTurnCompleted, child.Turn, l.Chain.BySession, Maker{Session: l.Chain.BySession, Turn: l.Chain.By}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // The default caps, as permissions.toml writes them.
@@ -18,7 +27,7 @@ const MaxDepth, MaxAskedPerTurn, MaxAskedPerRoot = 2, 10, 30
 var testLimits = Limits{MaxDepth: MaxDepth, MaxPerTurn: MaxAskedPerTurn, MaxPerTree: MaxAskedPerRoot}
 
 func askTurn(q *Queue, l Links, key string) (Job, error) {
-	j, _, err := q.CreateTurnLinked(DefaultTeam, key, Spec{Harness: "claude", Folder: "/x", Isolate: true, Prompt: "hi"}, l, testLimits)
+	j, _, err := q.CreateTurnLinked(DefaultTeam, key, Spec{Harness: "claude", Folder: "/x", Isolate: true, Prompt: "hi"}, l, testLimits, "", Maker{})
 	return j, err
 }
 
@@ -29,8 +38,8 @@ func TestAskedCaps(t *testing.T) {
 	if _, err := askTurn(q, asked("p", "t_1", "p", MaxDepth+1), ""); !isLimit(err, "levels") {
 		t.Fatalf("too deep: %v", err)
 	}
-	if _, err := askTurn(q, Links{Asker: &Asker{Session: "p", Turn: "t_1"}}, ""); !errors.Is(err, ErrBadState) {
-		t.Fatalf("asked without a chain: %v", err)
+	if _, err := askTurn(q, Links{Chain: &Chain{By: "t_1", BySession: "p"}}, ""); !errors.Is(err, ErrBadState) {
+		t.Fatalf("asked without a depth: %v", err)
 	}
 	for i := range MaxAskedPerTurn {
 		if _, err := askTurn(q, asked("p", "t_1", "p", 1), ""); err != nil {
@@ -106,10 +115,12 @@ func TestDeliver(t *testing.T) {
 	if _, _, err := q.Start(r.ID, pa.ID, pa.Number, lease); err != nil {
 		t.Fatal(err)
 	}
-	child, err := askTurn(q, asked(parent.Session, parent.Turn, parent.Session, 1), "")
+	links := asked(parent.Session, parent.Turn, parent.Session, 1)
+	child, err := askTurn(q, links, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	onFor(t, q, child, links)
 	// The delivered reply is read from the record by the child's turn, not
 	// from a copy in its result.
 	q.ReadReplyWith(func(session, turn string) (string, error) {
@@ -125,7 +136,7 @@ func TestDeliver(t *testing.T) {
 	if _, _, err := q.Start(r.ID, ca.ID, ca.Number, lease); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := q.Deliver(DefaultTeam, nil, nil); err != nil || n != 0 {
+	if n, err := q.FireOns(DefaultTeam, nil, nil); err != nil || n != 0 {
 		t.Fatalf("before the child ends: %d %v", n, err)
 	}
 	res := `{"session":"` + child.Session + `","state":"finished","folder":"/w/1",` +
@@ -134,7 +145,7 @@ func TestDeliver(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err := q.Deliver(DefaultTeam, nil, nil); err != nil {
+		if _, err := q.FireOns(DefaultTeam, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -156,7 +167,7 @@ func TestDeliver(t *testing.T) {
 	}
 	if d.State != Queued || d.Spec.Session != parent.Session || d.Spec.Harness != "claude" || d.Links.ResultOf.Job != child.ID ||
 		d.Links.ResultOf.Session != child.Session || d.Links.ResultOf.Turn != child.Turn || d.Links.ResultOf.Agent != "claude" ||
-		d.Links.Chain == nil || d.Links.Chain.Depth != 1 || d.Links.Asker != nil {
+		d.Links.Chain == nil || d.Links.Chain.Depth != 1 || d.Links.Chain.By != "" {
 		t.Fatalf("delivery: %+v %+v", d, d.Links)
 	}
 	for _, want := range []string{"[AgentBus]", "not from the person", "Agent: claude", "Folder: /w/1", "Changed files: 2",
@@ -177,7 +188,7 @@ func TestDeliver(t *testing.T) {
 		t.Fatalf("took %s, want the delivery", got.ID)
 	}
 	// The person's own job ended too, and is never delivered.
-	if n, err := q.Deliver(DefaultTeam, nil, nil); err != nil || n != 0 {
+	if n, err := q.FireOns(DefaultTeam, nil, nil); err != nil || n != 0 {
 		t.Fatalf("after: %d %v", n, err)
 	}
 	_ = pj
@@ -214,10 +225,12 @@ func TestDeliverNamesTheAskingTurnsAgent(t *testing.T) {
 	for _, removed := range []bool{false, true} {
 		q, _ := open(t)
 		parent := job(t, q, "")
-		child, err := askTurn(q, asked(parent.Session, parent.Turn, parent.Session, 1), "")
+		links := asked(parent.Session, parent.Turn, parent.Session, 1)
+		child, err := askTurn(q, links, "")
 		if err != nil {
 			t.Fatal(err)
 		}
+		onFor(t, q, child, links)
 		if _, err := q.Cancel(DefaultTeam, child.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -230,7 +243,7 @@ func TestDeliverNamesTheAskingTurnsAgent(t *testing.T) {
 			return Spec{Harness: "codex", AgentID: "a_1", Access: "subscription", AgentModel: "m"}, ""
 		}
 		for range 2 {
-			if _, err := q.Deliver(DefaultTeam, nil, agent); err != nil {
+			if _, err := q.FireOns(DefaultTeam, nil, agent); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -252,7 +265,7 @@ func TestDeliverNamesTheAskingTurnsAgent(t *testing.T) {
 				t.Fatalf("delivered with its agent removed: %+v", d)
 			}
 			var why string
-			if err := q.db.QueryRow(`SELECT error FROM deliveries WHERE job = ?`, child.ID).Scan(&why); err != nil || why == "" {
+			if err := q.db.QueryRow(`SELECT error FROM on_fires WHERE key = ?`, child.Turn).Scan(&why); err != nil || why == "" {
 				t.Fatalf("delivery record: %q %v", why, err)
 			}
 			continue
@@ -268,10 +281,12 @@ func TestDeliverNamesTheAskingTurnsAgent(t *testing.T) {
 func TestDeliverKeyIsOurs(t *testing.T) {
 	q, _ := open(t)
 	parent := job(t, q, "")
-	child, err := askTurn(q, asked(parent.Session, parent.Turn, parent.Session, 1), "")
+	links := asked(parent.Session, parent.Turn, parent.Session, 1)
+	child, err := askTurn(q, links, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	onFor(t, q, child, links)
 	if strings.Trim(ResultKey(child.ID), "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-") == "" {
 		t.Fatalf("%s is a key a caller may send", ResultKey(child.ID))
 	}
@@ -283,7 +298,7 @@ func TestDeliverKeyIsOurs(t *testing.T) {
 	if _, err := q.Cancel(DefaultTeam, child.ID); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := q.Deliver(DefaultTeam, nil, nil); err != nil || n != 1 {
+	if n, err := q.FireOns(DefaultTeam, nil, nil); err != nil || n != 1 {
 		t.Fatalf("deliver: %d %v", n, err)
 	}
 }
@@ -321,7 +336,7 @@ func TestSessionRootOfReview(t *testing.T) {
 		Session: j.Session, Workspace: &Workspace{Kind: WorkspaceFolder, Folder: "/x"}}); err != nil {
 		t.Fatal(err)
 	}
-	rv, _, err := q.ReviewLinked(DefaultTeam, j.ID, Spec{Harness: "codex"}, "", false, asked(j.Session, "t_1", j.Session, 1), testLimits)
+	rv, _, err := q.ReviewLinked(DefaultTeam, j.ID, Spec{Harness: "codex"}, "", false, asked(j.Session, "t_1", j.Session, 1), testLimits, "", Maker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,10 +433,12 @@ func TestDeliverToALostSession(t *testing.T) {
 	if _, _, err := q.Start(r.ID, pa.ID, pa.Number, lease); err != nil {
 		t.Fatal(err)
 	}
-	child, err := askTurn(q, asked(parent.Session, parent.Turn, parent.Session, 1), "")
+	links := asked(parent.Session, parent.Turn, parent.Session, 1)
+	child, err := askTurn(q, links, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	onFor(t, q, child, links)
 	cj, ca := take(t, q, r)
 	if cj.ID != child.ID {
 		t.Fatalf("took %s, want the child", cj.ID)
@@ -437,7 +454,7 @@ func TestDeliverToALostSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if n, err := q.Deliver(DefaultTeam, nil, nil); err != nil || n != 0 {
+		if n, err := q.FireOns(DefaultTeam, nil, nil); err != nil || n != 0 {
 			t.Fatalf("deliver: %d %v", n, err)
 		}
 	}

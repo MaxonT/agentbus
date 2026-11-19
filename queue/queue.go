@@ -204,6 +204,36 @@ CREATE TABLE IF NOT EXISTS deliveries (
 	error    TEXT NOT NULL DEFAULT '',
 	created  INTEGER NOT NULL
 );
+-- An on: a standing instruction on control, "when this event happens, do
+-- this" (on.go). B13 has one event (a turn completes) and one action (start a
+-- turn in session with the subject turn's reply). It is a row plus the
+-- control loop's check; nothing waits. off is set when it is removed or, for a
+-- one-shot, once it has fired.
+CREATE TABLE IF NOT EXISTS ons (
+	id      TEXT PRIMARY KEY,
+	team    TEXT NOT NULL REFERENCES teams(id),
+	event   TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	session TEXT NOT NULL,
+	maker   TEXT NOT NULL,
+	off     INTEGER,
+	created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ons_live ON ons(team, event, off);
+-- One standing instruction per (event, subject): the ask path may register the
+-- same delivery again on a retry, and this makes that a no-op.
+CREATE UNIQUE INDEX IF NOT EXISTS ons_subject ON ons(team, event, subject);
+-- One row per time an on fired, keyed so a fire happens exactly once even
+-- across a control restart: the same role the deliveries table plays for the
+-- old delivery. For a one-shot turn.completed on, key is the subject turn.
+CREATE TABLE IF NOT EXISTS on_fires (
+	on_id   TEXT NOT NULL REFERENCES ons(id),
+	key     TEXT NOT NULL,
+	job     TEXT NOT NULL DEFAULT '',
+	error   TEXT NOT NULL DEFAULT '',
+	created INTEGER NOT NULL,
+	PRIMARY KEY (on_id, key)
+);
 CREATE TABLE IF NOT EXISTS attempt_events (
 	attempt TEXT NOT NULL REFERENCES attempts(id),
 	seq     INTEGER NOT NULL,
@@ -386,11 +416,10 @@ type Links struct {
 	ReviewsJob string `json:"reviews_job,omitempty"`
 	// RedoOf: the job this one does again.
 	RedoOf string `json:"redo_of,omitempty"`
-	// Asker: the turn whose agent asked for this job with its turn token
-	// (asked.go). Its result is delivered to that turn's session.
-	Asker *Asker `json:"asker,omitempty"`
-	// Chain: the request tree this job is in, for asked work and the turns
-	// that deliver its results.
+	// Chain: the request tree this job is in, and (for asked work) the turn
+	// that asked for it (Chain.By/BySession). The result is delivered by an
+	// on row registered for the job (on.go), not from here. Set on asked work
+	// and on the turns that deliver its results.
 	Chain *Chain `json:"chain,omitempty"`
 	// ResultOf: this turn job delivers that job's result. AgentBus started
 	// it, not the person.
@@ -846,7 +875,7 @@ func scanRunner(s scanner) (Runner, error) {
 // the same fields returns the first job and created false; other fields under
 // the same key get ErrKeyConflict.
 func (q *Queue) Create(team, kind, key string, spec Spec, links Links) (job Job, created bool, err error) {
-	return q.create(team, kind, key, spec, links, Limits{}, spec.Session)
+	return q.create(team, kind, key, spec, links, Limits{}, spec.Session, nil)
 }
 
 // HasKey reports whether a job was already made with this idempotency key.
@@ -932,7 +961,7 @@ func (q *Queue) TurnsAhead(team, id string) ([]Job, error) {
 // turn, the reviewed job's session for a review. A turn job that opens a new
 // session gets its id here. A session whose turn runs is never refused: Take
 // starts its turn jobs one at a time, in the order they were made.
-func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limits, session string) (job Job, created bool, err error) {
+func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limits, session string, on *onReg) (job Job, created bool, err error) {
 	specBytes, err := spec.asked().hashBytes()
 	if err != nil {
 		return job, false, err
@@ -951,6 +980,17 @@ func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limit
 					return ErrKeyConflict
 				}
 				job.ID = id
+				// A retry of the same ask: make sure its on exists (the first
+				// try may have stopped between the job and the on). Idempotent.
+				if on != nil {
+					var turnID sql.NullString
+					if err := tx.QueryRow(`SELECT turn FROM jobs WHERE id = ?`, id).Scan(&turnID); err != nil {
+						return fmt.Errorf("queue: read turn: %w", err)
+					}
+					if err := insertOn(tx, team, turnID.String, on, nanos(q.now())); err != nil {
+						return err
+					}
+				}
 				return nil
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
@@ -1012,6 +1052,13 @@ func (q *Queue) create(team, kind, key string, spec Spec, links Links, lim Limit
 		if _, err := tx.Exec(`INSERT INTO jobs(id, team, kind, state, idem_key, request_hash, spec, links, turn, session, created, updated)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, job.ID, team, kind, Queued, k, hash, string(sb), string(lb), turn, sess, now, now); err != nil {
 			return fmt.Errorf("queue: write job: %w", err)
+		}
+		// The ask's on, in the same transaction as its turn, so the two are
+		// durable together (no window where the turn exists but its on does not).
+		if t, ok := turn.(string); ok {
+			if err := insertOn(tx, team, t, on, now); err != nil {
+				return err
+			}
 		}
 		created = true
 		return nil
@@ -2180,11 +2227,11 @@ func (q *Queue) Review(team, id, agent, model, key string, includeReply bool) (J
 // ReviewAs is Review with the reviewer as a saved agent: as names its
 // harness in Agent, and its AgentID, Access, KeyEnv and Model.
 func (q *Queue) ReviewAs(team, id string, as Spec, key string, includeReply bool) (Job, bool, error) {
-	return q.review(team, id, as, key, includeReply, Links{}, Limits{})
+	return q.review(team, id, as, key, includeReply, Links{}, Limits{}, nil)
 }
 
 // review is ReviewAs with links; ReviewsJob is set here.
-func (q *Queue) review(team, id string, as Spec, key string, includeReply bool, links Links, lim Limits) (Job, bool, error) {
+func (q *Queue) review(team, id string, as Spec, key string, includeReply bool, links Links, lim Limits, on *onReg) (Job, bool, error) {
 	j, err := q.Get(team, id)
 	if err != nil {
 		return Job{}, false, err
@@ -2225,5 +2272,5 @@ func (q *Queue) review(team, id string, as Spec, key string, includeReply bool, 
 		}
 		links.Chain = &Chain{Root: root}
 	}
-	return q.create(team, KindReview, key, spec, links, lim, j.Session)
+	return q.create(team, KindReview, key, spec, links, lim, j.Session, on)
 }
