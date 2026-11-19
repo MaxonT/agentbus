@@ -25,7 +25,7 @@ func TestFormatPolicyStarter(t *testing.T) {
 // away from its default.
 func TestFormatPolicyRoundTrip(t *testing.T) {
 	no, yes, two, half := false, true, 7, 0.5
-	p := Policy{ReadFolders: []string{"~/notes", "/tmp/a b"}, Allow: []string{"go test", `say "hi"`}, Forbid: []string{"git push"},
+	p := Policy{Allow: []string{"go test", `say "hi"`}, Forbid: []string{"git push"},
 		Edit: EditNone, Subagents: &no,
 		Limits:   Limits{MaxDepth: &two, MaxJobsPerTurn: &two, MaxJobsPerTree: &two, MaxCostUSDPerTree: &half},
 		AgentAPI: AgentAPI{Apply: &yes, Tools: &no}}
@@ -228,7 +228,6 @@ func TestRemote(t *testing.T) {
 		}
 		p := DefaultPolicy()
 		p.Forbid = []string{"git push"}
-		p.ReadFolders = []string{"~"}
 		json.NewEncoder(w).Encode(RunnerSettings{Permissions: p, PermissionsVersion: "v1", Instructions: "Hi {session}", InstructionsVersion: "v2", SettingsVersion: 7})
 	}))
 	defer srv.Close()
@@ -242,13 +241,6 @@ func TestRemote(t *testing.T) {
 	p, v, err := r.Policy()
 	if err != nil || v != "v1" || !slices.Equal(p.Forbid, []string{"git push"}) || sawToken != "Bearer rt_secret" {
 		t.Fatalf("Policy: %+v %q %v %q", p, v, err, sawToken)
-	}
-	// ~ is this machine's home; a folder that is not here says so.
-	if q, err := p.Resolve("/"); err != nil || !slices.Equal(q.ReadFolders, []string{"/"}) {
-		t.Fatalf("Resolve: %+v %v", q, err)
-	}
-	if _, err := p.Resolve(filepath.Join(t.TempDir(), "nope")); !errors.As(err, &se) || !strings.Contains(se.Where, "on this runner") {
-		t.Fatalf("a folder not on this runner: %v", err)
 	}
 	if text, v, err := r.Instructions(); err != nil || text != "Hi {session}" || v != "v2" {
 		t.Fatalf("Instructions: %q %q %v", text, v, err)

@@ -657,6 +657,45 @@ func TestUpgradeRemovesRetiredKey(t *testing.T) {
 	}
 }
 
+// A stored policy that holds read_folders, retired in 0.6 (B8), loses it on the
+// first start, as one change whose settings.changed event names the key, and
+// keeps the rest. A second start does nothing.
+func TestUpgradeRemovesReadFolders(t *testing.T) {
+	dir := home(t)
+	storedDB(t, dir, `{"read_folders":["~/notes"],"forbid":["rm"]}`)
+	d, rep, err := upgrade(dir).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(rep.Removed, ",") != "read_folders" || len(rep.Kept) != 0 {
+		t.Fatalf("removed %v kept %v", rep.Removed, rep.Kept)
+	}
+	var got []Change
+	d.SetSink(func(c Change) error { got = append(got, c); return nil }, nil)
+	if s := stored(t, d, SettingPermissions); s != `{"forbid":["rm"]}` {
+		t.Fatalf("stored %s", s)
+	}
+	if len(got) != 1 || got[0].Setting != SettingPermissions || strings.Join(got[0].Keys, ",") != "read_folders" || got[0].File != "" {
+		t.Fatalf("events %+v", got)
+	}
+	if p, _, err := d.Policy(); err != nil || p.Forbid[0] != "rm" {
+		t.Fatalf("policy %+v %v", p, err)
+	}
+	d.Close()
+
+	d, rep, err = upgrade(dir).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if len(rep.Removed) != 0 || len(rep.Kept) != 0 {
+		t.Fatalf("second start: removed %v kept %v", rep.Removed, rep.Kept)
+	}
+	if cs, _, _ := d.Changes(); len(cs) != 1 {
+		t.Fatalf("second start: %d changes", len(cs))
+	}
+}
+
 // A stored policy that holds share_read_only, retired in 0.6, loses it on the
 // first start, as one change whose settings.changed event names the key, and
 // keeps the rest. A second start does nothing.

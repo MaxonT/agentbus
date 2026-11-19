@@ -42,7 +42,7 @@ func TestAgyArgs(t *testing.T) {
 			[]string{"mcp(*)", "command(make)"}, []string{"write_file(*)", "edit_file(*)"}},
 		// A rule cannot hold a parenthesis or a glob character: such an
 		// entry is left out, so it allows nothing.
-		{"unsafe names", Turn{Writes: edit, Allow: []string{"x) command(rm"}, ReadFolders: []string{"/a*"}},
+		{"unsafe names", Turn{Writes: edit, Allow: []string{"x) command(rm"}},
 			[]string{"mcp(*)", "write_file(/w/f)", "edit_file(/w/f)"},
 			[]string{"write_file(/w/f/policy.toml)", "edit_file(/w/f/policy.toml)"}},
 	} {

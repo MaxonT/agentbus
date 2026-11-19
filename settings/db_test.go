@@ -80,7 +80,7 @@ func TestUpgradeSteps(t *testing.T) {
 		t.Errorf("the last step %s keeps the default it changes", last.Key)
 	}
 	if strings.Join(retiredKeys, ",") != "commands,subscriptions_on_runners,agent_api.continue,sandbox.read,"+
-		"agent_api.scope,agent_api.read,agent_api.list_agents,agent_api.start,agent_api.review,agent_api.cancel,agent_api.rename,share_read_only" {
+		"agent_api.scope,agent_api.read,agent_api.list_agents,agent_api.start,agent_api.review,agent_api.cancel,agent_api.rename,share_read_only,read_folders" {
 		t.Errorf("retired keys %v", retiredKeys)
 	}
 	for _, m := range movedKeys {

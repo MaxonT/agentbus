@@ -44,7 +44,7 @@ func TestReadPolicy(t *testing.T) {
 
 	// A missing file is empty lists and every default.
 	def := DefaultPolicy()
-	if p, err := load(path, home); err != nil || len(p.ReadFolders)+len(p.Allow)+len(p.Forbid) != 0 || !samePolicy(p, def) {
+	if p, err := load(path, home); err != nil || len(p.Allow)+len(p.Forbid) != 0 || !samePolicy(p, def) {
 		t.Fatalf("missing file: %+v %v", p, err)
 	}
 	if def.Edit != EditSession || *def.Limits.MaxDepth != 2 || *def.Limits.MaxJobsPerTurn != 10 || *def.Limits.MaxJobsPerTree != 30 ||
@@ -56,7 +56,7 @@ func TestReadPolicy(t *testing.T) {
 	}
 	// The starter parses, with empty lists, and writes out every default.
 	writePerm(t, path, PolicyStarter)
-	if p, err := load(path, home); err != nil || len(p.ReadFolders)+len(p.Allow)+len(p.Forbid) != 0 || !samePolicy(p, def) {
+	if p, err := load(path, home); err != nil || len(p.Allow)+len(p.Forbid) != 0 || !samePolicy(p, def) {
 		t.Fatalf("starter: %+v %v", p, err)
 	}
 	// An older file, with the lists only, keeps its lists and gets the
@@ -75,16 +75,12 @@ func TestReadPolicy(t *testing.T) {
 	if p, err := load(path, home); err != nil || *p.Subagents || p.Edit != EditSession {
 		t.Fatalf("subagents = false: %+v %v", p, err)
 	}
-	// ~ is the home folder; a folder comes back absolute and clean.
-	writePerm(t, path, "read_folders = [\"~\", \"~/notes/a/\", \""+dir+"/.\"]\n"+
-		"allow = [\"go test\", 'make test']\n"+
+	// Commands and comments.
+	writePerm(t, path, "allow = [\"go test\", 'make test']\n"+
 		"forbid = [\n  \"git push\", # a comment\n]\n")
 	p, err := load(path, home)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if want := []string{home, filepath.Join(home, "notes", "a"), dir}; !slices.Equal(p.ReadFolders, want) {
-		t.Errorf("folders %q, want %q", p.ReadFolders, want)
 	}
 	// A colon in an argument is fine: the rule ends at the last ":*".
 	writePerm(t, path, "allow = [\"curl http://localhost:3000/health\"]\n")
@@ -101,12 +97,6 @@ func TestReadPolicy(t *testing.T) {
 		{"not strings", "allow = [1]\n", "a value has the wrong type"},
 		{"unknown key", "allowed = [\"go test\"]\n", `unknown key "allowed"`},
 		{"a table", "[allow]\nx = 1\n", "lists of strings"},
-		{"empty folder", "read_folders = [\"\"]\n", `read_folders entry "" is empty`},
-		{"relative folder", "read_folders = [\"notes\"]\n", "must be an absolute path"},
-		{"a flag as a folder", "read_folders = [\"--help\"]\n", "must be an absolute path"},
-		{"another user's home", "read_folders = [\"~root\"]\n", "must be an absolute path"},
-		{"missing folder", "read_folders = [\"~/nope\"]\n", "is not an existing folder"},
-		{"control character", "read_folders = [\"/tmp\\n\"]\n", "control character"},
 		{"empty command", "allow = [\" \"]\n", `allow entry " " is empty`},
 		{"a flag as a command", "forbid = [\"--dangerously-skip-permissions\"]\n", "starts with -"},
 		{"comma", "allow = [\"go test,Edit\"]\n", "comma or a parenthesis"},
@@ -114,8 +104,6 @@ func TestReadPolicy(t *testing.T) {
 		{"padded", "allow = [\"go test \"]\n", "starts or ends with a space"},
 		{"rule syntax in a command", "allow = [\"go test:*\"]\n", "has a star"},
 		{"two spaces", "allow = [\"go  test\"]\n", "two spaces in a row"},
-		{"glob in a folder", "read_folders = [\"/tmp/*\"]\n", "glob character"},
-		{"comma in a folder", "read_folders = [\"/tmp,Edit\"]\n", "comma"},
 		{"tab", "allow = [\"go\\ttest\"]\n", "control character"},
 		{"edit unknown", "edit = \"everywhere\"\n", `edit must be "session" or "none"`},
 		{"edit not a string", "edit = true\n", "wrong type"},

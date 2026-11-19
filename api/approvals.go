@@ -150,7 +150,7 @@ func (a *API) decideApproval(w http.ResponseWriter, r *http.Request, id string) 
 	switch decision {
 	case "once":
 		once = true
-	case "always", "allow":
+	case "always", "allow", "always for this folder":
 		always, decision = true, "always"
 	case "refuse":
 	default:
@@ -189,9 +189,22 @@ func (a *API) decideApproval(w http.ResponseWriter, r *http.Request, id string) 
 	// allow, for the turns after this one; once changes no settings.
 	_ = once
 	if always {
-		if err := a.allowCommands(h.rules); err != nil {
-			writeError(w, http.StatusInternalServerError, "the approval could not be written to the settings")
-			return
+		if a.isFolderTool(h.toolName) {
+			folder := ""
+			if len(h.rules) > 0 {
+				folder = h.rules[0]
+			}
+			if folder != "" && a.cfg.Store != nil {
+				if err := a.cfg.Store.AddFolderGrant(h.session, folder); err != nil {
+					writeError(w, http.StatusInternalServerError, "the folder grant could not be stored")
+					return
+				}
+			}
+		} else {
+			if err := a.allowCommands(h.rules); err != nil {
+				writeError(w, http.StatusInternalServerError, "the approval could not be written to the settings")
+				return
+			}
 		}
 	}
 	// H1: no continuation turn. The gateway holds the model's reply at the Ask

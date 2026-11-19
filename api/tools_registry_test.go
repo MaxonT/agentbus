@@ -70,10 +70,10 @@ func getToolDef(t *testing.T, e *env, name string) toolreg.Tool {
 // result are byte-identical before removing it and after re-adding it.
 func TestDefaultRemovedAndReaddedBehavesTheSame(t *testing.T) {
 	e := mcpEnv(t)
-	// The only built-in app after B12: ask_agent. The ten read tool copies
-	// retired with read-only turns (reading is agentbus-api, not a tool).
-	if got := len(listToolSummaries(t, e)); got != 1 {
-		t.Fatalf("%d built-in tools, want 1", got)
+	// The built-in apps: ask_agent and folder access tools (read_file,
+	// list_folder, write_file) in B8.
+	if got := len(listToolSummaries(t, e)); got != 4 {
+		t.Fatalf("%d built-in tools, want 4", got)
 	}
 	before := toolEntry(t, e, token, "ask_agent")
 	if before == nil {

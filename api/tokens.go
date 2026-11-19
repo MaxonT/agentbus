@@ -77,6 +77,8 @@ const (
 	// onPath: DELETE /api/v0/ons/{id}. The handler checks the on's maker is
 	// this token's turn (on.go).
 	onPath
+	// fileOp: POST /api/v0/files/read, list, write.
+	fileOp
 )
 
 // Refusals a turn token gets. Fixed wording: they never quote the request.
@@ -274,7 +276,7 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 		if j.Links.Chain == nil || j.Links.Chain.By == "" || j.Links.Chain.Root != g.Root {
 			return refuse(turnAskedRefused)
 		}
-	case askTurn, anyRead, toolList, onRegister, onPath:
+	case askTurn, anyRead, toolList, onRegister, onPath, fileOp:
 		// The handler checks the rest: onRegister reads the subject turn from
 		// the body and the session it delivers to; onPath reads the on's maker.
 	default:
@@ -318,7 +320,7 @@ func turnRefusal(turn int, api settings.AgentAPI) string {
 		return turnWriteRefused
 	case turn == applyTurnTok && !*api.Apply:
 		return turnSwitchedOff("apply a turn's changes", "Agents may apply")
-	case turn == toolList && !*api.Tools:
+	case (turn == toolList || turn == fileOp) && !*api.Tools:
 		return turnSwitchedOff("use the agentbus MCP tools", "AgentBus tools")
 	}
 	return ""

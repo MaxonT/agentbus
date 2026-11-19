@@ -270,9 +270,10 @@ func TestOneEndpointStartsEveryTurn(t *testing.T) {
 	// compaction points the context view shows ("compacts at ~Y%"). 69 with
 	// POST /api/v0/ons and DELETE /api/v0/ons/{id}, the on primitive: register
 	// a standing instruction (a turn completes -> deliver its reply) and remove
-	// it (B13).
-	if len(ops) != 69 {
-		t.Errorf("%d endpoints, want 69: %v", len(ops), ops)
+	// it (B13). 72 with POST /api/v0/files/read, POST /api/v0/files/list and
+	// POST /api/v0/files/write, folder access through tools (B8).
+	if len(ops) != 72 {
+		t.Errorf("%d endpoints, want 72: %v", len(ops), ops)
 	}
 	for _, want := range []string{"POST /api/v0/turns", "GET /api/v0/turns", "GET /api/v0/turns/{id}", "POST /api/v0/turns/{id}/stop",
 		"GET /api/v0/turns/{id}/diff", "POST /api/v0/turns/{id}/apply", "POST /api/v0/turns/{id}/review",

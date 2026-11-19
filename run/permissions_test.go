@@ -24,14 +24,11 @@ func writePerm(t *testing.T, path, s string) {
 // rule, resume and model. Read-only turns retired (B12): edit = "none" (no edit
 // rule) is the only way a turn is kept from writing.
 func TestTurnArgsPermissions(t *testing.T) {
-	perm := settings.Policy{ReadFolders: []string{"/home/me/.agents", "/home/me/notes"},
+	perm := settings.Policy{
 		Allow: []string{"go test", "make test"}, Forbid: []string{"git push", "git checkout"}}
-	const reads = "Read(//home/me/.agents/**),Grep(//home/me/.agents/**),Glob(//home/me/.agents/**)," +
-		"Read(//home/me/notes/**),Grep(//home/me/notes/**),Glob(//home/me/notes/**)"
 	// The whole Bash tool is allowed on an edit turn, so the gateway decides
 	// every shell command (allow, ask, forbid, unlisted); the per-command
 	// Bash(<cmd>:*) rules are gone, and so is the Bash forbid deny.
-	allow := []string{"--allowedTools", reads + ",Bash"}
 	bash := []string{"--allowedTools", "Bash"}
 	// No edit rule: every tool that edits files is denied, whatever the
 	// person's own settings allow.
@@ -50,23 +47,19 @@ func TestTurnArgsPermissions(t *testing.T) {
 		want                       []string
 	}{
 		{"claude, no policy, no edits", "claude", "", "", Writes{}, settings.Policy{}, cat(head, bash, noChrome, noEditOnly, []string{"--", "hi"})},
-		{"claude", "claude", "", "", Writes{}, perm, cat(head, allow, noChrome, noEdit, []string{"--", "hi"})},
+		{"claude", "claude", "", "", Writes{}, perm, cat(head, bash, noChrome, noEdit, []string{"--", "hi"})},
 		// The edit rule: Edit and Write in the session's folder, and a deny
 		// on each protected file, which wins over it and over forbid's
 		// neighbours in the same list.
 		{"claude edits its folder", "claude", "", "", edit, perm, cat(head,
-			[]string{"--allowedTools", reads + ",Edit(//w/repo/**),Bash", "--no-chrome",
+			[]string{"--allowedTools", "Edit(//w/repo/**),Bash", "--no-chrome",
 				"--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token)", "--", "hi"})},
 		{"claude edits, no other policy", "claude", "", "", edit, settings.Policy{}, cat(head,
 			[]string{"--allowedTools", "Edit(//w/repo/**),Bash", "--no-chrome", "--disallowedTools", "Edit(//data/permissions.toml),Edit(//data/token)", "--", "hi"})},
-		// read_folders never becomes --add-dir: that would let a turn write
-		// there under the person's acceptEdits mode.
-		{"claude, folders only", "claude", "", "", Writes{}, settings.Policy{ReadFolders: []string{"/x"}},
-			cat(head, []string{"--allowedTools", "Read(//x/**),Grep(//x/**),Glob(//x/**),Bash"}, noChrome, noEditOnly, []string{"--", "hi"})},
 		{"claude, allow only", "claude", "", "", Writes{}, settings.Policy{Allow: []string{"go test"}},
 			cat(head, bash, noChrome, noEditOnly, []string{"--", "hi"})},
 		{"claude resume and model", "claude", "r-1", "opus", Writes{}, perm,
-			cat(head, []string{"--resume", "r-1"}, allow, noChrome, noEdit, []string{"--model", "opus", "--", "hi"})},
+			cat(head, []string{"--resume", "r-1"}, bash, noChrome, noEdit, []string{"--model", "opus", "--", "hi"})},
 		// codex writes, with network, only with the edit rule; edit = "none" (no
 		// edit rule) runs the read-only sandbox with no network.
 		{"codex edits", "codex", "", "", edit, perm, []string{"exec", "--skip-git-repo-check", "--json", "--sandbox", "workspace-write",
