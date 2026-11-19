@@ -115,23 +115,22 @@ Settings apply to every session, from the next turn. Change them on the cockpit'
 through the API (`/api/v0/settings/permissions` and `/api/v0/settings/instructions`; the keys and
 their defaults are in `/docs`, under Settings).
 
-- **Workspace:** each session works in its own copy of your folder, cloned copy-on-write where the
-  disk supports it, so a big `node_modules` costs nothing to copy and a turn may write its own. To
-  reach a file outside its copy, an agent uses an AgentBus tool, and each new folder is asked for
-  once (**Always for this folder** grants it from then on).
+- **Permissions:** whether an agent may apply its own changes (off by default; you always may), then
+  two lists by name, each in three parts: **Commands** and **Tools**. **Allow** runs without asking,
+  **Ask** holds the call, and **Refuse** never runs it. Starting subagents and editing files are
+  tools too (`subagent`, `edit`), so they are ruled like any other. On **Ask** the call is held for
+  up to 60 seconds while a card above the message box waits for you: **Allow once** runs it in the
+  same turn, **Always allow** runs it and allows it from then on, and **Refuse** or no answer in time
+  returns a plain refusal. Refuse wins over Ask, Ask over Allow. **Anything else** decides a call on
+  none of the lists. Agents reach the record, and apply and stop a turn, through `agentbus-api`.
 - **Config:** files from your home copied into each session's own home at each turn: your
   settings, skills, MCP servers and logins. **Use my config** fills the list. Sign-ins are never
   copied.
-- **Permissions:** the one AgentBus tool agents may call, to ask another agent; whether they may
-  start their own subagents (off by default, so the work is recorded); and whether an agent may
-  apply its own changes (off by default; you always may). Agents reach the record, and review,
-  apply and stop a turn, through `agentbus-api`, not a tool. **Commands** and tool calls go through
-  one list by name, in three parts: **Allow** (run without asking), **Ask**, and **Refuse** (never).
-  On **Ask** the call is held for up to 60 seconds while a card above the message box waits for you:
-  **Allow once** runs it in the same turn, **Always allow** runs it and allows it from then on, and
-  **Refuse** or no answer in time returns a plain refusal. Refuse wins over Ask, Ask over Allow.
-- **Isolation:** the sandbox walls each session to its folder and its home. Network contain lets
-  agents reach only the hosts you list. Both are off by default.
+- **Isolation:** each session works in its own copy of your folder, cloned copy-on-write where the
+  disk supports it, so a big `node_modules` costs nothing to copy. To reach a file outside its copy,
+  an agent uses an app that asks you once per folder (**Always for this folder** grants it from then
+  on). The sandbox walls each session to its folder and its home, and network contain lets agents
+  reach only the hosts you list. Both are off by default.
 - **Limits:** how much work one message may cause: how deep agents may ask each other, how many
   turns, and the cost.
 
