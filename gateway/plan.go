@@ -19,10 +19,14 @@ package gateway
 //     gateway.
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -139,15 +143,10 @@ func samePlan(a, b event.Plan) bool {
 	return a.UsedPercent == b.UsedPercent && a.WindowMinutes == b.WindowMinutes && a.Status == b.Status
 }
 
-// readPlan stores the plan usage a reply to ex carries, when ex's call used
-// a subscription of control's. The event names the call it came from and
-// no session: the plan is the sign-in's, not a session's.
-func (g *Gateway) readPlan(ex *exchange, h http.Header) {
-	if ex.signin.Subscription == "" {
-		return
-	}
+// recordPlans emits plan.usage events for each changed reading.
+func (g *Gateway) recordPlans(ex *exchange, plans []event.Plan) {
 	now := g.now()
-	for _, p := range planReadings(h, ex.signin) {
+	for _, p := range plans {
 		if !g.plans.changed(p, now) {
 			continue
 		}
@@ -159,5 +158,104 @@ func (g *Gateway) readPlan(ex *exchange, h http.Header) {
 			Vendor:   g.adapter.Vendor(),
 			Plan:     &p,
 		})
+	}
+}
+
+// readPlan stores the plan usage a reply to ex carries, when ex's call used
+// a subscription of control's. The event names the call it came from and
+// no session: the plan is the sign-in's, not a session's.
+func (g *Gateway) readPlan(ex *exchange, h http.Header) {
+	if ex.signin.Subscription == "" {
+		return
+	}
+	g.recordPlans(ex, planReadings(h, ex.signin))
+}
+
+// readAgyQuota reads and parses the JSON body of agy's startup call
+// /v1internal:retrieveUserQuotaSummary, mapping each bucket to plan.usage.
+// It restores resp.Body so the caller receives the original reply intact.
+// If reading the upstream response body fails, the error is returned so the proxy
+// fails rather than hiding a broken stream. A body that decodes but does not parse
+// records nothing and never fails the call.
+func (g *Gateway) readAgyQuota(ex *exchange, resp *http.Response) error {
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	plain, err := decode(resp.Header.Get("Content-Encoding"), body, "reply", false)
+	if err != nil {
+		return nil
+	}
+	g.recordPlans(ex, parseAgyQuota(plain, ex.signin))
+	return nil
+}
+
+type agyQuotaSummary struct {
+	Groups []struct {
+		Buckets []struct {
+			BucketID          string   `json:"bucketId"`
+			RemainingFraction *float64 `json:"remainingFraction"`
+			ResetTime         string   `json:"resetTime"`
+		} `json:"buckets"`
+	} `json:"groups"`
+}
+
+// parseAgyQuota maps agy's retrieveUserQuotaSummary body to event.Plan readings:
+// Window = bucketId, UsedPercent = round((1 - remainingFraction) * 100),
+// ResetsAt = resetTime, WindowMinutes 300 for 5h buckets and 10080 for weekly ones
+// (0 for unknown bucket ids), Subscription = agy.
+func parseAgyQuota(body []byte, si Signin) []event.Plan {
+	var summary agyQuotaSummary
+	if err := json.Unmarshal(body, &summary); err != nil {
+		return nil
+	}
+	sub := si.Subscription
+	if sub == "" {
+		sub = "agy"
+	}
+	var out []event.Plan
+	for _, group := range summary.Groups {
+		for _, b := range group.Buckets {
+			if b.BucketID == "" || b.RemainingFraction == nil {
+				continue
+			}
+			rem := *b.RemainingFraction
+			if rem < 0 {
+				rem = 0
+			} else if rem > 1 {
+				rem = 1
+			}
+			p := event.Plan{
+				Subscription:  sub,
+				Connection:    si.Connection,
+				Window:        b.BucketID,
+				WindowMinutes: agyWindowMinutes(b.BucketID),
+				UsedPercent:   math.Round((1.0 - rem) * 100),
+			}
+			if b.ResetTime != "" {
+				if t, err := time.Parse(time.RFC3339Nano, b.ResetTime); err == nil {
+					u := t.UTC()
+					p.ResetsAt = &u
+				} else if t, err := time.Parse(time.RFC3339, b.ResetTime); err == nil {
+					u := t.UTC()
+					p.ResetsAt = &u
+				}
+			}
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func agyWindowMinutes(id string) int {
+	switch {
+	case strings.HasSuffix(id, "-5h") || id == "5h":
+		return 300
+	case strings.HasSuffix(id, "-weekly") || id == "weekly":
+		return 10080
+	default:
+		return 0
 	}
 }

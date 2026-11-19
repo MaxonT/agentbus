@@ -683,6 +683,11 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 		return errUnreadable
 	}
 	if ex.call.Service {
+		if ex.call.Path == "/v1internal:retrieveUserQuotaSummary" && resp.StatusCode == http.StatusOK {
+			if err := g.readAgyQuota(ex, resp); err != nil {
+				return err
+			}
+		}
 		g.serviceReplied(ex, resp.StatusCode)
 		return nil
 	}

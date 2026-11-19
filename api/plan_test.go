@@ -113,3 +113,101 @@ func TestSubscriptionsShowPlanUsage(t *testing.T) {
 		t.Fatalf("claude usage: %+v", u)
 	}
 }
+
+// A connected subscription with no reading shows usage_known: false in
+// GET /api/v0/subscriptions, so an agent choosing by quota can tell
+// "unknown" from "none". Once a reading arrives, usage_known is true.
+// A disconnected subscription omits usage_known.
+func TestSubscriptionsUsageKnown(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	clock := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	subs := &credentials.Subscriptions{Dir: filepath.Join(dir, "subscriptions"), Now: func() time.Time { return clock }}
+
+	srv := httptest.NewUnstartedServer(nil)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	a, err := New(Config{Store: st, Token: token, Port: port, BaseURL: "http://127.0.0.1:" + port,
+		Subscriptions: &credentials.Manager{Store: subs, Logins: map[string]credentials.Login{"claude": {}, "codex": {}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Config.Handler = a
+	srv.Start()
+	t.Cleanup(srv.Close)
+	e := &env{srv: srv, api: a, store: st, port: port}
+
+	// 1. Connect claude, but no readings yet. Codex remains not connected.
+	if err := subs.Put("claude", "fake-claude-token", 365*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	cred, err := subs.Credential(credentials.Need{Access: credentials.AccessSubscription, Harness: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := cred.Connection
+
+	resp, raw := do(t, e.req(t, "GET", "/api/v0/subscriptions", nil))
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, raw)
+	}
+	var rawMap struct {
+		Subscriptions []map[string]any `json:"subscriptions"`
+	}
+	if err := json.Unmarshal([]byte(raw), &rawMap); err != nil {
+		t.Fatal(err)
+	}
+	byHarness := map[string]map[string]any{}
+	for _, s := range rawMap.Subscriptions {
+		byHarness[s["harness"].(string)] = s
+	}
+
+	// Claude is connected with no readings: usage_known must be false, usage omitted
+	claudeSub := byHarness["claude"]
+	if claudeSub["connected"] != true {
+		t.Fatalf("claude connected = %v, want true", claudeSub["connected"])
+	}
+	if claudeSub["usage_known"] != false {
+		t.Fatalf("claude usage_known = %v, want false (raw: %v)", claudeSub["usage_known"], claudeSub)
+	}
+	if _, hasUsage := claudeSub["usage"]; hasUsage {
+		t.Fatalf("claude has usage field, want omitted: %v", claudeSub["usage"])
+	}
+
+	// Codex is not connected: usage_known must be omitted
+	codexSub := byHarness["codex"]
+	if codexSub["connected"] != false {
+		t.Fatalf("codex connected = %v, want false", codexSub["connected"])
+	}
+	if _, hasKnown := codexSub["usage_known"]; hasKnown {
+		t.Fatalf("codex has usage_known, want omitted: %v", codexSub["usage_known"])
+	}
+
+	// 2. Add a reading for claude -> usage_known becomes true, usage present
+	reset := clock.Add(5 * time.Hour)
+	if _, _, err := st.Append(event.Event{ID: "p-1", Kind: event.PlanUsage, Time: clock, Vendor: "anthropic", Exchange: "x-1",
+		Plan: &event.Plan{Subscription: "claude", Connection: account, Window: "5h", WindowMinutes: 300, UsedPercent: 42, ResetsAt: &reset}}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, raw = do(t, e.req(t, "GET", "/api/v0/subscriptions", nil))
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, raw)
+	}
+	if err := json.Unmarshal([]byte(raw), &rawMap); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range rawMap.Subscriptions {
+		byHarness[s["harness"].(string)] = s
+	}
+	claudeSub = byHarness["claude"]
+	if claudeSub["usage_known"] != true {
+		t.Fatalf("claude usage_known = %v, want true", claudeSub["usage_known"])
+	}
+	if u, ok := claudeSub["usage"].([]any); !ok || len(u) != 1 {
+		t.Fatalf("claude usage = %v, want 1 reading", claudeSub["usage"])
+	}
+}
