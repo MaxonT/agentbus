@@ -89,8 +89,8 @@ with no query (ChatGPT, and OpenRouter's Responses format); `POST /v1internal:st
 with `alt=sse` or no query, and `POST /v1internal:generateContent` with none (Code Assist). Besides
 those, agy's own Code Assist methods `loadCodeAssist`, `listExperiments`, `fetchAdminControls`,
 `fetchAvailableModels`, `fetchUserInfo` and `retrieveUserQuotaSummary` (POST, no query) get it too,
-because agy stops without them; each is recorded as `vendor.called` with its status, its body
-unread. Any other call (another path, another method, another query) is answered **403** with
+because agy stops without them; each is recorded as `vendor.called` with its status (and `retrieveUserQuotaSummary`'s
+reply body is read for plan quota; the others' bodies unread). Any other call (another path, another method, another query) is answered **403** with
 `{"error": "control adds a credential only to the calls the vendor's adapter records, …"}`, gets no
 credential, reaches no vendor, and is recorded as `call.refused` with `call` (method and path,
 never the query) and why. A reply in a format the adapter does not read (a Content-Type it does not

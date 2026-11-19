@@ -100,6 +100,11 @@ func (g *Gateway) serveService(w http.ResponseWriter, r *http.Request, session, 
 	}
 	ex := &exchange{id: id, session: session, client: clientName(r.UserAgent()), turn: turn, start: g.now(),
 		relayed: rl != nil, checked: true, call: call, name: callName(r)}
+	if rl != nil {
+		ex.signin = rl.Signin
+	} else if c := credOf(r.Context()); c != nil {
+		ex.signin = c.signin
+	}
 	if turn != "" {
 		g.track(ex, session, turn)
 	}

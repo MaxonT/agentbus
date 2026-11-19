@@ -13,6 +13,7 @@ import (
 
 	"github.com/staysup/agentbus/adapter"
 	"github.com/staysup/agentbus/adapter/anthropic"
+	"github.com/staysup/agentbus/adapter/gemini"
 	"github.com/staysup/agentbus/adapter/openai"
 	"github.com/staysup/agentbus/event"
 )
@@ -350,5 +351,173 @@ func TestPlanUsageNewConnectStoredAgain(t *testing.T) {
 	plans := plansIn(mem.Events())
 	if len(plans) != 2 || plans[0].Plan.Connection != "c1" || plans[1].Plan.Connection != "c2" {
 		t.Fatalf("%+v", plans)
+	}
+}
+
+const paradevAgyQuota = `{
+	"groups": [
+		{
+			"buckets": [
+				{
+					"bucketId": "gemini-weekly",
+					"remainingFraction": 0.98,
+					"resetTime": "2026-09-01T00:00:00Z"
+				},
+				{
+					"bucketId": "gemini-5h",
+					"remainingFraction": 0.875,
+					"resetTime": "2026-08-28T20:00:00Z"
+				}
+			]
+		},
+		{
+			"buckets": [
+				{
+					"bucketId": "3p-weekly",
+					"remainingFraction": 0.75
+				},
+				{
+					"bucketId": "3p-5h",
+					"remainingFraction": 0.5
+				},
+				{
+					"bucketId": "unknown-bucket",
+					"remainingFraction": 0.5
+				}
+			]
+		}
+	]
+}`
+
+// agy calls POST /v1internal:retrieveUserQuotaSummary at startup.
+// The gateway relays it as a service call, reads the body, and records
+// one plan.usage per bucket under subscription "agy", keeping unknown
+// bucket ids with WindowMinutes 0.
+func TestAgyQuotaRelayedServiceCall(t *testing.T) {
+	v := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, paradevAgyQuota)
+	}))
+	t.Cleanup(v.Close)
+
+	do, mem, _ := planGateway(t, "relayed", Signin{Subscription: "agy", Connection: "conn-agy-1"}, gemini.Adapter{}, v.URL)
+	do("/v1internal:retrieveUserQuotaSummary", "{}")
+
+	plans := plansIn(mem.Events())
+	if len(plans) != 5 {
+		t.Fatalf("got %d plan.usage events, want 5: %+v", len(plans), plans)
+	}
+
+	byWindow := map[string]event.Plan{}
+	for _, e := range plans {
+		if e.Vendor != "gemini" {
+			t.Errorf("vendor = %q, want gemini", e.Vendor)
+		}
+		if e.Plan == nil {
+			t.Fatalf("nil Plan in %+v", e)
+		}
+		if e.Plan.Subscription != "agy" {
+			t.Errorf("subscription = %q, want agy", e.Plan.Subscription)
+		}
+		if e.Plan.Connection != "conn-agy-1" {
+			t.Errorf("connection = %q, want conn-agy-1", e.Plan.Connection)
+		}
+		byWindow[e.Plan.Window] = *e.Plan
+	}
+
+	// 1 - 0.875 = 0.125 -> 13%
+	g5h := byWindow["gemini-5h"]
+	if g5h.WindowMinutes != 300 || g5h.UsedPercent != 13 || g5h.ResetsAt == nil || g5h.ResetsAt.Format(time.RFC3339) != "2026-08-28T20:00:00Z" {
+		t.Errorf("gemini-5h = %+v", g5h)
+	}
+
+	// 1 - 0.98 = 0.02 -> 2%
+	gW := byWindow["gemini-weekly"]
+	if gW.WindowMinutes != 10080 || gW.UsedPercent != 2 || gW.ResetsAt == nil || gW.ResetsAt.Format(time.RFC3339) != "2026-09-01T00:00:00Z" {
+		t.Errorf("gemini-weekly = %+v", gW)
+	}
+
+	// 1 - 0.5 = 0.5 -> 50%
+	p5h := byWindow["3p-5h"]
+	if p5h.WindowMinutes != 300 || p5h.UsedPercent != 50 || p5h.ResetsAt != nil {
+		t.Errorf("3p-5h = %+v", p5h)
+	}
+
+	// 1 - 0.75 = 0.25 -> 25%
+	pW := byWindow["3p-weekly"]
+	if pW.WindowMinutes != 10080 || pW.UsedPercent != 25 || pW.ResetsAt != nil {
+		t.Errorf("3p-weekly = %+v", pW)
+	}
+
+	// Unknown bucket is kept with WindowMinutes 0
+	unk := byWindow["unknown-bucket"]
+	if unk.WindowMinutes != 0 || unk.UsedPercent != 50 {
+		t.Errorf("unknown-bucket = %+v", unk)
+	}
+}
+
+// A malformed quota body records nothing and never fails the call.
+func TestAgyQuotaMalformedBodyDoesNotFail(t *testing.T) {
+	for _, malformed := range []string{
+		`{not-json`,
+		`{"groups": "not-an-array"}`,
+		`{"groups": [{"buckets": "not-an-array"}]}`,
+		`{"groups": [{"buckets": [{"bucketId": 123}]}]}`,
+	} {
+		v := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, malformed)
+		}))
+		do, mem, _ := planGateway(t, "relayed", Signin{Subscription: "agy", Connection: "conn-agy-1"}, gemini.Adapter{}, v.URL)
+		do("/v1internal:retrieveUserQuotaSummary", "{}")
+		v.Close()
+
+		if plans := plansIn(mem.Events()); len(plans) != 0 {
+			t.Fatalf("malformed %q recorded %d plans: %+v", malformed, len(plans), plans)
+		}
+	}
+}
+
+// An upstream read failure during retrieveUserQuotaSummary propagates 502
+// rather than being hidden as a normal EOF on a partial buffer.
+func TestAgyQuotaUpstreamReadFailure(t *testing.T) {
+	v := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "500")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"groups": [`))
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+		}
+	}))
+	t.Cleanup(v.Close)
+
+	u, _ := url.Parse(v.URL)
+	mem := &event.Memory{}
+	g := New(u, gemini.Adapter{}, mem)
+	t.Cleanup(g.Close)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.ServeRelayed(w, r, Relayed{
+			Session: "s1", Turn: "t_1", Path: strings.TrimPrefix(r.URL.Path, "/relay/x"),
+			Prepare: func(rl *Relayed) {
+				rl.Header = func(h http.Header) { h.Set("Authorization", ruleCred) }
+				rl.Signin = Signin{Subscription: "agy", Connection: "c1"}
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest("POST", srv.URL+"/relay/x/v1internal:retrieveUserQuotaSummary", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer placeholder")
+	resp, err := rawClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d (body: %s), want 502 Bad Gateway", resp.StatusCode, string(body))
 	}
 }

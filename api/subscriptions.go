@@ -49,7 +49,8 @@ type SubscriptionState struct {
 	Expired     bool              `json:"expired" doc:"The sign-in cannot be used: its time is up, or the vendor refused to renew it. Connect again."`
 	Error       string            `json:"error,omitempty" doc:"Why it cannot be used, when it cannot."`
 	Connect     *credentials.View `json:"connect,omitempty" doc:"The latest connect, while control runs. Its links and one-time code are shown only while it runs."`
-	Usage       []PlanReading     `json:"usage,omitempty" doc:"How much of the plan is used, per window, as the vendor said on the latest model reply that carried this subscription's current connect (plan.usage). Shortest window first. Absent until such a reply on this connect: claude and codex say it on each reply; other harnesses do not."`
+	Usage       []PlanReading     `json:"usage,omitempty" doc:"How much of the plan is used, per window, as the vendor said on the latest model reply that carried this subscription's current connect (plan.usage). Shortest window first. Absent until such a reply on this connect: claude and codex say it on each reply; agy says it on startup; other harnesses do not."`
+	UsageKnown  *bool             `json:"usage_known,omitempty" doc:"Whether plan usage is known for this connected subscription: true when at least one window has been read on the current connect, false when connected but no reading has arrived yet (unknown). Absent when not connected."`
 }
 
 // PlanReading is one window of a subscription's plan, from its latest
@@ -75,7 +76,7 @@ var subscriptionRoutes = []route{
 		tag:     "Settings",
 		summary: "List subscriptions",
 		doc: "The person's own subscriptions that control can add to the model calls of agents on their runners, which hold no sign-in: " +
-			"for each harness, whether it is connected and until when, and how much of its plan is used (usage). A connected one is used for every turn, on one machine (agentbus up) as on every approved runner; a turn whose harness is not connected is refused with \"connect your <harness> subscription in Settings\".",
+			"for each harness, whether it is connected and until when, and how much of its plan is used (usage, with usage_known false when connected with no reading yet). A connected one is used for every turn, on one machine (agentbus up) as on every approved runner; a turn whose harness is not connected is refused with \"connect your <harness> subscription in Settings\".",
 		replies: []reply{ok(200, SubscriptionList{}, "The subscriptions."), fail(404, noSubscriptions)},
 		serve:   plain((*API).listSubscriptions)},
 	{method: "POST", path: "/api/v0/subscriptions/{id}/connect", op: "connectSubscription",
@@ -262,6 +263,8 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 		}
 		if st.Connected {
 			s.Usage = usageOf(plans, h, credentials.ConnectionOf(*st.ConnectedAt))
+			known := len(s.Usage) > 0
+			s.UsageKnown = &known
 		}
 		out.Subscriptions = append(out.Subscriptions, s)
 	}
