@@ -89,8 +89,7 @@ func (s *Server) attemptJob(msg string) (queue.Job, run.Grant, bool) {
 	if session == "" {
 		return queue.Job{}, run.Grant{}, false
 	}
-	g := run.Grant{Session: session, Turn: j.Turn, Root: session, ReadOnly: j.Spec.ReadOnly || j.Kind == queue.KindReview,
-		Harness: j.Spec.Harness}
+	g := run.Grant{Session: session, Turn: j.Turn, Root: session, Harness: j.Spec.Harness}
 	if c := j.Links.Chain; c != nil {
 		g.Root, g.Depth = c.Root, c.Depth
 	}

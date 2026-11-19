@@ -11,9 +11,9 @@ package api
 // and the instructions: every /api/v0/settings route is main-token only),
 // change or remove saved agents, see or make tokens (none is
 // ever in a reply), close sessions, write program events, or read or write
-// sessions outside its request tree. A read-only turn's token only reads.
-// Its own session and the person's session, the tree's root, are never
-// continued by it: results reach them by delivery only.
+// sessions outside its request tree. Its own session and the person's session,
+// the tree's root, are never continued by it: results reach them by delivery
+// only.
 //
 // A request tree is the person's session (its root) and every session work
 // asked for from it, at any depth (queue.Chain). route.turn says what a turn
@@ -54,19 +54,18 @@ const (
 	// askTurn: POST /api/v0/turns. The handler checks the rest (askChecks).
 	askTurn
 	// askReview: {id} is a turn of a session in the token's request tree, to
-	// review. Not for a read-only turn.
+	// review.
 	askReview
 	// askedTurn: {id} is a turn that work in the token's request tree asked
-	// for, to stop. Not for a read-only turn.
+	// for, to stop.
 	askedTurn
 	// anyRead: a read that holds no session's data, such as the saved
 	// agents.
 	anyRead
-	// renameSession: {id} is a session in the token's scope, to rename. Not
-	// for a read-only turn.
+	// renameSession: {id} is a session in the token's scope, to rename.
 	renameSession
 	// applyTurnTok: {id} is a turn of a session in the token's scope, whose
-	// changes to apply. Not for a read-only turn.
+	// changes to apply.
 	applyTurnTok
 	// toolList: POST /api/v0/mcp, the API as tools. Each tool call is sent
 	// through its own route and checked there (tools.go).
@@ -80,7 +79,7 @@ const (
 		"and asks for work with POST /api/v0/turns and POST /api/v0/turns/{id}/review"
 	turnSessionRefused  = "a turn token reads only its own session and the sessions its request tree started"
 	turnCallRefused     = "a turn token reads only the calls of its own session and the sessions its request tree started"
-	turnReadOnly        = "this turn is read-only, so its token only reads; it cannot start, continue, review or stop work, rename sessions or apply changes"
+	turnReviewLeaf      = "a review reviews the turn and reports a verdict; it cannot ask for work, review another turn, apply changes or stop work. Read the record and reply with your verdict."
 	turnContinueRefused = "a turn token does not continue sessions: ask_agent starts a new one, and its result comes back to your session " +
 		"as a later turn; to follow up, ask again with what the result said"
 	turnFolderRefused = "a turn token starts sessions only in its own session's folder, or a folder inside it; " +
@@ -178,8 +177,23 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 		writeError(w, http.StatusServiceUnavailable, turnPolicyBroken(err))
 		return nil, false
 	}
-	if msg := turnRefusal(rt.turn, g, perm.AgentAPI); msg != "" {
+	if msg := turnRefusal(rt.turn, perm.AgentAPI); msg != "" {
 		return refuse(msg)
+	}
+	// A review is a leaf (B12): it reviews the turn and reports a verdict, so
+	// its token never asks for, reviews, applies or stops further work. Its one
+	// turn runs in a copy that is torn down at the end, so there is nothing for
+	// a later turn to run in. Reading the record is allowed. (Read-only turns
+	// retired, but a review stays a leaf at the token, not at the harness.)
+	switch rt.turn {
+	case askTurn, askReview, applyTurnTok, askedTurn:
+		if a.cfg.Queue != nil {
+			if isReview, err := a.cfg.Queue.IsReview(queue.DefaultTeam, g.Session); err != nil {
+				return failed(err)
+			} else if isReview {
+				return refuse(turnReviewLeaf)
+			}
+		}
 	}
 	// A turn token reaches its own request tree, always: its own session,
 	// the tree's root and every session work in the tree started. Start and
@@ -283,20 +297,13 @@ func (a *API) allowTurn(w http.ResponseWriter, r *http.Request, rt *route, id st
 	return r.WithContext(ctx), true
 }
 
-// turnRefusal says why a turn token of grant g may not call a route of kind
-// turn at all under [agent_api], or "": the read-only turn, apply and tools.
-// Reading, listing agents, starting, reviewing, stopping and renaming have no
-// switch: within its request tree a turn token always may (0.5.2).
-// The rest of the check needs the request (allowTurn). The tool list
-// (tools.go) asks it too, so a tool is listed only where its route would
-// take the call.
-func turnRefusal(turn int, g run.Grant, api settings.AgentAPI) string {
-	switch turn {
-	case askTurn, askReview, askedTurn, renameSession, applyTurnTok:
-		if g.ReadOnly {
-			return turnReadOnly
-		}
-	}
+// turnRefusal says why a turn token may not call a route of kind turn at all
+// under [agent_api], or "": apply and tools. Reading, listing agents, starting,
+// reviewing, stopping and renaming have no switch: within its request tree a
+// turn token always may (0.5.2). The rest of the check needs the request
+// (allowTurn). The tool list (tools.go) asks it too, so a tool is listed only
+// where its route would take the call.
+func turnRefusal(turn int, api settings.AgentAPI) string {
 	switch {
 	case turn == mainOnly:
 		return turnWriteRefused

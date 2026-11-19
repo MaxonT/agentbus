@@ -39,7 +39,7 @@ const DefaultTurnWait = 30 * time.Second
 
 var runModel = run.ModelShape
 
-const badRun = "the body must be one JSON object with prompt, agent and folder (or session, and optionally agent), and optionally model, read_only, isolate and idempotency_key, at most 2 MiB"
+const badRun = "the body must be one JSON object with prompt, agent and folder (or session, and optionally agent), and optionally model, isolate and idempotency_key, at most 2 MiB"
 
 // TurnRequest is the body of POST /api/v0/turns. omitempty marks a field as
 // optional in the API's description.
@@ -56,7 +56,11 @@ type TurnRequest struct {
 	Isolate   *bool  `json:"isolate,omitempty" doc:"True unless false, for a new session. True: the session runs in its own copy of folder, exactly as folder is now, uncommitted edits included, made as the isolation setting says (auto, overlay, copy, git or none). False: always folder as it is. Not sent with session."`
 	Prompt    string `json:"prompt" doc:"From 1 byte to 256 KiB, no NUL byte. Always passed after --."`
 	Model     string `json:"model,omitempty" doc:"Passed only as the value of --model, for this turn only. Absent: the named agent's model, as it is when the turn is asked for; an agent with none runs on its harness's own default."`
-	ReadOnly  *bool  `json:"read_only,omitempty" doc:"False unless true. True: claude gets Read, Grep and Glob only; codex runs with --sandbox read-only. False: claude keeps its own tools and permission settings, plus the edit rule of the settings (by default it edits its session's folder without asking); with edit = \"session\" codex runs with --sandbox workspace-write and network access on, so it can edit the folder and reach the network, and with edit = \"none\" read-only. Read-only codex has no network."`
+	// compat 0.6: read-only turns retired (B12). A client of a build before
+	// 0.6 may still send read_only; it is read and dropped, so the request is
+	// not refused. A review is a normal turn now, in its own copy, and never
+	// applied automatically. Removed next release.
+	ReadOnly *bool `json:"read_only,omitempty" doc:"Deprecated and ignored: read-only turns were retired in 0.6. A review runs like any turn, in its own copy of the folder, and its changes are never applied automatically. Accepted for one release so an older client is not refused."`
 	// IdempotencyKey makes a retry safe: a client whose request timed out
 	// sends it again with the same key and gets the same turn.
 	IdempotencyKey string `json:"idempotency_key,omitempty" doc:"Optional, 1 to 128 characters of A-Z, a-z, 0-9 and . _ : -. A retry with the same key and the same fields answers 202 with the turn the key first started, existing true, and starts nothing. The same key with other fields gets 409. A request refused with 400 used no key."`
@@ -100,6 +104,13 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 		body.Machine = body.Connector
 	}
 	body.Connector = ""
+	// compat 0.6: read_only is retired (B12); read and dropped so an older
+	// client's request is not refused. The turn runs as any turn does.
+	// TODO(B12 P2): a job created before 0.6 with read_only:true stored a
+	// request hash that included it; an identical retry now hashes without it
+	// and gets a key conflict instead of the existing turn. This only bites a
+	// retry that spans the upgrade; a new key, or a fresh request, is unaffected.
+	body.ReadOnly = nil
 	// Only a body without session starts a new session. A session sent as
 	// "" or null is refused, never read as absent: that would start a new
 	// session in place of the one the caller meant.
@@ -123,7 +134,7 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	spec := queue.Spec{Prompt: body.Prompt, Model: body.Model, ReadOnly: body.ReadOnly != nil && *body.ReadOnly}
+	spec := queue.Spec{Prompt: body.Prompt, Model: body.Model}
 	if sent.Session != nil {
 		if !sessionID.MatchString(body.Session) {
 			writeError(w, http.StatusBadRequest, "session must match "+sessionID.String())

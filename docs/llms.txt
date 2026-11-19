@@ -22,10 +22,11 @@ copy. They reach the **person's folder** only when a turn is **applied**:
 
 ## Calling the API from a turn
 
-A claude or codex turn may have some of the API as tools of its own (when `[agent_api] tools = true`),
-from the MCP server `agentbus` at `POST /api/v0/mcp`: `ask_agent`, `list_agents`, `list_turns`,
-`get_turn`, `turn_diff`, `search_history` and the other reads. Each does what its route below does,
-with your turn's token. To review, apply or stop a turn, use `agentbus-api` (below).
+A claude or codex turn may have the apps as tools of its own (when `[agent_api] tools = true`),
+from the MCP server `agentbus` at `POST /api/v0/mcp`: `ask_agent`, and any other app. Each does what
+its route below does, with your turn's token. Reading the record (turns, diffs, sessions, saved
+agents), reviewing, applying and stopping a turn are the API's own routes, reached with
+`agentbus-api` (below), not tools.
 
 Your environment has `AGENTBUS_URL` and `AGENTBUS_TOKEN` (your turn's own token; never print it).
 Without the tools, use `agentbus-api METHOD PATH [JSON]`: it is on your PATH and sends the token for you.
@@ -79,7 +80,7 @@ work, ask for a review of your turn, then end your turn.
 
 ## Refusals
 
-A 403 says why: a read-only turn asking for anything; a session outside your tree; sending
+A 403 says why: a session outside your tree; sending
 `"session"` to continue one (your token never continues a session); a folder outside yours; a call the person switched off in
 `[agent_api]` of the settings; a limit in `[limits]` (depth 2, 10 asks per turn, 30 per tree
 by default). A 404 means no such turn, session or agent. Errors are JSON: `{"error":"..."}`.

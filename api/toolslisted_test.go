@@ -40,7 +40,7 @@ func TestToolsListedOncePerTurn(t *testing.T) {
 	const claudeTok, otherTok = "turn-tok-claude-0123456789abcdef", "turn-tok-other-0123456789abcdef"
 	e := mcpEnvGrants(t, true, map[string]run.Grant{
 		claudeTok: {Session: "s1", Turn: "t_1", Root: "s1", Harness: "claude"},
-		otherTok:  {Session: "s1", Turn: "t_2", Root: "s1", Harness: "claude", ReadOnly: true},
+		otherTok:  {Session: "s1", Turn: "t_2", Root: "s1", Harness: "claude"},
 	})
 	served := toolNames(t, e, claudeTok)
 	toolNames(t, e, claudeTok)
@@ -64,7 +64,7 @@ func TestToolsListedOncePerTurn(t *testing.T) {
 		t.Errorf("tools.listed is the API's own event: %+v", ev)
 	}
 
-	// Another turn's list is its own event, with its own (read-only) tools.
+	// Another turn's list is its own event, with its own tools.
 	ro := toolNames(t, e, otherTok)
 	got = toolsListedOf(t, e, "s1")
 	if len(got) != 2 || got[1].Turn != "t_2" || !slices.Equal(got[1].Tools, ro) {

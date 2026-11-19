@@ -212,18 +212,11 @@ func TestToolCallEmptyInputHeldThenRouteRejects(t *testing.T) {
 	}
 }
 
-// An unauthorized call (a read-only token renaming) is refused at authorize,
-// before the gate can hold it, with the route's own message (R2).
-func TestToolCallUnauthorizedRefusedWithoutHold(t *testing.T) {
-	e := toolGateEnv(t, 5*time.Second, 0, nil)
-	_, v := rpc(t, e, mcpReadTok, askCall)
-	if dig(v, "result", "isError") != true || !strings.Contains(resultText(v), "read-only") {
-		t.Errorf("unauthorized call: %v", v)
-	}
-	if ids := pendingIDs(t, e); len(ids) != 0 {
-		t.Errorf("an unauthorized call was held: %v", ids)
-	}
-}
+// Read-only turns retired (B12): there is no longer a per-call authorize
+// refusal reachable through the one built-in app (ask_agent is always allowed
+// a turn token), so the former read-only-token refusal test is gone. The
+// authorize-before-hold path (R2) still runs; [agent_api] tools = false is
+// refused at the tool server, covered in the mcp tests.
 
 // "Always" clears EVERY ask entry that matches the tool, so a second equivalent
 // entry does not keep asking after the first is moved (R2).
@@ -436,7 +429,7 @@ func hasEvent(t *testing.T, e *env, k event.Kind, tool string) bool {
 func toolGateEnv(t *testing.T, timeout time.Duration, max int, shape func(*settings.Policy)) *env {
 	t.Helper()
 	dir := t.TempDir()
-	p := settings.FirstInstallPolicy() // ships the read-only built-in tools pre-set to allow
+	p := settings.FirstInstallPolicy() // a fresh install's policy
 	tools := true
 	p.AgentAPI.Tools = &tools
 	if shape != nil {
@@ -453,7 +446,6 @@ func toolGateEnv(t *testing.T, timeout time.Duration, max int, shape func(*setti
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	grants := map[string]run.Grant{
 		mcpWriteTok: {Session: "s1", Turn: "t_1", Root: "s1"},
-		mcpReadTok:  {Session: "s1", Turn: "t_1", Root: "s1", ReadOnly: true},
 	}
 	a, err := New(Config{Store: st, Token: token, Port: port, BaseURL: "http://127.0.0.1:" + port,
 		Settings:        settings.NewFiles(dir),

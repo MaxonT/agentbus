@@ -1,9 +1,11 @@
 package api
 
 // POST /api/v0/turns/{id}/review: ask another agent to review a turn. A review
-// is a turn of its own: read-only, in a session control names for it, in the
-// reviewed turn's copy. Its verdict and findings are read from its reply
-// when it ends (queue.ParseVerdict), and shown on it.
+// is a turn of its own, in a session control names for it, in the reviewed
+// turn's copy. Read-only turns retired in 0.6 (B12): it runs like any turn and
+// reads the reviewed turn through agentbus-api; its own edits stay in its copy
+// and are never applied automatically. Its verdict and findings are read from
+// its reply when it ends (queue.ParseVerdict), and shown on it.
 
 import (
 	"errors"

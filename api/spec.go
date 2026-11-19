@@ -46,7 +46,7 @@ const specIntro = "agentbus runs on your machine, between your coding agents and
 	"- A turn started by `POST /api/v0/turns` gets its own token in `$AGENTBUS_TOKEN`, and this service's address in `$AGENTBUS_URL`. " +
 	"With it the agent reads its session and asks other agents: it starts turns, each in a new session, asks for reviews and reads their results, on the operations that say so; it never continues a session. " +
 	"Each result comes back to the asking session as a later turn. It never changes policy or saved agents, never sees a token, " +
-	"and stops working when the turn's child exits. A read-only turn's token only reads. " +
+	"and stops working when the turn's child exits. " +
 	"An asked turn finds who asked it in `$AGENTBUS_ASKED_BY_SESSION` and `$AGENTBUS_ASKED_BY_TURN`. " +
 	"Its copy does not hold the asker's unapplied changes: read them through this API.\n" +
 	"- The turns token, the file `turns_token` in the data folder, may only start, stop, review and read turns, on the operations that say so. " +
@@ -77,17 +77,16 @@ var turnTokenDoc = map[int]string{
 	treeSessionPath:  "A turn token may call this for a session in its request tree: its own, the person's session it started from, or one work in that tree started.",
 	treeSessionQuery: "A turn token may call this for a session in its request tree: without session, its own is used.",
 	treeTurn:         "A turn token may call this for a turn of a session in its request tree, by the turn id alone.",
-	askTurn: "A turn token may call this to ask another agent, unless its turn is read-only. " +
+	askTurn: "A turn token may call this to ask another agent. " +
 		"A new session must be in the turn's own folder or one inside it (the person's folder when absent), always isolated. " +
 		"A session it continues must be one its request tree started, never its own or the person's. " +
 		"The turn's result comes back to the asking session as a later turn. Caps: " + askCaps,
-	askReview: "A turn token may call this for a turn of a session in its request tree, its own session's turns included, unless its turn is read-only. " +
+	askReview: "A turn token may call this for a turn of a session in its request tree, its own session's turns included. " +
 		"The review's result comes back to the asking session as a later turn. Caps: " + askCaps,
-	askedTurn: "A turn token may stop only a turn its request tree asked for, unless its turn is read-only.",
-	anyRead:   "A turn token may call this too.",
-	applyTurnTok: "A turn token may call this for a turn of a session in its request tree only when [agent_api] apply is on (off by default), " +
-		"and never from a read-only turn.",
-	renameSession: "A turn token may rename a session in its request tree, unless its turn is read-only. It never closes one.",
+	askedTurn:     "A turn token may stop only a turn its request tree asked for.",
+	anyRead:       "A turn token may call this too.",
+	applyTurnTok:  "A turn token may call this for a turn of a session in its request tree only when [agent_api] apply is on (off by default).",
+	renameSession: "A turn token may rename a session in its request tree. It never closes one.",
 	toolList: "A turn token may call this: its list holds the tools its turn may call under [agent_api] (none of them when tools is false), " +
 		"and each call is checked by the operation it names.",
 }
@@ -115,13 +114,12 @@ var constraints = map[string]func(*openapi3.Schema){
 		s.Type = &openapi3.Types{"object"}
 	},
 
-	"TurnRequest":           closed,
-	"TurnRequest.agent":     pattern(sessionID.String()),
-	"TurnRequest.folder":    maxLength(MaxFolder),
-	"TurnRequest.prompt":    minLength(1),
-	"TurnRequest.model":     pattern(runModel.String()),
-	"TurnRequest.read_only": defaultFalse,
-	"TurnRequest.session":   pattern(sessionID.String()),
+	"TurnRequest":         closed,
+	"TurnRequest.agent":   pattern(sessionID.String()),
+	"TurnRequest.folder":  maxLength(MaxFolder),
+	"TurnRequest.prompt":  minLength(1),
+	"TurnRequest.model":   pattern(runModel.String()),
+	"TurnRequest.session": pattern(sessionID.String()),
 
 	"AgentRequest":         closed,
 	"AgentRequest.name":    func(s *openapi3.Schema) { minLength(1)(s); maxLength(agents.MaxName)(s) },

@@ -448,10 +448,11 @@ func TestBadBaseIsSetup(t *testing.T) {
 	}
 }
 
-// A review of a worktree job runs read-only in the author's worktree, in a
-// session of its own. The verdict is read from the reviewer's last reply in
-// the record.
-func TestReviewRunsInTheAuthorsWorktree(t *testing.T) {
+// A review of a worktree job runs as a normal turn (read-only retired, B12) in
+// its OWN copy of the reviewed worktree, in a session of its own — never in the
+// author's worktree, so its edits cannot reach the author's workspace or the
+// person's folder. The verdict is read from the reviewer's last reply.
+func TestReviewRunsInItsOwnCopy(t *testing.T) {
 	repo := t.TempDir()
 	mustGit(t, repo, "init", "-q", "-b", "main")
 	write(t, filepath.Join(repo, "app.txt"), "v1\n")
@@ -504,13 +505,24 @@ func TestReviewRunsInTheAuthorsWorktree(t *testing.T) {
 	}
 	r := w.runs()[1]
 	args := strings.Join(r.Args, " ")
-	if !sameDir(r.Cwd, filepath.Join(w.r.cfg.Workdir, author.Session)) || !strings.Contains(args, "--tools Read,Grep,Glob") ||
-		!strings.Contains(args, "--model sonnet") || strings.Contains(args, "--resume") {
-		t.Fatalf("review ran in %q with %q", r.Cwd, args)
-	}
-	if res := result(t, got); res.Session == author.Session || res.Session == "" {
+	res := result(t, got)
+	if res.Session == author.Session || res.Session == "" {
 		t.Fatalf("the review ran in session %q, the author's is %q", res.Session, author.Session)
 	}
+	// B12: the review runs in its OWN copy (named after its session), not the
+	// author's worktree, and as a normal turn (no --tools lockdown).
+	if strings.Contains(r.Cwd, author.Session) || !strings.Contains(r.Cwd, res.Session) {
+		t.Fatalf("the review did not run in its own copy: %q (own %q, author %q)", r.Cwd, res.Session, author.Session)
+	}
+	if strings.Contains(args, "--tools Read,Grep,Glob") || !strings.Contains(args, "--model sonnet") || strings.Contains(args, "--resume") {
+		t.Fatalf("review args %q", args)
+	}
+	// The copy is removed once the review ends (cleanup is async), so nothing
+	// is left behind.
+	waitFor(t, "the review's copy to be removed", func() bool {
+		_, err := os.Stat(r.Cwd)
+		return os.IsNotExist(err)
+	})
 }
 
 // An attempt whose lease ran out is stale: its next heartbeat says so, and

@@ -260,12 +260,13 @@ func TestAskFanOutAndDeliver(t *testing.T) {
 	}
 }
 
-// A chain of asks stops at the depth cap, a read-only turn's token cannot
-// ask, and one turn's asks stop at the per-turn cap. Each refusal says why.
+// A chain of asks stops at the depth cap, and one turn's asks stop at the
+// per-turn cap; each refusal says why. read_only is accepted and ignored
+// (retired in 0.6, B12), so a turn that sends it runs and acts normally.
 func TestAskCaps(t *testing.T) {
 	e, dir := askEnv(t)
 	folder := t.TempDir()
-	root := startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"root"}`)
+	startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"root"}`)
 	tok := tokenOf(t, dir, "root")
 	ask(t, e, tok, `{"agent":"claude","prompt":"d1"}`)
 	ask(t, e, tokenOf(t, dir, "d1"), `{"agent":"claude","prompt":"d2"}`)
@@ -281,14 +282,12 @@ func TestAskCaps(t *testing.T) {
 		t.Errorf("past the per-turn cap: %d %s", code, out)
 	}
 
-	startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"ro","read_only":true}`)
-	code, out = as(t, e, tokenOf(t, dir, "ro"), "POST", "/api/v0/turns", `{"agent":"claude","prompt":"x"}`)
-	if code != 403 || !strings.Contains(out, "read-only") {
-		t.Errorf("read-only turn asking: %d %s", code, out)
-	}
-	code, out = as(t, e, tokenOf(t, dir, "ro"), "PATCH", "/api/v0/sessions/"+root.Session, `{"title":"x"}`)
-	if code != 403 || !strings.Contains(out, "read-only") {
-		t.Errorf("read-only turn renaming: %d %s", code, out)
+	// Read-only turns retired (B12): read_only is accepted and ignored, so the
+	// turn runs normally and its token may rename its own session.
+	ro := startTurn(t, e, `{"agent":"claude","folder":"`+folder+`","prompt":"ro","read_only":true}`)
+	code, out = as(t, e, tokenOf(t, dir, "ro"), "PATCH", "/api/v0/sessions/"+ro.Session, `{"title":"x"}`)
+	if code != 200 {
+		t.Errorf("a turn that sent read_only could not rename its own session: %d %s", code, out)
 	}
 	for _, p := range []string{"root", "d1", "d2", "ro"} {
 		release(dir, p)
@@ -495,8 +494,10 @@ func TestAskedAgentReadsTheAskersChanges(t *testing.T) {
 		}
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args-child"))
-	// With the tools, on by default, the line names the tool and the turn.
-	if want := "call turn_changes with turn " + root.Turn + " and session " + root.Session; !strings.Contains(string(args), want) {
+	// Read-only turns and the read-tool copies retired (B12): the line points
+	// the agent at the changes route through agentbus-api (curl form here, no
+	// API client on PATH in the test), not at a turn_changes tool.
+	if want := "/api/v0/turns/" + root.Turn + "/changes?session=" + root.Session; !strings.Contains(string(args), want) {
 		t.Errorf("the child's instructions do not name %s: %s", want, args)
 	}
 	if got, _ := os.ReadFile(filepath.Join(pwdOf(t, dir, "child"), "a.txt")); string(got) != "one\n" {

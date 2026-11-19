@@ -168,6 +168,23 @@ func (q *Queue) SessionFolder(team, session string) (ref, machine string, repo b
 	return sp.FolderRef, sp.Machine, false, nil
 }
 
+// IsReview reports whether session is a review's own session (Links.ReviewSession):
+// a review runs in a session of its own, created when its job is made. A review
+// is a leaf (B12): control refuses a review's token asking for, reviewing,
+// applying or stopping further work, so its one turn and its copy are all it has.
+func (q *Queue) IsReview(team, session string) (bool, error) {
+	var one int
+	err := q.db.QueryRow(`SELECT 1 FROM jobs WHERE team = ? AND kind = 'review'
+		AND json_extract(links, '$.review_session') = ? LIMIT 1`, team, session).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("queue: read review session: %w", err)
+	}
+	return true, nil
+}
+
 // ReviewLinked is ReviewAs with links: for a review an agent asked for, its
 // Asker and Chain. The caps are checked in the same transaction.
 func (q *Queue) ReviewLinked(team, id string, as Spec, key string, includeReply bool, links Links, lim Limits) (Job, bool, error) {

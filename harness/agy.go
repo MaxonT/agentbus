@@ -241,33 +241,24 @@ func agySettings(t Turn) string {
 			allow = append(allow, "read_file("+f+")")
 		}
 	}
-	write := !t.Writes.ReadOnly
-	// Edit turns may call the MCP servers the person copied into the
-	// session's home (Home files); read-only turns get no mcp rule, and
-	// headless agy then refuses every MCP call (measured 2026-11-14).
-	if write {
-		allow = append(allow, "mcp(*)")
+	// Every turn may call the MCP servers the person copied into the
+	// session's home (Home files). Read-only turns retired in 0.6 (B12): a
+	// review runs like any turn, so it gets the mcp rule too.
+	allow = append(allow, "mcp(*)")
+	for _, f := range t.Writes.Edit {
+		allow = append(allow, "write_file("+f+")", "edit_file("+f+")")
 	}
-	if write {
-		for _, f := range t.Writes.Edit {
-			allow = append(allow, "write_file("+f+")", "edit_file("+f+")")
-		}
-		for _, c := range t.Allow {
-			if ruleSafe(c) {
-				allow = append(allow, "command("+c+")")
-			}
-		}
-		for _, p := range t.Writes.Protect {
-			deny = append(deny, "write_file("+p+")", "edit_file("+p+")")
+	for _, c := range t.Allow {
+		if ruleSafe(c) {
+			allow = append(allow, "command("+c+")")
 		}
 	}
-	if !write || len(t.Writes.Edit) == 0 {
+	for _, p := range t.Writes.Protect {
+		deny = append(deny, "write_file("+p+")", "edit_file("+p+")")
+	}
+	// A turn with no edit rule (edit = "none") may still not write its folder.
+	if len(t.Writes.Edit) == 0 {
 		deny = append(deny, "write_file(*)", "edit_file(*)")
-	}
-	if !write {
-		// A read-only turn runs no command, as a read-only claude turn
-		// has no shell.
-		deny = append(deny, "command(*)")
 	}
 	perm := map[string][]string{"allow": allow}
 	if len(deny) > 0 {

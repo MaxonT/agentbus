@@ -22,10 +22,9 @@ package run
 //	subagents = false claude: --disallowedTools Task,Agent,Workflow; codex: --disable multi_agent --disable multi_agent_v2
 //
 // read_folders only grants reads, in Claude Code's default and acceptEdits
-// modes; under the person's own auto mode it may still write there. A
-// read_only turn stays read-only: allow does not widen it. A forbid wins over
-// an allow and over the person's own settings. Each turn's flags are in its
-// header line in logs/runs/<session>.log.
+// modes; under the person's own auto mode it may still write there. A forbid
+// wins over an allow and over the person's own settings. Each turn's flags are
+// in its header line in logs/runs/<session>.log.
 
 import (
 	"os"
@@ -77,11 +76,7 @@ type Writes = harness.Writes
 // cannot keep one file of its folder out of its sandbox, runs read-only in a
 // folder holding a protected file. why says, for the service log, why edits
 // were left out.
-func writesFor(h harness.Harness, folder string, readOnly bool, perm settings.Policy, protect []string) (w Writes, why string) {
-	w.ReadOnly = readOnly
-	if readOnly {
-		return w, ""
-	}
+func writesFor(h harness.Harness, folder string, perm settings.Policy, protect []string) (w Writes, why string) {
 	for _, p := range protect {
 		w.Protect = appendReal(w.Protect, p)
 	}

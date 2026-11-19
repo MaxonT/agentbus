@@ -200,29 +200,29 @@ func TestTurnEnvAsked(t *testing.T) {
 // leaves it out.
 func TestAskedLine(t *testing.T) {
 	o := &event.Origin{Kind: event.OriginAsked, Session: "s1", Turn: "t_1"}
-	line := askedLine(askedBy(o), true, false)
+	line := askedLine(askedBy(o), true)
 	for _, want := range []string{"session s1, turn t_1", `agentbus-api GET "/api/v0/turns/t_1/changes?session=s1"`, `agentbus-api GET "/api/v0/turns?session=s1"`} {
 		if !strings.Contains(line, want) {
 			t.Errorf("line lacks %q: %s", want, line)
 		}
 	}
-	if line := askedLine(askedBy(o), false, false); !strings.Contains(line, `"$AGENTBUS_URL/api/v0/turns/t_1/changes?session=s1"`) {
+	if line := askedLine(askedBy(o), false); !strings.Contains(line, `"$AGENTBUS_URL/api/v0/turns/t_1/changes?session=s1"`) {
 		t.Errorf("curl: %s", line)
 	}
 	for _, o := range []*event.Origin{nil, {Kind: event.OriginResult, Session: "s1", Turn: "t_1"}, {Kind: event.OriginAsked, Session: "s1"}} {
-		if line := askedLine(askedBy(o), true, false); line != "" {
+		if line := askedLine(askedBy(o), true); line != "" {
 			t.Errorf("%v: %s", o, line)
 		}
 	}
 }
 
-// A turn that may write gets the API client on its allow list, so the gateway
-// runs the agent's own API calls without asking; a read-only one gets nothing
-// new, and the person's own lists are not changed. The whole Bash tool is
-// allowed on an edit turn, so the gateway is the one gate for shell.
+// Every turn gets the API client on its allow list now (read-only retired,
+// B12), so the gateway runs the agent's own API calls without asking; the
+// person's own lists are not changed. The whole Bash tool is allowed, so the
+// gateway is the one gate for shell.
 func TestWithAPI(t *testing.T) {
 	own := settings.Policy{Allow: []string{"go test"}, Forbid: []string{"git push"}}
-	p := withAPI(own, true, false)
+	p := withAPI(own, true)
 	if !slices.Contains(p.Allow, APIClient) {
 		t.Errorf("the API client is not on the allow list: %v", p.Allow)
 	}
@@ -234,10 +234,7 @@ func TestWithAPI(t *testing.T) {
 	if len(own.Allow) != 1 {
 		t.Errorf("the person's allow list changed: %v", own.Allow)
 	}
-	if p := withAPI(own, true, true); len(p.Allow) != 1 {
-		t.Errorf("read-only: %v", p.Allow)
-	}
-	if p := withAPI(own, false, false); len(p.Allow) != 1 {
+	if p := withAPI(own, false); len(p.Allow) != 1 {
 		t.Errorf("no path: %v", p.Allow)
 	}
 }

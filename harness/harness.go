@@ -276,10 +276,9 @@ type OpenRouterWire struct {
 	Model string
 }
 
-// Writes is what one turn may change. Nothing when ReadOnly. Otherwise the
-// files under each folder of Edit, never the files of Protect.
+// Writes is what one turn may change: the files under each folder of Edit,
+// never the files of Protect.
 type Writes struct {
-	ReadOnly bool
 	// Edit is the turn's folder, and its real path when that differs, when
 	// edit = "session". Empty: the turn edits nothing without asking.
 	Edit []string
@@ -313,10 +312,9 @@ type Turn struct {
 	Tools string
 	// OwnServers are the names of the person's own MCP servers in the home
 	// the turn runs in (OwnServers): what Home files copied into a session's
-	// home, or this user's own on a runner that gives sessions no home. An
-	// edit turn loads them and may call them; a read-only turn (a review)
-	// never does. Names only: never a server's settings, which may hold a
-	// token.
+	// home, or this user's own on a runner that gives sessions no home. Every
+	// turn loads them and may call them, reviews included (read-only retired,
+	// B12). Names only: never a server's settings, which may hold a token.
 	OwnServers []string
 	// Walled says the runner's sandbox walls the turn in (package sandbox):
 	// the harness's own sandbox stays off, since macOS cannot build one
