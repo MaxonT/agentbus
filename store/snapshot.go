@@ -38,6 +38,12 @@ type Session struct {
 	// list grouped by it keeps the session in one place.
 	FirstAgent   string `json:"first_agent,omitempty" doc:"The agent (harness) of the session's first turn.started or run that names one. A later turn may run on another agent; agent is then that one's, and first_agent stays. Absent for a session no run started."`
 	FirstAgentID string `json:"first_agent_id,omitempty" doc:"The saved agent's id from the same event as first_agent: the saved agent the session started on. Absent when that turn named a harness alone, or no run started the session."`
+	// Origin is the origin of the session's first turn: who started the session
+	// when the person did not. kind asked marks a session another agent's turn
+	// asked for (ask_agent). Absent for a session the person started. A view
+	// can show only the person's sessions by hiding those with an asked origin,
+	// nothing dropped from the record.
+	Origin *event.Origin `json:"origin,omitempty" doc:"The origin of the session's first turn: kind asked when another agent's turn asked for this session (ask_agent), naming that turn. Absent for a session the person started."`
 	// Usage sums the model.responded events that carried usage. It is nil when
 	// none did: absent usage is unknown, never zero.
 	Usage *event.Usage `json:"usage" doc:"Sums the replies that carried usage. Null when none did: unknown, never zero."`
@@ -174,6 +180,38 @@ func (s *Store) snapshotAt(hi int64) (Snapshot, error) {
 		}
 		if x := byID[id]; x != nil {
 			x.FirstAgent, x.FirstAgentID = agent, agentID
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return snap, fmt.Errorf("store: snapshot: %w", err)
+	}
+	rows.Close()
+
+	// The origin of the session's first turn.started: who started the session
+	// when the person did not (ask_agent gives kind asked). The bare origin
+	// column comes from the MIN(seq) row, so it is the first turn's.
+	rows, err = s.r.Query(`SELECT session, COALESCE(json_extract(data, '$.origin'), ''), MIN(seq)
+		FROM events WHERE seq <= ? AND kind = 'turn.started' GROUP BY session`, hi)
+	if err != nil {
+		return snap, fmt.Errorf("store: snapshot: %w", err)
+	}
+	for rows.Next() {
+		var id, origin string
+		var seq int64
+		if err := rows.Scan(&id, &origin, &seq); err != nil {
+			rows.Close()
+			return snap, fmt.Errorf("store: snapshot: %w", err)
+		}
+		if origin == "" {
+			continue
+		}
+		var o event.Origin
+		if json.Unmarshal([]byte(origin), &o) != nil {
+			continue
+		}
+		if x := byID[id]; x != nil {
+			x.Origin = &o
 		}
 	}
 	if err := rows.Err(); err != nil {
