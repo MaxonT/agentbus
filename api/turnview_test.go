@@ -182,8 +182,8 @@ func TestNeverStartedOnOnePageAcrossClocks(t *testing.T) {
 func TestQueuedTurnOrigin(t *testing.T) {
 	e := newJobsEnv(t)
 	asked, _, err := e.q.CreateTurnLinked(queue.DefaultTeam, "", queue.Spec{Harness: "claude", Prompt: "asked"},
-		queue.Links{Asker: &queue.Asker{Session: "s_ask", Turn: "t_ask"}, Chain: &queue.Chain{Root: "s_ask", Depth: 1}},
-		queue.Limits{MaxDepth: 2, MaxPerTurn: 10, MaxPerTree: 30})
+		queue.Links{Chain: &queue.Chain{Root: "s_ask", Depth: 1, By: "t_ask", BySession: "s_ask"}},
+		queue.Limits{MaxDepth: 2, MaxPerTurn: 10, MaxPerTree: 30}, "", queue.Maker{})
 	if err != nil {
 		t.Fatal(err)
 	}

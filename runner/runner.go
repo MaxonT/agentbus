@@ -910,8 +910,8 @@ func (r *Runner) request(at *attempt) run.Request {
 	case l.ResultOf != nil:
 		req.Origin = &event.Origin{Kind: event.OriginResult, Session: l.ResultOf.Session, Turn: l.ResultOf.Turn,
 			TurnKind: l.ResultOf.Kind, Agent: l.ResultOf.Agent}
-	case l.Asker != nil:
-		req.Origin = &event.Origin{Kind: event.OriginAsked, Session: l.Asker.Session, Turn: l.Asker.Turn}
+	case l.Chain != nil && l.Chain.By != "":
+		req.Origin = &event.Origin{Kind: event.OriginAsked, Session: l.Chain.BySession, Turn: l.Chain.By}
 	}
 	return req
 }

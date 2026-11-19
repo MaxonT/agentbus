@@ -267,9 +267,12 @@ func TestOneEndpointStartsEveryTurn(t *testing.T) {
 	// from the prompt cache, and what a prompt is made of. Both read the
 	// record and start no turn. 67 with GET and PUT
 	// /api/v0/settings/compaction, which read and change the per-vendor
-	// compaction points the context view shows ("compacts at ~Y%").
-	if len(ops) != 67 {
-		t.Errorf("%d endpoints, want 67: %v", len(ops), ops)
+	// compaction points the context view shows ("compacts at ~Y%"). 69 with
+	// POST /api/v0/ons and DELETE /api/v0/ons/{id}, the on primitive: register
+	// a standing instruction (a turn completes -> deliver its reply) and remove
+	// it (B13).
+	if len(ops) != 69 {
+		t.Errorf("%d endpoints, want 69: %v", len(ops), ops)
 	}
 	for _, want := range []string{"POST /api/v0/turns", "GET /api/v0/turns", "GET /api/v0/turns/{id}", "POST /api/v0/turns/{id}/stop",
 		"GET /api/v0/turns/{id}/diff", "POST /api/v0/turns/{id}/apply", "POST /api/v0/turns/{id}/review",

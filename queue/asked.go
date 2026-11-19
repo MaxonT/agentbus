@@ -1,10 +1,11 @@
 package queue
 
 // Work an agent asks for. A running turn may start turns and reviews through
-// the API with its own token. Each such job names the turn that asked for it
-// (Links.Asker) and the request tree it belongs to (Links.Chain). When it
-// ends, Deliver starts a new turn in the asking session whose prompt is the
-// result: a turn continuing a turn ("mail"). The asking turn never waits.
+// the API with its own token. Each such job names the request tree it belongs
+// to and the turn that asked for it (Links.Chain: Root, Depth, By, BySession).
+// When it ends, an on row registered for it (on.go) starts a new turn in the
+// asking session whose prompt is the result: a turn continuing a turn
+// ("mail"). The asking turn never waits.
 //
 // The caps, [limits] in permissions.toml, keep a chain of agents asking
 // agents from running away.
@@ -19,19 +20,20 @@ import (
 	"github.com/staysup/agentbus/workspace"
 )
 
-// Asker is the turn whose agent asked for a job, with its turn token.
-type Asker struct {
-	Session string `json:"session"`
-	Turn    string `json:"turn"`
-}
-
 // Chain is where a job sits in a request tree. Root is the session the
 // person's own turn ran in. Depth is how many agents asked in a row: work the
 // person's turn asks for has depth 1, work that work asks for depth 2. A
-// delivered result has the depth of the work it carries.
+// delivered result has the depth of the work it carries. By and BySession are
+// the turn and session that asked for the job: the provenance the per-turn cap
+// (checkAsked) keys on and the record's "asked" origin (runner.go, turnview.go)
+// reads, both from the asking turn's token. They are empty on a delivered
+// result and on the person's own work. They moved here off the retired Asker
+// struct so a turn's origin survives once delivery moves to an on row (on.go).
 type Chain struct {
-	Root  string `json:"root"`
-	Depth int    `json:"depth"`
+	Root      string `json:"root"`
+	Depth     int    `json:"depth"`
+	By        string `json:"by,omitempty"`
+	BySession string `json:"by_session,omitempty"`
 }
 
 // ResultOf marks a turn job that carries the result of asked work: a turn
@@ -67,24 +69,24 @@ func (e *LimitError) Error() string { return e.Msg }
 // checkAsked refuses a new asked job that would pass a cap. It runs in the
 // job's own transaction, so requests at once cannot all pass.
 func checkAsked(tx *sql.Tx, team string, links Links, lim Limits) error {
-	if links.Asker == nil {
-		return nil
+	if links.Chain == nil || links.Chain.By == "" {
+		return nil // not asked work: the person's own turn, or a delivered result
 	}
-	if links.Chain == nil || links.Chain.Depth < 1 {
+	if links.Chain.Depth < 1 {
 		return ErrBadState
 	}
 	if links.Chain.Depth > lim.MaxDepth {
 		return &LimitError{fmt.Sprintf("work may be asked for at most %d levels below the person's turn, and this would be level %d (Depth in Settings, Limits)", lim.MaxDepth, links.Chain.Depth)}
 	}
 	var n int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE team = ? AND json_extract(links, '$.asker.session') = ?
-		AND json_extract(links, '$.asker.turn') = ?`, team, links.Asker.Session, links.Asker.Turn).Scan(&n); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE team = ? AND json_extract(links, '$.chain.by') = ?
+		AND json_extract(links, '$.chain.by_session') = ?`, team, links.Chain.By, links.Chain.BySession).Scan(&n); err != nil {
 		return fmt.Errorf("queue: count asked: %w", err)
 	}
 	if n >= lim.MaxPerTurn {
 		return &LimitError{fmt.Sprintf("one turn may ask for at most %s, and this turn has asked for %d (Turns per request in Settings, Limits)", turnsOrReviews(lim.MaxPerTurn), n)}
 	}
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE team = ? AND json_extract(links, '$.asker.session') IS NOT NULL
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE team = ? AND json_extract(links, '$.chain.by') IS NOT NULL
 		AND json_extract(links, '$.chain.root') = ?`, team, links.Chain.Root).Scan(&n); err != nil {
 		return fmt.Errorf("queue: count asked: %w", err)
 	}
@@ -103,12 +105,23 @@ func turnsOrReviews(n int) string {
 	return fmt.Sprintf("%d turns or reviews", n)
 }
 
-// CreateTurnLinked makes a turn job, with links: for a turn an agent asked
-// for, its Asker and Chain, held to lim. The caps are checked in the same
-// transaction. A turn of a session whose turn runs waits behind it in the
-// queue.
-func (q *Queue) CreateTurnLinked(team, key string, spec Spec, links Links, lim Limits) (Job, bool, error) {
-	return q.create(team, KindTurn, key, spec, links, lim, spec.Session)
+// CreateTurnLinked makes a turn job, with links and the caps held to lim,
+// checked in the same transaction. A turn of a session whose turn runs waits
+// behind it in the queue. When deliverTo is set (an ask), an on is registered
+// for the new turn in the same transaction, delivering its reply to deliverTo
+// on completion, so the turn and its on are durable together (on.go). maker is
+// who asked, for the delivery's agent and the record; deliverTo "" registers
+// no on (a turn the person started).
+func (q *Queue) CreateTurnLinked(team, key string, spec Spec, links Links, lim Limits, deliverTo string, maker Maker) (Job, bool, error) {
+	return q.create(team, KindTurn, key, spec, links, lim, spec.Session, onRegFor(deliverTo, maker))
+}
+
+// onRegFor is the onReg an ask registers, or nil when deliverTo is empty.
+func onRegFor(deliverTo string, maker Maker) *onReg {
+	if deliverTo == "" {
+		return nil
+	}
+	return &onReg{session: deliverTo, maker: maker}
 }
 
 // SessionRoot is the root of the request tree a session was started in: the
@@ -186,106 +199,84 @@ func (q *Queue) IsReview(team, session string) (bool, error) {
 }
 
 // ReviewLinked is ReviewAs with links: for a review an agent asked for, its
-// Asker and Chain. The caps are checked in the same transaction.
-func (q *Queue) ReviewLinked(team, id string, as Spec, key string, includeReply bool, links Links, lim Limits) (Job, bool, error) {
-	return q.review(team, id, as, key, includeReply, links, lim)
+// Chain, held to lim in the same transaction. deliverTo and maker register the
+// on that delivers the verdict to the asking session, in that same transaction
+// (CreateTurnLinked).
+func (q *Queue) ReviewLinked(team, id string, as Spec, key string, includeReply bool, links Links, lim Limits, deliverTo string, maker Maker) (Job, bool, error) {
+	return q.review(team, id, as, key, includeReply, links, lim, onRegFor(deliverTo, maker))
 }
 
-// Deliver starts the next turn of each asking session whose asked work has
-// ended, with the result as its prompt, and says how many it started. Each
-// job's result is delivered once: the delivery's idempotency key is the job's
-// id, and the deliveries table records it, or why it could not be. The turn
-// runs on the agent of the asking turn, as agent reads it now, after the
-// turn running there now: every turn names its agent, and control names
-// this one. name gives a saved agent's name for the prompt; nil names it by
-// id. agent nil runs it on the asking turn's agent as that turn was asked.
-func (q *Queue) Deliver(team string, name func(id string) string, agent AgentOf) (int, error) {
-	rows, err := q.db.Query(`SELECT id FROM jobs j WHERE team = ? AND ended IS NOT NULL
-		AND json_extract(links, '$.asker.session') IS NOT NULL
-		AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.job = j.id) ORDER BY ended, id LIMIT 20`, team)
+// deliverResult builds and queues the turn that carries job j's result to
+// toSession, on the agent the asking turn ran (resolved now from askingTurn,
+// or by agent), after any turn running in toSession. It says the queued
+// turn's id, or why none could be made (a plain reason, not an error) — and
+// returns ErrFull, and no id, when the queue is full so the caller can try
+// again later. It writes no dedupe row: the caller (FireOns, on.go) records
+// the fire in on_fires so a result is carried exactly once. The turn runs on
+// the agent of the asking turn, as agent reads it now: every turn names its
+// agent, and control names this one. name gives a saved agent's name for the
+// prompt; nil names it by id. agent nil runs it on the asking turn's agent as
+// that turn was asked.
+func (q *Queue) deliverResult(team, toSession, askingTurn string, j Job, name func(id string) string, agent AgentOf) (string, string, error) {
+	c, err := q.changesOf(j)
 	if err != nil {
-		return 0, fmt.Errorf("queue: list results: %w", err)
+		return "", "", err
 	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("queue: list results: %w", err)
-		}
-		ids = append(ids, id)
+	reply, err := q.replyOf(j)
+	if err != nil {
+		return "", "", err
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, id := range ids {
-		j, err := q.Get(team, id)
-		if err != nil {
-			return n, err
-		}
-		c, err := q.changesOf(j)
-		if err != nil {
-			return n, err
-		}
-		reply, err := q.replyOf(j)
-		if err != nil {
-			return n, err
-		}
-		spec := Spec{Session: j.Links.Asker.Session, Prompt: ResultPrompt(j, c, reply, name)}
-		why := ""
-		asking, err := q.JobByTurn(team, j.Links.Asker.Turn)
+	spec := Spec{Session: toSession, Prompt: ResultPrompt(j, c, reply, name)}
+	// The reply runs on the asking turn's agent. An on registered by the main
+	// token names no asking turn (askingTurn ""); then it runs on the agent
+	// that did the work (the subject's own), so the delivery still has one.
+	from := j.Spec
+	if askingTurn != "" {
+		asking, err := q.JobByTurn(team, askingTurn)
 		switch {
 		case errors.Is(err, ErrNotFound):
-			why = "the asking turn is not in the queue, so its agent is not known"
+			return "", "the asking turn is not in the queue, so its agent is not known", nil
 		case err != nil:
-			return n, err
-		case agent != nil:
-			var as Spec
-			if as, why = agent(asking.Spec); why == "" {
-				spec.Harness, spec.AgentID, spec.Access, spec.KeyEnv, spec.AgentModel = as.Harness, as.AgentID, as.Access, as.KeyEnv, as.AgentModel
-			}
-		default:
-			a := asking.Spec
-			spec.Harness, spec.AgentID, spec.Access, spec.KeyEnv, spec.AgentModel = a.Harness, a.AgentID, a.Access, a.KeyEnv, a.AgentModel
+			return "", "", err
 		}
-		if why != "" {
-			if _, err := q.db.Exec(`INSERT INTO deliveries(job, delivery, error, created) VALUES(?,?,?,?) ON CONFLICT DO NOTHING`,
-				j.ID, "", why, nanos(q.now())); err != nil {
-				return n, fmt.Errorf("queue: write delivery: %w", err)
-			}
-			continue
-		}
-		res := &ResultOf{Job: j.ID, Kind: j.Kind, Session: resultSession(j), Turn: j.Turn, Agent: agentName(j.Spec)}
-		links := Links{ResultOf: res}
-		if j.Links.Chain != nil {
-			links.Chain = &Chain{Root: j.Links.Chain.Root, Depth: j.Links.Chain.Depth}
-		}
-		d, _, err := q.create(team, KindTurn, ResultKey(j.ID), spec, links, Limits{}, spec.Session)
-		var removed *RunnerRemovedError
-		switch {
-		case errors.As(err, &removed):
-			why = "the asking session's machine " + strconv.Quote(removed.Machine) + " was removed"
-		case err == nil:
-			n++
-		case errors.Is(err, ErrFull):
-			return n, nil // the queue is full: try again later
-		case errors.Is(err, ErrSessionClosed):
-			why = "the asking session is closed"
-		case errors.Is(err, ErrSessionEnded):
-			why = "the asking session ended with its first turn"
-		case errors.Is(err, ErrKeyConflict):
-			why = "a delivery of this result already exists with other fields"
-		default:
-			return n, err
-		}
-		if _, err := q.db.Exec(`INSERT INTO deliveries(job, delivery, error, created) VALUES(?,?,?,?) ON CONFLICT DO NOTHING`,
-			j.ID, d.ID, why, nanos(q.now())); err != nil {
-			return n, fmt.Errorf("queue: write delivery: %w", err)
-		}
+		from = asking.Spec
 	}
-	return n, nil
+	if agent != nil {
+		as, why := agent(from)
+		if why != "" {
+			return "", why, nil
+		}
+		from = as
+	}
+	spec.Harness, spec.AgentID, spec.Access, spec.KeyEnv, spec.AgentModel = from.Harness, from.AgentID, from.Access, from.KeyEnv, from.AgentModel
+	res := &ResultOf{Job: j.ID, Kind: j.Kind, Session: resultSession(j), Turn: j.Turn, Agent: agentName(j.Spec)}
+	links := Links{ResultOf: res}
+	// The delivery carries the subject's request tree. This is safe because an
+	// on delivers only within that tree: the ask path registers an on for its
+	// own session, and the public route refuses a delivery session outside the
+	// subject's tree (api/on.go). So toSession's tree is always the subject's,
+	// and the old delivery's invariant (delivery stays in one tree) holds.
+	if j.Links.Chain != nil {
+		links.Chain = &Chain{Root: j.Links.Chain.Root, Depth: j.Links.Chain.Depth}
+	}
+	d, _, err := q.create(team, KindTurn, ResultKey(j.ID), spec, links, Limits{}, spec.Session, nil)
+	var removed *RunnerRemovedError
+	switch {
+	case errors.As(err, &removed):
+		return "", "the asking session's machine " + strconv.Quote(removed.Machine) + " was removed", nil
+	case err == nil:
+		return d.ID, "", nil
+	case errors.Is(err, ErrFull):
+		return "", "", ErrFull
+	case errors.Is(err, ErrSessionClosed):
+		return "", "the asking session is closed", nil
+	case errors.Is(err, ErrSessionEnded):
+		return "", "the asking session ended with its first turn", nil
+	case errors.Is(err, ErrKeyConflict):
+		return "", "a delivery of this result already exists with other fields", nil
+	default:
+		return "", "", err
+	}
 }
 
 // AgentOf is the agent a delivered result's turn runs on, read now from the
@@ -305,11 +296,8 @@ func ResultKey(id string) string { return "result/" + id }
 func hashLinks(l Links) Links {
 	l.ReviewSession = "" // named by control, not asked for
 	l.ApplyBy = nil      // who asked, not what
-	if l.Asker != nil {
-		l.Asker = nil
-		if l.Chain != nil {
-			l.Chain = &Chain{Root: l.Chain.Root}
-		}
+	if l.Chain != nil && l.Chain.By != "" {
+		l.Chain = &Chain{Root: l.Chain.Root}
 	}
 	return l
 }

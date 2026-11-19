@@ -165,7 +165,7 @@ func (q *Queue) ApplyAs(team, turn string, by *By) (job Job, created bool, err e
 	// The key counts the applies of turn that ended without applying, so
 	// requests at once make one job, and one after a refusal makes a new
 	// one. It holds a "/", which no key a caller sends may hold (ResultKey).
-	return q.create(team, KindApply, ApplyKey(turn, p.refused), p.spec, p.links, Limits{}, p.spec.Session)
+	return q.create(team, KindApply, ApplyKey(turn, p.refused), p.spec, p.links, Limits{}, p.spec.Session, nil)
 }
 
 // applyPlan is the apply job of a turn not applied yet: its spec (the
@@ -331,7 +331,7 @@ func (q *Queue) Preview(team, session string) (job Job, turn string, applies int
 	if err := q.dropPreviews(team, `session = ? AND cancel = 1`, session); err != nil {
 		return Job{}, turn, applies, err
 	}
-	job, _, err = q.create(team, KindPreview, "", p.spec, p.links, Limits{}, session)
+	job, _, err = q.create(team, KindPreview, "", p.spec, p.links, Limits{}, session, nil)
 	return job, turn, applies, err
 }
 
