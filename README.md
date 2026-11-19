@@ -151,6 +151,9 @@ their defaults are in `/docs`, under Settings).
 - MCP servers in your config load on every turn, reviews included. On a Mac, a server that
   signs in with OAuth keeps its token in the Keychain, and macOS asks to let the session read it;
   deny it to keep that server off. What a server does is outside AgentBus's record.
+- Antigravity cannot start with the sandbox on, on macOS: it opens a local port, and the macOS sandbox cannot
+  limit a port to this machine, so AgentBus does not allow it. Turn the sandbox off to use Antigravity on a Mac.
+  Linux runners are not affected. A fix that keeps the sandbox is planned.
 - Claude's browser (Chrome) cannot run in AgentBus sessions: it needs the tool's own sign-in.
 - Antigravity: use it with a Gemini API key (Settings, Subscriptions). Its Google sign-in does not
   work through AgentBus yet: before any work it checks your account with Google directly, outside
